@@ -65,7 +65,9 @@ export default definePlugin({
                 // Primary: New Discord Canary - togglePopout and message are in the same
                 // nE component call, followed by a np toolbar button with {label:
                 {
-                    match: /\{togglePopout:\i,.+?message:(\i)\}\)\]\}\):null,(?!Vencord\.Api\.MessagePopover).*?\(?\(0,\i\.jsx\)\((\i),\{label:/,
+                    // The button reference is a member expression on current Canary
+                    // (nt.qv), which \i's bare identifier pattern cannot match.
+                    match: /\{togglePopout:\i,.+?message:(\i)\}\)\]\}\):null,(?!Vencord\.Api\.MessagePopover).*?\(?\(0,\i\.jsx\)\(([\w$]+(?:\.[\w$]+)*),\{label:/,
                     replace: (_, message, buttonComponent) => {
                         const i = _.indexOf("):null,") + 7;
                         return _.slice(0, i) + `Vencord.Api.MessagePopover._buildPopoverElements(Vencord.Api.MessagePopover._captureToolbarButton(${buttonComponent}),${message}),` + _.slice(i);
@@ -135,7 +137,7 @@ export default definePlugin({
         {
             find: "#{intl::MESSAGE_UTILITIES_A11Y_LABEL}",
             replacement: {
-                match: /className:(\i\(\)\(\i\.className,.{0,80}?\)),(onClick:.{0,150}?children:\(0,\i\.jsxs?\)\(\i,\{className:)(\i\.innerClassName),children:(\[\i,\i\])/,
+                match: /className:(\i\(\)\(\i\.className,.{0,80}?\)),(onClick:.{0,150}?children:\(0,\i\.jsxs?\)\([\w$]+(?:\.[\w$]+)*,\{className:)(\i\.innerClassName),children:(\[\i,\i\])/,
                 replace: 'className:"vc-message-popover "+$1,$2$3+" vc-message-popover-bar",children:Vencord.Api.MessagePopover._wrapPopoverBar($4)'
             }
         },

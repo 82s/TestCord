@@ -55,7 +55,9 @@ export default definePlugin({
                 },
                 {
                     predicate: () => !settings.store.noQuickReacts,
-                    match: /\i(\?null:\(0,\i\.jsxs\).{0,100}message:\i\}\)),\(0,\i\.jsxs?\)\(\i,\{\}\)/,
+                    // The add-reaction button is a member expression on current Canary
+                    // (nt.$$), which \i's bare identifier pattern cannot match.
+                    match: /\i(\?null:\(0,\i\.jsxs\).{0,100}message:\i\}\)),\(0,\i\.jsxs?\)\([\w$]+(?:\.[\w$]+)*,\{\}\)/,
                     replace: "false$1"
                 },
             ]
