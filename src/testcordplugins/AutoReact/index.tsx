@@ -286,6 +286,7 @@ function toggleEmojiIn(list: Emoji[], emoji: Emoji): Emoji[] {
 
 function EmojiPicker({ selected, onToggle }: { selected: Emoji[]; onToggle(emoji: Emoji): void; }) {
     const [query, setQuery] = React.useState("");
+    const [limit, setLimit] = React.useState(GRID_LIMIT);
 
     // EmojiStore is the source of truth. GuildEmojis.usableEmojis covers boosted
     // (nitro) server emoji too; getUsableGuildEmoji() is per-guild only.
@@ -297,21 +298,27 @@ function EmojiPicker({ selected, onToggle }: { selected: Emoji[]; onToggle(emoji
             const trimmed = query.trim();
             return trimmed
                 ? EmojiStore.getSearchResultsOrder(all, trimmed, SEARCH_LIMIT, EmojiIntention.REACTION)
-                : all.slice(0, GRID_LIMIT);
+                : all;
         },
         [query]
     );
+
+    const visible = results.length > limit ? results.slice(0, limit) : results;
+    const remaining = results.length - visible.length;
 
     return (
         <div>
             <TextInput
                 value={query}
-                onChange={setQuery}
+                onChange={text => {
+                    setQuery(text);
+                    setLimit(GRID_LIMIT);
+                }}
                 placeholder="Search all Discord emoji"
                 style={{ marginBottom: "8px" }}
             />
             <ScrollerThin fade className={cl("emojiGrid")}>
-                {results.map((emoji, i) => {
+                {visible.map((emoji, i) => {
                     const ruleEmoji = toRuleEmoji(emoji);
                     const picked = selected.some(e => sameEmoji(e, ruleEmoji));
                     return (
@@ -333,9 +340,25 @@ function EmojiPicker({ selected, onToggle }: { selected: Emoji[]; onToggle(emoji
                     );
                 })}
             </ScrollerThin>
-            <Forms.FormText style={{ marginTop: "6px", color: "var(--text-muted)" }}>
-                {results.length} emoji shown. Search to narrow it down.
-            </Forms.FormText>
+            {remaining > 0 ? (
+                <div className={cl("loadMore")}>
+                    <Forms.FormText style={{ color: "var(--text-muted)" }}>
+                        Showing {visible.length} of {results.length}
+                    </Forms.FormText>
+                    <Button
+                        size={Button.Sizes.SMALL}
+                        color={Button.Colors.TRANSPARENT}
+                        look={Button.Looks.LINK}
+                        onClick={() => setLimit(l => l + GRID_LIMIT)}
+                    >
+                        Load more
+                    </Button>
+                </div>
+            ) : (
+                <Forms.FormText style={{ marginTop: "6px", color: "var(--text-muted)" }}>
+                    {results.length} emoji shown. Search to narrow it down.
+                </Forms.FormText>
+            )}
         </div>
     );
 }

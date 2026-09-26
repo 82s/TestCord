@@ -7,3 +7,11 @@
     background: var(--background-secondary);
     border-radius: 8px;
 }
+
+.vc-autoreact-loadMore {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 6px;
+}
