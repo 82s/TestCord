@@ -7,13 +7,17 @@
 import { Logger } from "@utils/Logger";
 import { PluginNative } from "@utils/types";
 
-import type { BreachRecord, CordCatUserInfo, DsaAction, DsaLookupResult } from "./types";
+import { settings } from "./settings";
+import type { BreachRecord, CordCatUserInfo, DsaAction, DsaLookupResult, NativeCordCatResult } from "./types";
 
 const logger = new Logger("DsaWarnings");
 const SUCCESS_CACHE_TTL_MS = 5 * 60 * 1000;
 const ERROR_CACHE_TTL_MS = 60 * 1000;
 const RESULT_CACHE_MAX = 200;
-const Native = VencordNative.pluginHelpers.DsaWarnings as PluginNative<typeof import("./native")>;
+const REQUEST_TIMEOUT_MS = 15_000;
+const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+// Undefined on web builds, where the IPC bridge does not exist.
+const Native = VencordNative.pluginHelpers.DsaWarnings as PluginNative<typeof import("./native")> | undefined;
 
 const resultCache = new Map<string, { expiresAt: number; result: DsaLookupResult; }>();
 
@@ -179,6 +183,65 @@ export function invalidateWarnings(parsedId?: string) {
     resultCache.clear();
 }
 
+export function buildDsaBrowseUrl(parsedId: string) {
+    const url = new URL(`${settings.store.dsaBrowseBaseUrl}/browse`);
+    url.searchParams.set("parsedId", parsedId);
+    url.searchParams.set("sort", "applicationDate");
+    url.searchParams.set("order", "desc");
+    return url.toString();
+}
+
+async function readCappedText(response: Response) {
+    const length = Number(response.headers.get("content-length"));
+    if (Number.isFinite(length) && length > MAX_RESPONSE_BYTES) throw new Error("Response was too large.");
+
+    const text = await response.text();
+    if (new TextEncoder().encode(text).byteLength > MAX_RESPONSE_BYTES) throw new Error("Response was too large.");
+    return text;
+}
+
+async function webFetchCordCatQuery(parsedId: string): Promise<NativeCordCatResult> {
+    const apiKey = settings.store.cordCatApiKey.trim();
+    if (!apiKey) {
+        return {
+            ok: false,
+            error: "No CordCat API key configured. Open plugin settings and add your API key (get one at https://api.cord.cat)."
+        };
+    }
+
+    const url = new URL(`/api/v2/query/${encodeURIComponent(parsedId)}`, settings.store.cordCatApiBaseUrl);
+    if (url.protocol !== "https:") return { ok: false, error: "CordCat API URL must use https." };
+
+    // The browser extension injects the CORS response headers and strips the Origin header that
+    // CordCat answers with a 500. Builds without that (userscript, standalone web) cannot reach it.
+    try {
+        const response = await fetch(url, {
+            headers: { "Accept": "application/json", "X-API-Key": apiKey },
+            redirect: "error",
+            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+        });
+        return { ok: true, status: response.status, body: await readCappedText(response) };
+    } catch (error) {
+        // fetch only rejects with a TypeError when the request never completed, which for a
+        // cross-origin call means CordCat's CORS answer never reached us.
+        if (error instanceof TypeError) {
+            return {
+                ok: false,
+                error: "CordCat blocked the browser request. DSA lookups need the TestCord browser extension with its network rules loaded, or the desktop app."
+            };
+        }
+        const reason = error instanceof Error ? error.message : String(error);
+        return { ok: false, error: `Could not reach CordCat: ${reason}` };
+    }
+}
+
+export async function openLookupWindow(parsedId: string) {
+    if (Native?.openCaptchaWindow) return Native.openCaptchaWindow(parsedId);
+
+    VencordNative.native.openExternal(buildDsaBrowseUrl(parsedId));
+    return { ok: true };
+}
+
 function parseReadyResponse(parsedId: string, body: string): DsaLookupResult | null {
     const payload: unknown = JSON.parse(body);
     if (!isRecord(payload)) return null;
@@ -233,7 +296,8 @@ export async function fetchActiveWarnings(parsedId: string): Promise<DsaLookupRe
     }
 
     try {
-        const nativeResult = await Native.fetchCordCatQuery?.(parsedId);
+        const fetchQuery = Native?.fetchCordCatQuery ?? webFetchCordCatQuery;
+        const nativeResult = await fetchQuery(parsedId);
 
         if (!nativeResult?.ok) {
             const msg = (nativeResult as any)?.error ?? "Native fetch returned no result";
@@ -252,12 +316,12 @@ export async function fetchActiveWarnings(parsedId: string): Promise<DsaLookupRe
         if (nativeResult.status === 401 || nativeResult.status === 403) {
             logger.warn(`CordCat returned ${nativeResult.status}, opening captcha window to authenticate`);
             try {
-                await Native.openCaptchaWindow?.(parsedId);
+                await openLookupWindow(parsedId);
             } catch (e) {
                 logger.warn("Failed to open captcha window:", e);
             }
             try {
-                const retryResult = await Native.fetchCordCatQuery?.(parsedId);
+                const retryResult = await fetchQuery(parsedId);
                 if (retryResult?.ok && retryResult.status >= 200 && retryResult.status < 300) {
                     const parsed = parseReadyResponse(parsedId, retryResult.body);
                     if (parsed) return setCache(parsedId, parsed);

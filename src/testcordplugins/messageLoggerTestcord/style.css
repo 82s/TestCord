@@ -357,6 +357,11 @@
     font-size: 11px;
 }
 
+.vc-testcord-ml-history-entry .vc-testcord-ml-embed {
+    margin-top: 6px;
+    background: var(--background-secondary);
+}
+
 .vc-testcord-ml-entry-meta {
     display: flex;
     align-items: center;

@@ -14,6 +14,7 @@
 
 .vc-popover-overflow {
     min-width: 0;
+    max-width: 100%;
     overflow-x: auto;
     scrollbar-width: none;
     container-type: scroll-state;
@@ -27,6 +28,11 @@
     display: flex;
     align-items: center;
     width: max-content;
+}
+
+/* The toolbar row is nowrap, so anything without an intrinsic size gets compressed. */
+.vc-popover-overflow-track > * {
+    flex: none;
 }
 
 .vc-popover-overflow .vc-popover-overflow-arrow {

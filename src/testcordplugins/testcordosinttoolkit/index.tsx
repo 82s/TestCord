@@ -40,6 +40,7 @@ import {
     sharedContacts,
     SocialHit,
 } from "./linkAnalysis";
+import * as webNative from "./webNative";
 
 const logger = new Logger("TestcordOSINTToolkit");
 
@@ -48,7 +49,8 @@ export const OSINT_HISTORY_KEY = "TestcordOSINTToolkit_recentInvestigations";
 const SCAN_HISTORY_KEY = "testcord-osint-history";
 const MAX_SCAN_HISTORY = 5;
 const REQUEST_TIMEOUT_MS = 12_000;
-const Native = VencordNative.pluginHelpers.TestcordOSINTToolkit as PluginNative<typeof import("./native")>;
+// pluginHelpers is empty on web builds, so fall back to the renderer-side HTTP implementation.
+const Native = (VencordNative.pluginHelpers.TestcordOSINTToolkit ?? webNative) as PluginNative<typeof import("./native")>;
 const OSINTPanel = LazyComponent(() => require("./components/OSINTPanel").default);
 let pluginActive = true;
 let nextGeoSeeerApiKey = 0;

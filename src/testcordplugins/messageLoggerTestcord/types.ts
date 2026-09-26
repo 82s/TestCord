@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import type { MessageJSON } from "@vencord/discord-types";
+import type { EmbedJSON, MessageJSON } from "@vencord/discord-types";
 
 export const LogStatus = {
     DELETED: "DELETED",
@@ -18,6 +18,9 @@ export type LogViewStatus = LogStatus | "ALL";
 export interface EditRecord {
     content: string;
     timestamp: string;
+    // Embed-driven messages (leaderboards, paginated bots) keep everything in the
+    // embed, so without this every history entry collapses to the same stub text.
+    embeds?: EmbedJSON[];
 }
 
 export interface LoggedAuthor {

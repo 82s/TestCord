@@ -48,8 +48,18 @@ chrome.webRequest.onHeadersReceived.addListener(
         return { responseHeaders };
     },
     {
-        urls: ["https://api.groq.com/*", "https://api.openai.com/*"],
+        urls: ["https://api.groq.com/*", "https://api.openai.com/*", "https://api.cord.cat/*", "https://geoseeer.com/*"],
         types: ["xmlhttprequest"]
     },
     ["blocking", "responseHeaders"]
+);
+
+// CordCat answers every request that carries an Origin header with a 500, which makes it
+// unreachable from a browser even with CORS headers injected above. Drop the header on the way out.
+chrome.webRequest.onBeforeSendHeaders.addListener(
+    ({ requestHeaders }) => ({
+        requestHeaders: (requestHeaders || []).filter(h => h.name.toLowerCase() !== "origin")
+    }),
+    { urls: ["https://api.cord.cat/*"], types: ["xmlhttprequest"] },
+    ["blocking", "requestHeaders"]
 );

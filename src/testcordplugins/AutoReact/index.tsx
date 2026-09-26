@@ -4,17 +4,24 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import "./style.css";
+
 import { ApplicationCommandInputType, ApplicationCommandOptionType, findOption, sendBotMessage } from "@api/Commands";
 import { NavContextMenuPatchCallback } from "@api/ContextMenu";
 import { definePluginSettings } from "@api/Settings";
 import { TestcordDevs } from "@utils/constants";
+import { classNameFactory } from "@utils/css";
 import { Logger } from "@utils/Logger";
 import { sleep } from "@utils/misc";
 import { ModalCloseButton, ModalContent, ModalFooter, ModalHeader, ModalRoot, ModalSize, openModal } from "@utils/modal";
 import definePlugin, { OptionType } from "@utils/types";
-import { Button, FluxDispatcher, Forms, Menu, React, RestAPI, showToast, TextArea, TextInput, Toasts, UserStore } from "@webpack/common";
+import type { Emoji as DiscordEmoji } from "@vencord/discord-types";
+import { EmojiIntention } from "@vencord/discord-types/enums";
+import { Button, EmojiStore, FluxDispatcher, Forms, IconUtils, Menu, React, RestAPI, ScrollerThin, showToast, TextArea, TextInput, Toasts, UserStore, useStateFromStores } from "@webpack/common";
 
 const logger = new Logger("AutoReact");
+
+const cl = classNameFactory("vc-autoreact-");
 
 type Emoji = { name: string; id: string | null; animated: boolean; };
 
@@ -245,6 +252,94 @@ function handleMessageCreate(data: any) {
 }
 
 // Emoji Picker Modal Component
+// Discord ships a few thousand unicode emoji and a custom emoji set per guild, so the
+// grid is capped and the search box is the way into the long tail.
+const GRID_LIMIT = 150;
+const SEARCH_LIMIT = 60;
+
+const cellStyle: React.CSSProperties = {
+    width: "36px",
+    height: "36px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: "22px",
+    cursor: "pointer",
+    borderRadius: "6px"
+};
+
+function toRuleEmoji(emoji: DiscordEmoji): Emoji {
+    return emoji.type === 1
+        ? { name: emoji.name, id: emoji.id, animated: emoji.animated }
+        : { name: emoji.name, id: null, animated: false };
+}
+
+function sameEmoji(a: Emoji, b: Emoji) {
+    return a.name === b.name && a.id === b.id;
+}
+
+function toggleEmojiIn(list: Emoji[], emoji: Emoji): Emoji[] {
+    return list.some(e => sameEmoji(e, emoji))
+        ? list.filter(e => !sameEmoji(e, emoji))
+        : [...list, emoji];
+}
+
+function EmojiPicker({ selected, onToggle }: { selected: Emoji[]; onToggle(emoji: Emoji): void; }) {
+    const [query, setQuery] = React.useState("");
+
+    // EmojiStore is the source of truth. GuildEmojis.usableEmojis covers boosted
+    // (nitro) server emoji too; getUsableGuildEmoji() is per-guild only.
+    const results = useStateFromStores(
+        [EmojiStore],
+        () => {
+            const custom = Object.values(EmojiStore.getGuilds()).flatMap(guild => guild.usableEmojis);
+            const all = [...custom, ...EmojiStore.getDisambiguatedEmojiContext().getDisambiguatedEmoji()];
+            const trimmed = query.trim();
+            return trimmed
+                ? EmojiStore.getSearchResultsOrder(all, trimmed, SEARCH_LIMIT, EmojiIntention.REACTION)
+                : all.slice(0, GRID_LIMIT);
+        },
+        [query]
+    );
+
+    return (
+        <div>
+            <TextInput
+                value={query}
+                onChange={setQuery}
+                placeholder="Search all Discord emoji"
+                style={{ marginBottom: "8px" }}
+            />
+            <ScrollerThin fade className={cl("emojiGrid")}>
+                {results.map((emoji, i) => {
+                    const ruleEmoji = toRuleEmoji(emoji);
+                    const picked = selected.some(e => sameEmoji(e, ruleEmoji));
+                    return (
+                        <button
+                            key={emoji.type === 1 ? emoji.id : `${emoji.name}:${i}`}
+                            type="button"
+                            title={`:${emoji.name}:`}
+                            onClick={() => onToggle(ruleEmoji)}
+                            style={{
+                                ...cellStyle,
+                                background: picked ? "var(--brand-experiment)" : "transparent",
+                                border: `1px solid ${picked ? "var(--brand-experiment)" : "transparent"}`
+                            }}
+                        >
+                            {emoji.type === 1
+                                ? <img src={IconUtils.getEmojiURL({ id: emoji.id, animated: emoji.animated, size: 32 })} alt={emoji.name} width={32} height={32} />
+                                : emoji.surrogates}
+                        </button>
+                    );
+                })}
+            </ScrollerThin>
+            <Forms.FormText style={{ marginTop: "6px", color: "var(--text-muted)" }}>
+                {results.length} emoji shown. Search to narrow it down.
+            </Forms.FormText>
+        </div>
+    );
+}
+
 function EmojiPickerModal(props: any) {
     const [selectedEmojis, setSelectedEmojis] = React.useState<{ name: string; id: string | null; animated: boolean; }[]>([]);
     const [inputValue, setInputValue] = React.useState("");
@@ -296,6 +391,8 @@ function EmojiPickerModal(props: any) {
             setSelectedEmojis([...selectedEmojis, emoji]);
         }
     };
+
+    const toggleEmoji = (emoji: Emoji) => setSelectedEmojis(prev => toggleEmojiIn(prev, emoji));
 
     return (
         <ModalRoot {...props} size={ModalSize.DYNAMIC}>
@@ -384,24 +481,9 @@ function EmojiPickerModal(props: any) {
                         }}
                         placeholder="Paste emoji or <:name:id> here"
                     />
-                    <div style={{ marginTop: "8px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                        {["👍", "❤️", "😂", "🔥", "👀", "💯", "🎉", "😎", "👌", "💪", "🙌", "✨"].map(emoji => (
-                            <button
-                                key={emoji}
-                                type="button"
-                                onClick={() => addEmoji({ name: emoji, id: null, animated: false })}
-                                style={{
-                                    fontSize: "20px",
-                                    padding: "4px 8px",
-                                    cursor: "pointer",
-                                    background: "var(--background-secondary)",
-                                    border: "none",
-                                    borderRadius: "4px"
-                                }}
-                            >
-                                {emoji}
-                            </button>
-                        ))}
+                    <div style={{ marginTop: "12px" }}>
+                        <Forms.FormText style={{ marginBottom: "8px" }}>Or browse every emoji:</Forms.FormText>
+                        <EmojiPicker selected={selectedEmojis} onToggle={toggleEmoji} />
                     </div>
                 </div>
             </ModalContent>
@@ -472,6 +554,8 @@ function ChannelEmojiPickerModal(props: any) {
             setSelectedEmojis([...selectedEmojis, emoji]);
         }
     };
+
+    const toggleEmoji = (emoji: Emoji) => setSelectedEmojis(prev => toggleEmojiIn(prev, emoji));
 
     const save = () => {
         const rules = parseChannelRules(settings.store.channelRules);
@@ -568,24 +652,9 @@ function ChannelEmojiPickerModal(props: any) {
                         }}
                         placeholder="Paste emoji or <:name:id> here"
                     />
-                    <div style={{ marginTop: "8px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                        {["👍", "❤️", "😂", "🔥", "👀", "💯", "🎉", "😎", "👌", "💪", "🙌", "✨"].map(emoji => (
-                            <button
-                                key={emoji}
-                                type="button"
-                                onClick={() => addEmoji({ name: emoji, id: null, animated: false })}
-                                style={{
-                                    fontSize: "20px",
-                                    padding: "4px 8px",
-                                    cursor: "pointer",
-                                    background: "var(--background-secondary)",
-                                    border: "none",
-                                    borderRadius: "4px"
-                                }}
-                            >
-                                {emoji}
-                            </button>
-                        ))}
+                    <div style={{ marginTop: "12px" }}>
+                        <Forms.FormText style={{ marginBottom: "8px" }}>Or browse every emoji:</Forms.FormText>
+                        <EmojiPicker selected={selectedEmojis} onToggle={toggleEmoji} />
                     </div>
                 </div>
             </ModalContent>

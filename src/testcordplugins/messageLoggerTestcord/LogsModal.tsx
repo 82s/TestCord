@@ -82,6 +82,55 @@ function LoggedComponent({ component }: { component: any; }) {
     return null;
 }
 
+function LoggedEmbed({ embed }: { embed: any; }) {
+    const imageSrc = mediaSrc(embed.image);
+    const thumbnailSrc = mediaSrc(embed.thumbnail);
+    const videoSrc = mediaSrc(embed.video);
+    const authorIcon = embed.author?.icon_url ?? embed.author?.proxy_icon_url ?? embed.author?.proxyIconUrl;
+    const footerIcon = embed.footer?.icon_url ?? embed.footer?.proxy_icon_url ?? embed.footer?.proxyIconUrl;
+    return (
+        <div
+            className={cl("embed")}
+            style={typeof embed.color === "number" ? { borderLeftColor: `#${embed.color.toString(16).padStart(6, "0")}` } : undefined}
+        >
+            {embed.author?.name && (
+                <div className={cl("embed-author")}>
+                    {authorIcon && <img src={authorIcon} alt="" style={{ width: 16, height: 16, borderRadius: "50%" }} />}
+                    {embed.author.url ? <MaskedLink href={embed.author.url}>{embed.author.name}</MaskedLink> : <strong>{embed.author.name}</strong>}
+                </div>
+            )}
+            {embed.title && (
+                <div className={cl("embed-title")}>
+                    {embed.url ? <MaskedLink href={embed.url}><strong>{embed.title}</strong></MaskedLink> : <strong>{embed.title}</strong>}
+                </div>
+            )}
+            {embed.description && <div className={cl("embed-description")}>{Parser.parse(embed.description)}</div>}
+            {embed.fields?.map((f: any, j: number) => (
+                <div key={j} className={cl("embed-field")}><strong>{f.name}</strong>: {f.value ? Parser.parse(f.value) : null}</div>
+            ))}
+            {imageSrc && <img src={imageSrc} alt="" style={{ maxWidth: "100%", borderRadius: 4, marginTop: 4 }} />}
+            {thumbnailSrc && <img src={thumbnailSrc} alt="" style={{ maxWidth: 80, borderRadius: 4, marginTop: 4 }} />}
+            {videoSrc && !imageSrc && (
+                <MaskedLink href={videoSrc}>{videoSrc}</MaskedLink>
+            )}
+            {(embed.footer?.text || embed.timestamp) && (
+                <div className={cl("embed-footer")}>
+                    {footerIcon && <img src={footerIcon} alt="" style={{ width: 14, height: 14, borderRadius: "50%" }} />}
+                    <span>{[embed.footer?.text, embed.timestamp ? new Date(embed.timestamp).toLocaleString() : ""].filter(Boolean).join(" • ")}</span>
+                </div>
+            )}
+            {embed.provider?.name && (
+                <div className={cl("embed-provider")}>
+                    {embed.provider.url ? <MaskedLink href={embed.provider.url}>{embed.provider.name}</MaskedLink> : embed.provider.name}
+                </div>
+            )}
+            {embed.url && !embed.title && !embed.description && !(embed.fields?.length) && !imageSrc && !thumbnailSrc && !videoSrc && (
+                <MaskedLink href={embed.url}>{embed.url}</MaskedLink>
+            )}
+        </div>
+    );
+}
+
 function LogEntry({ record, onDelete, onProtect }: LogEntryProps) {
     const { message, status } = record;
     const channel = ChannelStore.getChannel(message.channel_id);
@@ -105,55 +154,7 @@ function LogEntry({ record, onDelete, onProtect }: LogEntryProps) {
             </div>
             {message.embeds && message.embeds.length > 0 && (
                 <div className={cl("embeds")}>
-                    {message.embeds.map((embed: any, i: number) => {
-                        const imageSrc = mediaSrc(embed.image);
-                        const thumbnailSrc = mediaSrc(embed.thumbnail);
-                        const videoSrc = mediaSrc(embed.video);
-                        const authorIcon = embed.author?.icon_url ?? embed.author?.proxy_icon_url ?? embed.author?.proxyIconUrl;
-                        const footerIcon = embed.footer?.icon_url ?? embed.footer?.proxy_icon_url ?? embed.footer?.proxyIconUrl;
-                        return (
-                            <div
-                                key={i}
-                                className={cl("embed")}
-                                style={typeof embed.color === "number" ? { borderLeftColor: `#${embed.color.toString(16).padStart(6, "0")}` } : undefined}
-                            >
-                                {embed.author?.name && (
-                                    <div className={cl("embed-author")}>
-                                        {authorIcon && <img src={authorIcon} alt="" style={{ width: 16, height: 16, borderRadius: "50%" }} />}
-                                        {embed.author.url ? <MaskedLink href={embed.author.url}>{embed.author.name}</MaskedLink> : <strong>{embed.author.name}</strong>}
-                                    </div>
-                                )}
-                                {embed.title && (
-                                    <div className={cl("embed-title")}>
-                                        {embed.url ? <MaskedLink href={embed.url}><strong>{embed.title}</strong></MaskedLink> : <strong>{embed.title}</strong>}
-                                    </div>
-                                )}
-                                {embed.description && <div className={cl("embed-description")}>{Parser.parse(embed.description)}</div>}
-                                {embed.fields?.map((f: any, j: number) => (
-                                    <div key={j} className={cl("embed-field")}><strong>{f.name}</strong>: {f.value ? Parser.parse(f.value) : null}</div>
-                                ))}
-                                {imageSrc && <img src={imageSrc} alt="" style={{ maxWidth: "100%", borderRadius: 4, marginTop: 4 }} />}
-                                {thumbnailSrc && <img src={thumbnailSrc} alt="" style={{ maxWidth: 80, borderRadius: 4, marginTop: 4 }} />}
-                                {videoSrc && !imageSrc && (
-                                    <MaskedLink href={videoSrc}>{videoSrc}</MaskedLink>
-                                )}
-                                {(embed.footer?.text || embed.timestamp) && (
-                                    <div className={cl("embed-footer")}>
-                                        {footerIcon && <img src={footerIcon} alt="" style={{ width: 14, height: 14, borderRadius: "50%" }} />}
-                                        <span>{[embed.footer?.text, embed.timestamp ? new Date(embed.timestamp).toLocaleString() : ""].filter(Boolean).join(" • ")}</span>
-                                    </div>
-                                )}
-                                {embed.provider?.name && (
-                                    <div className={cl("embed-provider")}>
-                                        {embed.provider.url ? <MaskedLink href={embed.provider.url}>{embed.provider.name}</MaskedLink> : embed.provider.name}
-                                    </div>
-                                )}
-                                {embed.url && !embed.title && !embed.description && !(embed.fields?.length) && !imageSrc && !thumbnailSrc && !videoSrc && (
-                                    <MaskedLink href={embed.url}>{embed.url}</MaskedLink>
-                                )}
-                            </div>
-                        );
-                    })}
+                    {message.embeds.map((embed: any, i: number) => <LoggedEmbed key={i} embed={embed} />)}
                 </div>
             )}
             {(message as any).components && (message as any).components.length > 0 && (
@@ -192,7 +193,9 @@ function LogEntry({ record, onDelete, onProtect }: LogEntryProps) {
                     {message.editHistory.map(edit => (
                         <div key={`${edit.timestamp}:${edit.content}`} className={cl("history-entry")}>
                             <time>{new Date(edit.timestamp).toLocaleString()}</time>
-                            <div>{edit.content ? Parser.parse(edit.content) : "No text content."}</div>
+                            {edit.content && <div>{Parser.parse(edit.content)}</div>}
+                            {edit.embeds?.map((embed: any, i: number) => <LoggedEmbed key={i} embed={embed} />)}
+                            {!edit.content && !edit.embeds?.length && <div className={cl("muted")}>No text content.</div>}
                         </div>
                     ))}
                 </details>

@@ -41,8 +41,10 @@ export interface MessagePopoverButtonItem {
     icon: ComponentType<any>,
     message: Message,
     channel: Channel,
-    onClick?: MouseEventHandler<HTMLButtonElement>,
-    onContextMenu?: MouseEventHandler<HTMLButtonElement>;
+    // HTMLElement: the button is Discord's on a native build and a Clickable div on
+    // the fallback path, and these handlers never touch the event target type.
+    onClick?: MouseEventHandler<HTMLElement>,
+    onContextMenu?: MouseEventHandler<HTMLElement>;
 }
 
 export type MessagePopoverButtonFactory = (message: Message) => MessagePopoverButtonItem | null;
@@ -122,7 +124,18 @@ function VencordPopoverButtons(props: { Component?: React.ComponentType<MessageP
                         <ErrorBoundary noop key={key}>
                             {ButtonComponent
                                 ? <ButtonComponent {...item} />
-                                : <item.icon width={16} height={16} />
+                                // The captured toolbar button is only wired up when the
+                                // capturing patch matches. Fall back to Discord's own
+                                // hover-bar button styling instead of a bare icon, which
+                                // renders unstyled and squashed in the toolbar row.
+                                : <Clickable
+                                    className={classes(ToolbarClasses.button, HoverBarClasses.hoverBarButton)}
+                                    onClick={item.onClick}
+                                    onContextMenu={item.onContextMenu}
+                                    aria-label={item.label}
+                                >
+                                    <item.icon className={HoverBarClasses.icon} width={16} height={16} />
+                                </Clickable>
                             }
                         </ErrorBoundary>
                     );
@@ -134,7 +147,9 @@ function VencordPopoverButtons(props: { Component?: React.ComponentType<MessageP
         return nodes;
     }, [Component, message.id, message.editedTimestamp, message.channel_id, enabledKey, settingsTick, _capturedToolbarButton ? 1 : 0]);
 
-    return <>{elements}</>;
+    // The overflow scroller lives here rather than only in the messagePopover patch
+    // so the bar stays usable even when that patch fails to match Discord's build.
+    return <PopoverOverflow>{elements}</PopoverOverflow>;
 }
 
 function OverflowArrow({ direction, onClick }: { direction: "left" | "right", onClick(): void; }) {

@@ -24,7 +24,10 @@ import { findCssClassesLazy } from "@webpack";
 
 import style from "./messagePopover.css?managed";
 
-const messageClasses = findCssClassesLazy("messageListItem", "message");
+// Looked up separately: findCssClasses requires every name to live in the same module,
+// so asking for both at once returns nothing whenever Discord splits them.
+const messageListItemClasses = findCssClassesLazy("messageListItem");
+const messageClasses = findCssClassesLazy("message");
 
 export default definePlugin({
     name: "MessagePopoverAPI",
@@ -33,16 +36,12 @@ export default definePlugin({
 
     start() {
         try {
-            const mli = (messageClasses as any)?.messageListItem;
-            const msg = (messageClasses as any)?.message;
-            if (mli || msg) {
-                setStyleClassNames(style, {
-                    messageListItem: mli ?? "messageListItem",
-                    message: msg ?? "message"
-                });
-            } else {
-                new Logger("MessagePopoverAPI").warn("messageListItem/message classes not found, skipping style injection");
-            }
+            const mli = (messageListItemClasses as any)?.messageListItem ?? "messageListItem";
+            const msg = (messageClasses as any)?.message ?? "message";
+            setStyleClassNames(style, {
+                messageListItem: mli,
+                message: msg
+            });
         } catch (e) {
             new Logger("MessagePopoverAPI").warn("Failed to resolve message classes:", e);
         }

@@ -795,6 +795,7 @@ export async function handleMessageUpdate(payload: MessageUpdatePayload) {
         ...(previous.editHistory ?? []),
         {
             content: previous.content,
+            embeds: previous.embeds?.length ? lodash.cloneDeep(previous.embeds) : undefined,
             timestamp: new Date().toISOString()
         }
     ];

@@ -4,19 +4,19 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { definePluginSettings } from "@api/Settings";
 import { BaseText } from "@components/BaseText";
 import ErrorBoundary from "@components/ErrorBoundary";
 import { EquicordDevs } from "@utils/constants";
 import { classNameFactory } from "@utils/css";
 import { classes } from "@utils/misc";
 import { useAwaiter } from "@utils/react";
-import definePlugin, { OptionType, PluginNative } from "@utils/types";
+import definePlugin from "@utils/types";
 import type { User } from "@vencord/discord-types";
 import { findCssClassesLazy } from "@webpack";
 import { Clickable, useState } from "@webpack/common";
 
-import { fetchActiveWarnings, getActionTags, getActiveRestrictionLabels, invalidateWarnings } from "./api";
+import { buildDsaBrowseUrl, fetchActiveWarnings, getActionTags, getActiveRestrictionLabels, invalidateWarnings, openLookupWindow } from "./api";
+import { settings } from "./settings";
 import managedStyle from "./style.css?managed";
 import type { BreachRecord, CordCatUserInfo, DsaAction } from "./types";
 
@@ -34,28 +34,9 @@ function ApiKeyNotice() {
     );
 }
 
-const settings = definePluginSettings({
-    cordCatApiKey: {
-        type: OptionType.STRING,
-        description: "CordCat API key (required). Get one at https://api.cord.cat",
-        default: "",
-    },
-    cordCatApiBaseUrl: {
-        type: OptionType.STRING,
-        description: "Base URL for the CordCat intelligence query API.",
-        default: "https://api.cord.cat",
-    },
-    dsaBrowseBaseUrl: {
-        type: OptionType.STRING,
-        description: "Base URL for the DSA lookup browse UI.",
-        default: "https://dsa.discord.food",
-    },
-});
-
 const cl = classNameFactory("vc-dsa-warnings-");
 const DMSideBarClasses = findCssClassesLazy("widgetPreviews");
 const MAX_VISIBLE_CARDS = 4;
-const Native = VencordNative.pluginHelpers.DsaWarnings as PluginNative<typeof import("./native")>;
 function getColorBrightness(color: number) {
     const red = (color >> 16) & 0xff;
     const green = (color >> 8) & 0xff;
@@ -84,14 +65,6 @@ function formatDate(value: string) {
         day: "numeric",
         year: "numeric"
     });
-}
-
-function buildDsaBrowseUrl(parsedId: string) {
-    const url = new URL(`${settings.store.dsaBrowseBaseUrl}/browse`);
-    url.searchParams.set("parsedId", parsedId);
-    url.searchParams.set("sort", "applicationDate");
-    url.searchParams.set("order", "desc");
-    return url.toString();
 }
 
 function buildCordCatUrl(parsedId: string) {
@@ -258,13 +231,7 @@ const DsaWarningsCollection = ErrorBoundary.wrap(function DsaWarningsCollection(
         setRefreshKey(current => current + 1);
     };
     const openCaptchaWindow = async () => {
-        if (Native.openCaptchaWindow) {
-            await Native.openCaptchaWindow(user.id);
-            retryFetch();
-            return;
-        }
-
-        VencordNative.native.openExternal(buildDsaBrowseUrl(user.id));
+        await openLookupWindow(user.id);
         retryFetch();
     };
     const visibleActions = isReady && isExpanded ? actions : isReady ? actions.slice(0, MAX_VISIBLE_CARDS) : [];

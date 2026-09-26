@@ -4,92 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { safeFetch } from "@main/utils/safeFetch";
-import type { IpcMainInvokeEvent } from "electron";
-const FETCH_TIMEOUT_MS = 30_000;
-const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
-const ALLOWED_METHODS = new Set(["GET", "POST"]);
-
-async function readCappedText(response: Response) {
-    const length = Number(response.headers.get("content-length"));
-    if (Number.isFinite(length) && length > MAX_RESPONSE_BYTES) throw new Error("Response was too large.");
-    const text = await response.text();
-    if (new TextEncoder().encode(text).byteLength > MAX_RESPONSE_BYTES) throw new Error("Response was too large.");
-    return text;
-}
-
-export interface NativeOSINTResponse {
-    status: number;
-    body: string;
-    error?: string;
-    headers?: Record<string, string>;
-}
-
-export async function osintFetch(
-    _: IpcMainInvokeEvent,
-    url: string,
-    method: string,
-    headers: Record<string, string>,
-    body?: string
-): Promise<NativeOSINTResponse> {
-    try {
-        const normalizedMethod = method.toUpperCase();
-        if (!ALLOWED_METHODS.has(normalizedMethod)) throw new Error("HTTP method is not allowed.");
-        const response = await safeFetch(url, {
-            method: normalizedMethod,
-            headers: {
-                "Content-Type": "application/json",
-                ...headers,
-            },
-            body,
-            signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-        });
-        return {
-            status: response.status,
-            body: await readCappedText(response),
-            headers: Object.fromEntries(response.headers.entries()),
-        };
-    } catch (error) {
-        return {
-            status: -1,
-            body: "",
-            error: error instanceof Error ? error.message : String(error),
-        };
-    }
-}
-
-export interface NativeCordCatResult {
-    ok: boolean;
-    status?: number;
-    body?: string;
-    error?: string;
-}
-
-export async function fetchCordCat(
-    _: IpcMainInvokeEvent,
-    parsedId: string
-): Promise<NativeCordCatResult> {
-    try {
-        const response = await fetch(`https://api.cord.cat/api/v2/query/${encodeURIComponent(parsedId)}`, {
-            headers: { Accept: "application/json" },
-            signal: AbortSignal.timeout(10_000),
-        });
-        return {
-            ok: true,
-            status: response.status,
-            body: await readCappedText(response),
-        };
-    } catch (error) {
-        return {
-            ok: false,
-            error: error instanceof Error ? error.message : String(error),
-        };
-    }
-}
-
-export type GeoAnalyzeResult = { success: true; data: unknown; } | { success: false; error: string; retryable?: boolean; };
-export type BreachVipSearchResult = { success: true; results: unknown[]; total: number; } | { success: false; error: string; };
-export type CordCatResult = { success: true; data: unknown; } | { success: false; error: string; };
+import type { BreachVipSearchResult, CordCatResult, GeoAnalyzeResult } from "./native";
 
 const GEO_API_URL = "https://geoseeer.com/api/v1/analyze";
 const BREACH_VIP_API_URL = "https://breach.vip/api/search";
@@ -103,37 +18,30 @@ const BREACH_VIP_FIELDS = new Set([
     "uuid", "username", "ip", "domain", "discordid", "steamid", "email", "password", "name", "phone"
 ]);
 
-async function readResponse(response: Response, maxBytes = 1_048_576): Promise<unknown> {
-    if (!response.body) return;
-    const reader = response.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let size = 0;
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        size += value.length;
-        if (size > maxBytes) {
-            await reader.cancel();
-            throw new Error("The service returned too much data.");
-        }
-        chunks.push(value);
-    }
-    const body = new Uint8Array(size);
-    let offset = 0;
-    for (const chunk of chunks) {
-        body.set(chunk, offset);
-        offset += chunk.length;
-    }
-    return JSON.parse(new TextDecoder().decode(body)) as unknown;
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
 }
 
+function isAbortError(error: unknown) {
+    return error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError");
+}
+
+// CordCat sends no CORS headers and rejects any request that carries an Origin header; GeoSeeer's
+// preflight does not allow the X-API-Key header. The browser extension patches both in
+// declarativeNetRequest, so a plain fetch is all that is left to do here.
+async function request(url: string, init: RequestInit, timeoutMs: number) {
+    return fetch(url, { ...init, redirect: "error", signal: AbortSignal.timeout(timeoutMs) });
+}
+
+async function readJson(response: Response, maxBytes: number): Promise<unknown> {
+    const text = await response.text();
+    if (new TextEncoder().encode(text).byteLength > maxBytes) throw new Error("The service returned too much data.");
+    return JSON.parse(text) as unknown;
+}
+
 async function getCordCatError(response: Response): Promise<string | undefined> {
     try {
-        const data = await readResponse(response);
+        const data = await readJson(response, MAX_CORDCAT_RESPONSE_BYTES);
         if (!isRecord(data)) return;
         const message = typeof data.message === "string" ? data.message : data.error;
         return typeof message === "string" && message.trim() ? message.trim() : undefined;
@@ -143,7 +51,6 @@ async function getCordCatError(response: Response): Promise<string | undefined> 
 }
 
 export async function queryCordCat(
-    _event: IpcMainInvokeEvent,
     tool: unknown,
     value: unknown,
     refresh: unknown,
@@ -180,24 +87,14 @@ export async function queryCordCat(
         default:
             return { success: false, error: "The CordCat tool is invalid." };
     }
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), CORDCAT_REQUEST_TIMEOUT_MS);
     const headers: Record<string, string> = { Accept: "application/json" };
     if (key) headers["X-API-Key"] = key;
     try {
-        let response = await fetch(`${CORDCAT_API_URL}${path}`, {
-            headers,
-            redirect: "error",
-            signal: controller.signal
-        });
+        const response = await request(`${CORDCAT_API_URL}${path}`, { headers }, CORDCAT_REQUEST_TIMEOUT_MS);
         if (tool === "user" && response.status === 400) {
-            response = await fetch(`${CORDCAT_API_URL}/api/v2/query/${value}`, {
-                headers,
-                redirect: "error",
-                signal: controller.signal
-            });
-            if (response.ok) {
-                const data = await readResponse(response, MAX_CORDCAT_RESPONSE_BYTES);
+            const fallback = await request(`${CORDCAT_API_URL}/api/v2/query/${value}`, { headers }, CORDCAT_REQUEST_TIMEOUT_MS);
+            if (fallback.ok) {
+                const data = await readJson(fallback, MAX_CORDCAT_RESPONSE_BYTES);
                 if (isRecord(data) && isRecord(data.userInfo)) return { success: true, data: data.userInfo };
                 return { success: false, error: "CordCat returned an invalid user profile." };
             }
@@ -217,21 +114,20 @@ export async function queryCordCat(
                     : `CordCat rejected the request with HTTP ${response.status}.`)
             };
         }
-        return { success: true, data: await readResponse(response, MAX_CORDCAT_RESPONSE_BYTES) };
+        return { success: true, data: await readJson(response, MAX_CORDCAT_RESPONSE_BYTES) };
     } catch (error) {
         return {
             success: false,
-            error: error instanceof Error && error.name === "AbortError"
+            error: isAbortError(error)
                 ? "The CordCat request timed out."
-                : "Could not reach CordCat."
+                : error instanceof TypeError
+                    ? "CordCat blocked the browser request. CordCat lookups need the TestCord browser extension with its network rules loaded, or the desktop app."
+                    : "Could not reach CordCat."
         };
-    } finally {
-        clearTimeout(timeout);
     }
 }
 
 export async function searchBreachVip(
-    _event: IpcMainInvokeEvent,
     term: unknown,
     fields: unknown,
     minecraft: unknown,
@@ -255,10 +151,8 @@ export async function searchBreachVip(
     if (wildcard && (term.startsWith("*") || term.startsWith("?"))) {
         return { success: false, error: "Wildcard searches cannot begin with * or ?." };
     }
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), BREACH_VIP_REQUEST_TIMEOUT_MS);
     try {
-        const response = await fetch(BREACH_VIP_API_URL, {
+        const response = await request(BREACH_VIP_API_URL, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -267,10 +161,8 @@ export async function searchBreachVip(
                 categories: minecraft ? ["minecraft"] : null,
                 wildcard,
                 case_sensitive: caseSensitive
-            }),
-            redirect: "error",
-            signal: controller.signal
-        });
+            })
+        }, BREACH_VIP_REQUEST_TIMEOUT_MS);
         if (response.status === 429) {
             return { success: false, error: "Breach.vip rate limit reached. Try again in one minute." };
         }
@@ -283,7 +175,7 @@ export async function searchBreachVip(
         if (!response.ok) {
             return { success: false, error: `Breach.vip rejected the search with HTTP ${response.status}.` };
         }
-        const data = await readResponse(response, MAX_BREACH_VIP_RESPONSE_BYTES);
+        const data = await readJson(response, MAX_BREACH_VIP_RESPONSE_BYTES);
         if (!isRecord(data) || !Array.isArray(data.results)) {
             return { success: false, error: "Breach.vip returned an invalid response." };
         }
@@ -291,20 +183,12 @@ export async function searchBreachVip(
     } catch (error) {
         return {
             success: false,
-            error: error instanceof Error && error.name === "AbortError"
-                ? "The Breach.vip search timed out."
-                : "Could not reach Breach.vip."
+            error: isAbortError(error) ? "The Breach.vip search timed out." : "Could not reach Breach.vip."
         };
-    } finally {
-        clearTimeout(timeout);
     }
 }
 
-export async function analyzeGeoImage(
-    _event: IpcMainInvokeEvent,
-    imageUrl: unknown,
-    apiKey: unknown
-): Promise<GeoAnalyzeResult> {
+export async function analyzeGeoImage(imageUrl: unknown, apiKey: unknown): Promise<GeoAnalyzeResult> {
     if (typeof imageUrl !== "string" || imageUrl.length > 4_096) {
         return { success: false, error: "The image URL is invalid." };
     }
@@ -319,19 +203,15 @@ export async function analyzeGeoImage(
     if (typeof apiKey !== "string" || !apiKey.trim() || apiKey.length > 512 || /[\r\n]/.test(apiKey)) {
         return { success: false, error: "The GeoSeeer API key is invalid.", retryable: true };
     }
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), GEO_REQUEST_TIMEOUT_MS);
     try {
-        const response = await fetch(GEO_API_URL, {
+        const response = await request(GEO_API_URL, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
                 "X-API-Key": apiKey.trim()
             },
-            body: JSON.stringify({ url: imageUrl, analysis_mode: "fast" }),
-            redirect: "error",
-            signal: controller.signal
-        });
+            body: JSON.stringify({ url: imageUrl, analysis_mode: "fast" })
+        }, GEO_REQUEST_TIMEOUT_MS);
         if (!response.ok) {
             return {
                 success: false,
@@ -339,15 +219,11 @@ export async function analyzeGeoImage(
                 retryable: [401, 402, 403, 429].includes(response.status)
             };
         }
-        return { success: true, data: await readResponse(response) };
+        return { success: true, data: await readJson(response, 1_048_576) };
     } catch (error) {
         return {
             success: false,
-            error: error instanceof Error && error.name === "AbortError"
-                ? "GeoSeeer request timed out."
-                : "Could not reach GeoSeeer."
+            error: isAbortError(error) ? "GeoSeeer request timed out." : "Could not reach GeoSeeer."
         };
-    } finally {
-        clearTimeout(timeout);
     }
 }
