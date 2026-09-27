@@ -1,80 +1,89 @@
 /*
  * Vencord, a Discord client mod
- * Copyright (c) 2025 nin0
+ * Copyright (c) 2026 Vendicated and contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 import { definePluginSettings } from "@api/Settings";
-import { Devs } from "@utils/constants";
+import { TestcordDevs } from "@utils/constants";
 import { openUserProfile } from "@utils/discord";
 import definePlugin, { OptionType } from "@utils/types";
-import { Toasts } from "@webpack/common";
+import { showToast, Toasts, UserStore } from "@webpack/common";
 
 const settings = definePluginSettings({
     ids: {
-        description: "User IDs of the friend (comma separated)",
-        type: OptionType.STRING
+        description: "Every account ID they have used (comma separated)",
+        type: OptionType.STRING,
+        default: "",
+        placeholder: "123456789012345678, 987654321098765432"
     },
     alias: {
-        description: "alias to ping them (@alias)",
-        type: OptionType.STRING
-    },
-    lSeenUserID: {
+        description: "Alias that gets replaced with a real mention, without the @",
         type: OptionType.STRING,
-        hidden: true,
-        description: "vencord is abandonware"
+        default: "",
+        placeholder: "friend"
+    },
+    notify: {
+        description: "Tell me when they show up on a new account",
+        type: OptionType.BOOLEAN,
+        default: true
     }
-});
+}).withPrivateSettings<{ lastSeen: string }>();
 
-function handler(c, msg) {
-    if (!settings.store.alias || !settings.store.lSeenUserID) {
-        Toasts.show({
-            type: Toasts.Type.FAILURE,
-            message: "User hasn't been last seen",
-            id: Toasts.genId(),
-        });
-        return {
-            cancel: true
-        };
-    }
-
-    msg.content = msg.content.replaceAll(`@${settings.store.alias}`, `<@${settings.store.lSeenUserID}>`);
-}
-
-let cachedIds: string[] = [];
-let cachedIdsRaw: string | undefined;
-function getTrackedIds(): string[] {
-    const raw = settings.store.ids || "";
-    if (raw === cachedIdsRaw) return cachedIds;
-    cachedIdsRaw = raw;
-    cachedIds = raw.split(",").map(t => t.trim());
-    return cachedIds;
+function substituteAlias(content: string) {
+    const { alias, lastSeen } = settings.plain;
+    if (!alias || !lastSeen) return content;
+    return content.replaceAll(`@${alias}`, `<@${lastSeen}>`);
 }
 
 export default definePlugin({
     name: "AntiNameChange",
-    description: "for that one friend who keeps changing their username/account",
+    description: "Keeps a real mention for someone who keeps cycling accounts",
     tags: ["Privacy", "Utility"],
-    authors: [Devs.nin0dev],
+    authors: [TestcordDevs.x2b],
     settings,
-    onBeforeMessageSend: handler,
-    onBeforeMessageEdit: handler,
+
+    onBeforeMessageSend(_channelId, message) {
+        message.content = substituteAlias(message.content);
+    },
+
+    onBeforeMessageEdit(_channelId, _messageId, message) {
+        message.content = substituteAlias(message.content);
+    },
+
     flux: {
-        MESSAGE_CREATE(ev) {
-            if (getTrackedIds().includes(ev.message.author.id)) settings.store.lSeenUserID = ev.message.author.id;
+        MESSAGE_CREATE({ message }) {
+            const authorId = message.author.id;
+            if (authorId === UserStore.getCurrentUser()?.id) return;
+
+            const watched = settings.plain.ids.split(",").some(id => id.trim() === authorId);
+            if (!watched || settings.plain.lastSeen === authorId) return;
+
+            const previous = settings.store.lastSeen;
+            settings.store.lastSeen = authorId;
+
+            if (settings.plain.notify) {
+                showToast(
+                    previous
+                        ? `Tracked account switched to ${message.author.username}`
+                        : `Now tracking ${message.author.username}`,
+                    previous ? Toasts.Type.SUCCESS : Toasts.Type.MESSAGE
+                );
+            }
         }
     },
+
     commands: [
         {
-            name: "profile",
-            description: "Open the profile of your friend who keeps changing accounts",
+            name: "antinamechange",
+            description: "Open the profile of the account currently in use",
             execute() {
-                if (!settings.store.lSeenUserID) return Toasts.show({
-                    type: Toasts.Type.FAILURE,
-                    message: "User hasn't been last seen",
-                    id: Toasts.genId(),
-                });
-                openUserProfile(settings.store.lSeenUserID);
+                const { lastSeen } = settings.plain;
+                if (!lastSeen) {
+                    showToast("No tracked account has been seen yet", Toasts.Type.FAILURE);
+                    return;
+                }
+                openUserProfile(lastSeen);
             }
         }
     ]

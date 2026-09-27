@@ -4,64 +4,63 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { Button } from "@components/Button";
 import ErrorBoundary from "@components/ErrorBoundary";
-import { classNameFactory } from "@utils/css";
-import { closeAllModals,ModalContent, ModalHeader, ModalRoot, ModalSize, openModal } from "@utils/modal";
-import { Button, Forms, SelectedChannelStore, TextInput } from "@webpack/common";
+import { Flex } from "@components/Flex";
+import { ModalContent, ModalFooter, ModalHeader, ModalRoot, ModalSize, openModal } from "@utils/modal";
+import { Forms, TextInput } from "@webpack/common";
 
-const cl = classNameFactory("vc-membercount-");
-import "./style.css";
-
-import { sendMessage } from "@utils/discord";
-
-export function showPrefefinedDurationModal(duration: string, id: string) {
-    let reason = "";
-    openModal(props =>
-        <>
-            <ErrorBoundary>
-                <ModalRoot {...props} size={ModalSize.DYNAMIC} fullscreenOnMobile={true} >
-                    <ModalHeader className={cl("header")}>
-                        <Forms.FormText style={{ fontSize: "1.2rem", fontWeight: "bold", marginRight: "7px" }}>Mute user</Forms.FormText>
-                    </ModalHeader>
-                    <ModalContent>
-                        <TextInput onChange={v => { reason = v; }} placeholder="Reason" className="vc-punishcommands-reason" />
-                        <div className="vc-punishcommands-button-container">
-                            <Button color={Button.Colors.RED} onClick={() => {
-                                sendMessage(SelectedChannelStore.getChannelId(), { content: `+Cg ${id} ${duration} ${reason}` });
-                                closeAllModals();
-                            }}>Mute</Button>
-                        </div>
-                    </ModalContent>
-                </ModalRoot>
-            </ErrorBoundary>
-        </>
-    );
+interface Props {
+    username: string;
+    presetDuration?: string;
+    onSubmit: (duration: string, reason: string) => Promise<void>;
 }
-export function showCustomDurationModal(id: string) {
-    let duration = "";
+
+export function openPunishModal({ username, presetDuration, onSubmit }: Props) {
+    let duration = presetDuration ?? "";
     let reason = "";
-    let pendingSend = false;
-    openModal(props =>
-        <>
-            <ErrorBoundary>
-                <ModalRoot {...props} size={ModalSize.DYNAMIC} fullscreenOnMobile={true} >
-                    <ModalHeader className={cl("header")}>
-                        <Forms.FormText style={{ fontSize: "1.2rem", fontWeight: "bold", marginRight: "7px" }}>Mute user</Forms.FormText>
-                    </ModalHeader>
-                    <ModalContent>
-                        <TextInput onChange={v => { duration = v; }} placeholder="Duration (as written in the command)" className="vc-punishcommands-duration-c" />
-                        <TextInput onChange={v => { reason = v; }} placeholder="Reason" className="vc-punishcommands-reason-c" />
-                        <div className="vc-punishcommands-button-container">
-                            <Button color={Button.Colors.RED} onClick={() => {
-                                if (pendingSend) return;
-                                pendingSend = true;
-                                sendMessage(SelectedChannelStore.getChannelId(), { content: `+Cg ${id} ${duration} ${reason}` });
-                                closeAllModals();
-                            }}>Mute</Button>
-                        </div>
-                    </ModalContent>
-                </ModalRoot>
-            </ErrorBoundary>
-        </>
-    );
+    let sending = false;
+
+    openModal(props => (
+        <ErrorBoundary>
+            <ModalRoot {...props} size={ModalSize.DYNAMIC}>
+                <ModalHeader>
+                    <Forms.FormText>Mute {username}</Forms.FormText>
+                </ModalHeader>
+                <ModalContent>
+                    <Flex flexDirection="column">
+                        {!presetDuration && (
+                            <TextInput
+                                placeholder="Duration, for example 2h"
+                                onChange={value => { duration = value; }}
+                            />
+                        )}
+                        <TextInput
+                            placeholder="Reason (optional)"
+                            onChange={value => { reason = value; }}
+                        />
+                    </Flex>
+                </ModalContent>
+                <ModalFooter>
+                    <Flex justifyContent="flex-end">
+                        <Button
+                            variant="primary"
+                            disabled={sending || (!presetDuration && !duration)}
+                            onClick={async () => {
+                                sending = true;
+                                try {
+                                    await onSubmit(duration, reason);
+                                    props.onClose();
+                                } finally {
+                                    sending = false;
+                                }
+                            }}
+                        >
+                            Send
+                        </Button>
+                    </Flex>
+                </ModalFooter>
+            </ModalRoot>
+        </ErrorBoundary>
+    ));
 }

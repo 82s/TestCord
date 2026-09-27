@@ -1,6 +1,6 @@
 /*
  * Vencord, a Discord client mod
- * Copyright (c) 2024 Vendicated and contributors
+ * Copyright (c) 2026 Vendicated and contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
@@ -11,213 +11,187 @@ import { Link } from "@components/Link";
 import { TestcordDevs } from "@utils/constants";
 import { identity } from "@utils/misc";
 import definePlugin, { OptionType } from "@utils/types";
-import { FluxDispatcher, Forms, MediaEngineStore, Select, Slider, Text, useState, useStateFromStores } from "@webpack/common";
+import { FluxDispatcher, MediaEngineStore, Select, Slider, Text, useState, useStateFromStores } from "@webpack/common";
 
-import { Settings } from "../../Vencord";
+const settings = definePluginSettings({
+    expandedByDefault: {
+        description: "Show the controls expanded instead of behind a toggle",
+        type: OptionType.BOOLEAN,
+        default: false
+    },
+    headers: {
+        description: "Label each control instead of prefixing it with an icon",
+        type: OptionType.BOOLEAN,
+        default: true
+    },
+    outputVolume: {
+        description: "Show an output volume slider",
+        type: OptionType.BOOLEAN,
+        default: true
+    },
+    inputVolume: {
+        description: "Show an input volume slider",
+        type: OptionType.BOOLEAN,
+        default: true
+    },
+    outputDevice: {
+        description: "Show an output device picker",
+        type: OptionType.BOOLEAN,
+        default: true
+    },
+    inputDevice: {
+        description: "Show an input device picker",
+        type: OptionType.BOOLEAN,
+        default: true
+    },
+    camera: {
+        description: "Show a camera picker",
+        type: OptionType.BOOLEAN,
+        default: false
+    }
+});
 
-function OutputVolumeComponent() {
-    const outputVolume = useStateFromStores([MediaEngineStore], () => MediaEngineStore.getOutputVolume());
+function VolumeSlider({
+    title,
+    get,
+    action,
+    max
+}: {
+    title: string;
+    get: () => number;
+    action: string;
+    max: number;
+}) {
+    const value = useStateFromStores([MediaEngineStore], get);
 
     return (
         <>
-            {Settings.plugins.VCPanelSettings.showOutputVolumeHeader && <Forms.FormTitle>Output volume</Forms.FormTitle>}
-            <Slider maxValue={200} minValue={0} onValueRender={v => `${v.toFixed(0)}%`} initialValue={outputVolume} asValueChanges={volume => {
-                FluxDispatcher.dispatch({
-                    type: "AUDIO_SET_OUTPUT_VOLUME",
-                    volume
-                });
-            }} />
+            {settings.plain.headers && <Text variant="heading-sm/medium">{title}</Text>}
+            <Slider
+                minValue={0}
+                maxValue={max}
+                initialValue={value}
+                onValueRender={v => `${v.toFixed(0)}%`}
+                asValueChanges={next => FluxDispatcher.dispatch({ type: action, volume: next })}
+            />
         </>
     );
 }
 
-function InputVolumeComponent() {
-    const inputVolume = useStateFromStores([MediaEngineStore], () => MediaEngineStore.getInputVolume());
+function DeviceSelect({
+    title,
+    icon,
+    devices,
+    selected,
+    action
+}: {
+    title: string;
+    icon: string;
+    devices: Record<string, { id: string; name: string }>;
+    selected: string | undefined;
+    action: string;
+}) {
+    const options = Object.values(devices).map(device => ({
+        value: device.id,
+        label: settings.plain.headers ? device.name : `${icon} ${device.name}`
+    }));
+
+    if (options.length === 0) return null;
 
     return (
         <>
-            {Settings.plugins.VCPanelSettings.showInputVolumeHeader && <Forms.FormTitle>Input volume</Forms.FormTitle>}
-            <Slider maxValue={100} minValue={0} initialValue={inputVolume} asValueChanges={volume => {
-                FluxDispatcher.dispatch({
-                    type: "AUDIO_SET_INPUT_VOLUME",
-                    volume
-                });
-            }} />
+            {settings.plain.headers && <Text variant="heading-sm/medium">{title}</Text>}
+            <Select
+                options={options}
+                serialize={identity}
+                isSelected={value => value === selected}
+                select={id => FluxDispatcher.dispatch({ type: action, id })}
+            />
         </>
     );
 }
 
-function OutputDeviceComponent() {
+function Controls() {
+    const { expandedByDefault, headers } = settings.plain;
+    const [expanded, setExpanded] = useState(expandedByDefault);
+
     const outputDevice = useStateFromStores([MediaEngineStore], () => MediaEngineStore.getOutputDeviceId());
-
-    return (
-        <>
-            {Settings.plugins.VCPanelSettings.showOutputDeviceHeader && <Forms.FormTitle>Output device</Forms.FormTitle>}
-            <Select options={Object.values(MediaEngineStore.getOutputDevices()).map((device: any /* i am NOT typing this*/) => {
-                return { value: device.id, label: Settings.plugins.VCPanelSettings.showOutputDeviceHeader ? device.name : `🔊 ${device.name}` };
-            })}
-                serialize={identity}
-                isSelected={value => value === outputDevice}
-                select={id => {
-                    FluxDispatcher.dispatch({
-                        type: "AUDIO_SET_OUTPUT_DEVICE",
-                        id
-                    });
-                }}>
-
-            </Select>
-        </>
-    );
-}
-
-function InputDeviceComponent() {
     const inputDevice = useStateFromStores([MediaEngineStore], () => MediaEngineStore.getInputDeviceId());
-
-    return (
-        <div style={{ marginTop: "10px" }}>
-            {Settings.plugins.VCPanelSettings.showInputDeviceHeader && <Forms.FormTitle>Input device</Forms.FormTitle>}
-            <Select options={Object.values(MediaEngineStore.getInputDevices()).map((device: any /* i am NOT typing this*/) => {
-                return { value: device.id, label: Settings.plugins.VCPanelSettings.showInputDeviceHeader ? device.name : `🎤 ${device.name}` };
-            })}
-                serialize={identity}
-                isSelected={value => value === inputDevice}
-                select={id => {
-                    FluxDispatcher.dispatch({
-                        type: "AUDIO_SET_INPUT_DEVICE",
-                        id
-                    });
-                }}>
-
-            </Select>
-        </div>
-    );
-}
-
-function VideoDeviceComponent() {
     const videoDevice = useStateFromStores([MediaEngineStore], () => MediaEngineStore.getVideoDeviceId());
 
     return (
-        <div style={{ marginTop: "10px" }}>
-            {Settings.plugins.VCPanelSettings.showVideoDeviceHeader && <Forms.FormTitle>Camera</Forms.FormTitle>}
-            <Select options={Object.values(MediaEngineStore.getVideoDevices()).map((device: any /* i am NOT typing this*/) => {
-                return { value: device.id, label: Settings.plugins.VCPanelSettings.showVideoDeviceHeader ? device.name : `📷 ${device.name}` };
-            })}
-                serialize={identity}
-                isSelected={value => value === videoDevice}
-                select={id => {
-                    FluxDispatcher.dispatch({
-                        type: "MEDIA_ENGINE_SET_VIDEO_DEVICE",
-                        id
-                    });
-                }}>
+        <div className="vc-panelsettings-root">
+            <Link className="vc-panelsettings-toggle" onClick={() => setExpanded(!expanded)}>
+                {expanded ? "▼ Hide settings" : "► Settings"}
+            </Link>
 
-            </Select>
+            {expanded && (
+                <div className="vc-panelsettings-body">
+                    {settings.plain.outputVolume && (
+                        <VolumeSlider
+                            title="Output volume"
+                            get={MediaEngineStore.getOutputVolume}
+                            action="AUDIO_SET_OUTPUT_VOLUME"
+                            max={200}
+                        />
+                    )}
+                    {settings.plain.inputVolume && (
+                        <VolumeSlider
+                            title="Input volume"
+                            get={MediaEngineStore.getInputVolume}
+                            action="AUDIO_SET_INPUT_VOLUME"
+                            max={100}
+                        />
+                    )}
+                    {settings.plain.outputDevice && (
+                        <DeviceSelect
+                            title="Output device"
+                            icon="🔊"
+                            devices={MediaEngineStore.getOutputDevices()}
+                            selected={outputDevice}
+                            action="AUDIO_SET_OUTPUT_DEVICE"
+                        />
+                    )}
+                    {settings.plain.inputDevice && (
+                        <DeviceSelect
+                            title="Input device"
+                            icon="🎤"
+                            devices={MediaEngineStore.getInputDevices()}
+                            selected={inputDevice}
+                            action="AUDIO_SET_INPUT_DEVICE"
+                        />
+                    )}
+                    {settings.plain.camera && (
+                        <DeviceSelect
+                            title="Camera"
+                            icon="📷"
+                            devices={MediaEngineStore.getVideoDevices()}
+                            selected={videoDevice}
+                            action="MEDIA_ENGINE_SET_VIDEO_DEVICE"
+                        />
+                    )}
+                </div>
+            )}
         </div>
     );
-}
-
-function VoiceSettings() {
-    const [showSettings, setShowSettings] = useState(Settings.plugins.VCPanelSettings.uncollapseSettingsByDefault);
-    return <div style={{ marginTop: "20px" }}>
-        <div style={{ marginBottom: "10px" }}>
-            <Link className="vc-panelsettings-underline-on-hover" style={{ color: "var(--header-secondary)" }} onClick={() => { setShowSettings(!showSettings); }}>{!showSettings ? "► Settings" : "▼ Hide"}</Link>
-        </div>
-
-        {
-            showSettings && <>
-                {Settings.plugins.VCPanelSettings.outputVolume && <OutputVolumeComponent />}
-                {Settings.plugins.VCPanelSettings.inputVolume && <InputVolumeComponent />}
-                {Settings.plugins.VCPanelSettings.outputDevice && <OutputDeviceComponent />}
-                {Settings.plugins.VCPanelSettings.inputDevice && <InputDeviceComponent />}
-                {Settings.plugins.VCPanelSettings.camera && <VideoDeviceComponent />}
-            </>
-        }
-    </div>;
 }
 
 export default definePlugin({
     name: "VCPanelSettings",
-    description: "Control voice settings right from the voice panel",
+    description: "Control your microphone, speakers and camera from the voice panel",
     tags: ["Voice", "Customisation"],
     authors: [TestcordDevs.x2b],
-    settings: definePluginSettings({
-        title1: {
-            type: OptionType.COMPONENT,
-            component: () => <Text style={{ fontWeight: "bold", fontSize: "1.27rem" }}>Appearance</Text>,
-            description: ""
-        },
-        uncollapseSettingsByDefault: {
-            type: OptionType.BOOLEAN,
-            default: false,
-            description: "Automatically uncollapse voice settings by default"
-        },
-        title2: {
-            type: OptionType.COMPONENT,
-            component: () => <Text style={{ fontWeight: "bold", fontSize: "1.27rem" }}>Settings to show</Text>,
-            description: ""
-        },
-        outputVolume: {
-            type: OptionType.BOOLEAN,
-            default: true,
-            description: "Show an output volume slider"
-        },
-        inputVolume: {
-            type: OptionType.BOOLEAN,
-            default: true,
-            description: "Show an input volume slider"
-        },
-        outputDevice: {
-            type: OptionType.BOOLEAN,
-            default: true,
-            description: "Show an output device selector"
-        },
-        inputDevice: {
-            type: OptionType.BOOLEAN,
-            default: true,
-            description: "Show an input device selector"
-        },
-        camera: {
-            type: OptionType.BOOLEAN,
-            default: false,
-            description: "Show a camera selector"
-        },
-        title3: {
-            type: OptionType.COMPONENT,
-            component: () => <Text style={{ fontWeight: "bold", fontSize: "1.27rem" }}>Headers to show</Text>,
-            description: ""
-        },
-        showOutputVolumeHeader: {
-            type: OptionType.BOOLEAN,
-            default: true,
-            description: "Show header above output volume slider"
-        },
-        showInputVolumeHeader: {
-            type: OptionType.BOOLEAN,
-            default: true,
-            description: "Show header above input volume slider"
-        },
-        showOutputDeviceHeader: {
-            type: OptionType.BOOLEAN,
-            default: false,
-            description: "Show header above output device selector"
-        },
-        showInputDeviceHeader: {
-            type: OptionType.BOOLEAN,
-            default: false,
-            description: "Show header above input device selector"
-        },
-        showVideoDeviceHeader: {
-            type: OptionType.BOOLEAN,
-            default: false,
-            description: "Show header above camera selector"
-        },
-    }),
-    renderVoiceSettings() { return <VoiceSettings />; },
+    settings,
+
+    renderVoiceSettings() {
+        return <Controls />;
+    },
+
     patches: [
         {
             find: "this.renderChannelButtons()",
             replacement: {
-                match: /this.renderChannelButtons\(\)/,
+                match: /this\.renderChannelButtons\(\)/,
                 replace: "this.renderChannelButtons(), $self.renderVoiceSettings()"
             }
         }

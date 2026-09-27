@@ -1,3 +1,19 @@
-.vc-panelsettings-underline-on-hover:hover {
-    text-decoration: underline;
+.vc-panelsettings-root {
+    margin-top: 20px;
+}
+
+.vc-panelsettings-toggle {
+    color: var(--header-secondary);
+    margin-bottom: 10px;
+
+    &:hover {
+        text-decoration: underline;
+    }
+}
+
+.vc-panelsettings-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-start;
 }

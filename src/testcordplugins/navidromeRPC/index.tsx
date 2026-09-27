@@ -1,168 +1,173 @@
 /*
  * Vencord, a Discord client mod
- * Copyright (c) 2025 Vendicated and contributors
+ * Copyright (c) 2026 Vendicated and contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 import "./style.css";
 
 import { definePluginSettings } from "@api/Settings";
-import { Devs } from "@utils/constants";
+import { TestcordDevs } from "@utils/constants";
 import definePlugin, { OptionType } from "@utils/types";
-import { FluxDispatcher } from "@webpack/common";
-import smd5 from "file://spark-md5.js?minify";
+import { ApplicationAssetUtils, FluxDispatcher, showToast, Toasts } from "@webpack/common";
 
+import { APPLICATION_ID, coverArtUrl, getNowPlaying, type NowPlaying } from "./api";
 import { ServerConfig } from "./components/ServerConfig";
-import { getApplicationAsset } from "./utils/constants";
-import { getNowPlayingTrack, req } from "./utils/navidrome";
-import { NowPlayingTrack } from "./utils/types";
 
-const shp = {
-    hidden: true,
-    description: ""
-};
+const SOCKET_ID = "NavidromeRPC";
+const RETRY_DELAY = 5000;
+const MIN_POLL = 500;
+
 export const settings = definePluginSettings({
     serverURL: {
-        ...shp,
-        type: OptionType.STRING
+        type: OptionType.STRING,
+        default: "",
+        description: ""
     },
     username: {
-        ...shp,
-        type: OptionType.STRING
-    },
-    isLoggedIn: {
-        ...shp,
-        type: OptionType.BOOLEAN,
-        default: false
-    },
-    serverConfigComponent: {
-        type: OptionType.COMPONENT,
-        component: () => <ServerConfig />
-    },
-    delay: {
-        type: OptionType.NUMBER,
-        description: "Delay between the requests to Navidrome in milliseconds. 1000 = 1 second",
-        default: 1000,
-        restartNeeded: true
+        type: OptionType.STRING,
+        default: "",
+        description: ""
     },
     name: {
+        description: "Application name. Placeholders: %TRACK% %ARTIST% %ARTISTS% %ALBUM%",
         type: OptionType.STRING,
-        description: "The application name that'll show (Listening to _____). Use %ARTIST% to get the main artist, %ARTISTS% to get all artists, %ALBUM% to get the album and %TRACK% to get the track",
         default: "Navidrome"
     },
-    shouldCalculateTimestamps: {
+    delay: {
+        description: "How often to ask the server what is playing, in milliseconds",
+        type: OptionType.NUMBER,
+        default: 1000
+    },
+    showProgress: {
+        description: "Send start and end times so Discord can draw a progress bar",
         type: OptionType.BOOLEAN,
-        description: "Show the song progress with start and finish times, if disabled will only show start time (how many mins ago). Insanely buggy",
         default: false
+    },
+    showArtwork: {
+        description: "Upload the album art as the activity image",
+        type: OptionType.BOOLEAN,
+        default: true
+    },
+    server: {
+        type: OptionType.COMPONENT,
+        description: "",
+        component: ServerConfig
     }
-});
+}).withPrivateSettings<{ trackId: string; startedAt: number }>();
+
+function clearActivity() {
+    FluxDispatcher.dispatch({ type: "LOCAL_ACTIVITY_UPDATE", activity: null, socketId: SOCKET_ID });
+}
+
+function fill(template: string, track: NowPlaying) {
+    return template
+        .replaceAll("%TRACK%", track.title)
+        .replaceAll("%ARTIST%", track.artists[0] ?? track.albumArtist)
+        .replaceAll("%ARTISTS%", track.artists.join(", "))
+        .replaceAll("%ALBUM%", track.album);
+}
+
+async function buildActivity(track: NowPlaying) {
+    const { name, showProgress, showArtwork } = settings.plain;
+
+    let largeImage: string | undefined;
+    if (showArtwork && track.coverId) {
+        try {
+            [largeImage] = await ApplicationAssetUtils.fetchAssetIds(APPLICATION_ID, [await coverArtUrl(track.coverId)]);
+        } catch {
+            // artwork is a nice to have, a failed upload should not cost us the whole activity
+        }
+    }
+
+    const activity: Record<string, unknown> = {
+        application_id: APPLICATION_ID,
+        name: fill(name, track),
+        type: 2,
+        status_display_type: 1,
+        details: track.title,
+        state: track.artists.join(", "),
+        assets: {
+            ...(largeImage ? { large_image: largeImage } : {}),
+            large_text: track.album
+        }
+    };
+
+    if (showProgress) {
+        // the server only reports how many minutes ago a track started, so the start time is
+        // pinned the first time we see a given track and held until the track actually changes
+        if (settings.plain.trackId !== track.id) {
+            settings.store.trackId = track.id;
+            settings.store.startedAt = Date.now() - track.minutesAgo * 60_000;
+        }
+
+        activity.timestamps = {
+            start: String(settings.plain.startedAt),
+            end: String(settings.plain.startedAt + track.duration * 1000)
+        };
+    }
+
+    return activity;
+}
+
+let timer: number | undefined;
+let running = false;
+
+function schedule(delay: number) {
+    if (!running) return;
+    window.clearTimeout(timer);
+    timer = window.setTimeout(tick, Math.max(MIN_POLL, delay));
+}
+
+async function tick() {
+    if (!running) return;
+
+    try {
+        const track = await getNowPlaying();
+        if (!running) return;
+
+        const activity = track ? await buildActivity(track) : null;
+        if (!running) return;
+
+        FluxDispatcher.dispatch({ type: "LOCAL_ACTIVITY_UPDATE", activity, socketId: SOCKET_ID });
+        schedule(settings.plain.delay);
+    } catch (error) {
+        if (!running) return;
+
+        clearActivity();
+        showToast(`NavidromeRPC: ${(error as Error).message}`, Toasts.Type.FAILURE);
+        schedule(RETRY_DELAY);
+    }
+}
+
+/** Used by the login form once the credentials check out. */
+export function restart() {
+    window.clearTimeout(timer);
+    if (running) void tick();
+}
 
 export default definePlugin({
     name: "NavidromeRPC",
-    description: "Show the currently playing song on your Navidrome server in your Rich Presence",
+    description: "Show what your Navidrome server is playing in your rich presence",
     tags: ["Activity", "Media"],
-    authors: [Devs.nin0dev],
+    authors: [TestcordDevs.x2b],
     settings,
-    interval: -1,
-    restartTimeout: -1,
-    running: false,
-    generation: 0,
-    updateInFlight: false,
-    start() {
-        this.running = true;
-        this.generation++;
-        this.updateInFlight = false;
-        (0, eval)(smd5);
-        settings.store.isLoggedIn && this.initRPC();
-    },
-    stop() {
-        this.running = false;
-        this.generation++;
-        delete window.SparkMD5;
-        FluxDispatcher.dispatch({
-            type: "LOCAL_ACTIVITY_UPDATE",
-            activity: null,
-            socket: "NavidromeRPC"
-        });
-        clearInterval(this.interval);
-        clearTimeout(this.restartTimeout);
-    },
-    req,
-    getNowPlayingTrack,
-    initRPC() {
-        if (!this.running) return;
-        const { generation } = this;
-        const fn = async () => {
-            if (!this.running || generation !== this.generation || this.updateInFlight) return;
-            this.updateInFlight = true;
-            try {
-                const track = await getNowPlayingTrack();
-                if (!this.running || generation !== this.generation) return;
-                await this.setRichPresence(track, generation);
-            } catch (e) {
-                console.error(e);
-                if (!this.running || generation !== this.generation) return;
-                FluxDispatcher.dispatch({
-                    type: "LOCAL_ACTIVITY_UPDATE",
-                    activity: null,
-                    socket: "NavidromeRPC"
-                });
-                clearInterval(this.interval);
-                this.restartTimeout = window.setTimeout(() => {
-                    if (!this.running || generation !== this.generation) return;
-                    // @ts-expect-error
-                    this.interval = setInterval(fn, settings.store.delay);
-                }, 5000);
-            } finally {
-                if (generation === this.generation) this.updateInFlight = false;
-            }
-        };
 
-        fn();
-        // @ts-expect-error
-        this.interval = setInterval(fn, settings.store.delay);
-    },
-    async setRichPresence(track: NowPlayingTrack, generation: number) {
-        if (!this.running || generation !== this.generation) return;
-        if (!track.isPlaying) {
-            return void FluxDispatcher.dispatch({
-                type: "LOCAL_ACTIVITY_UPDATE",
-                activity: null,
-                socket: "NavidromeRPC"
-            });
+    start() {
+        if (!settings.plain.serverURL || !settings.plain.username) {
+            showToast("NavidromeRPC needs a server URL and username first", Toasts.Type.FAILURE);
+            return;
         }
 
-        let times = {
+        running = true;
+        void tick();
+    },
 
-        };
-        if (settings.store.shouldCalculateTimestamps) times = {
-            timestamps: track.timestamps!
-        };
-
-        const largeImage = await getApplicationAsset(track.album!.art);
-        if (!this.running || generation !== this.generation) return;
-
-        FluxDispatcher.dispatch({
-            type: "LOCAL_ACTIVITY_UPDATE",
-            activity: {
-                application_id: "1396969056136986775",
-                name: settings.store.name
-                    .replaceAll("%ARTIST%", track.artists![0])
-                    .replaceAll("%ARTISTS%", track.artists!.join(", "))
-                    .replaceAll("%ALBUM%", track.album!.name)
-                    .replaceAll("%TRACK%", track.title!),
-                type: 2,
-                status_display_type: 1,
-
-                details: track.title!,
-                state: track.artists!.join(", "),
-                assets: {
-                    large_image: largeImage,
-                    large_text: track.album!.name
-                },
-                ...times
-            },
-            socketId: "NavidromeRPC",
-        });
+    stop() {
+        running = false;
+        window.clearTimeout(timer);
+        timer = undefined;
+        clearActivity();
+        settings.store.trackId = "";
     }
 });

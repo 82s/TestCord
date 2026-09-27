@@ -4,10 +4,16 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-export function getMemory() {
+import { arch, cpus, totalmem } from "os";
+
+export function getSystemInfo() {
     const memory = process.memoryUsage();
     return {
         heapUsed: memory.heapUsed,
-        heapTotal: memory.heapTotal
+        heapTotal: memory.heapTotal,
+        rss: memory.rss,
+        systemTotal: totalmem(),
+        cores: cpus().length,
+        arch: arch()
     };
 }

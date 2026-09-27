@@ -1,0 +1,25 @@
+.vc-reactiontracker-title {
+    font-size: 1.07rem;
+    font-weight: 500;
+    margin-bottom: 4px;
+}
+
+.vc-reactiontracker-empty {
+    margin-top: 7px;
+}
+
+.vc-reactiontracker-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+
+.vc-reactiontracker-row {
+    display: flex;
+    flex-direction: column;
+
+    span {
+        color: var(--text-muted);
+        font-size: 0.85rem;
+    }
+}

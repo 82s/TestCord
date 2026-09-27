@@ -4,183 +4,130 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import "./style.css";
+
 import { DataStore } from "@api/index";
 import { definePluginSettings } from "@api/Settings";
+import { Button } from "@components/Button";
 import { TestcordDevs } from "@utils/constants";
+import { pluralize } from "@utils/misc";
+import { useAwaiter } from "@utils/react";
 import definePlugin, { OptionType } from "@utils/types";
-import { Message } from "@vencord/discord-types";
-import { Button, Forms, MessageStore, Parser, Toasts, useEffect, UserStore, useState } from "@webpack/common";
+import { MessageStore, Parser, showToast, Toasts, UserStore } from "@webpack/common";
 
-const DATA_STORE_KEY = "huskchart";
-const MAX_HUSKS = 5000;
-type Husk = {
-    userId: string;
-    channelId: string;
-    messageId: string;
-};
-type SortedHusk = {
-    id: string;
-    count: number;
-};
-interface StoredHusks {
-    version: 1;
-    husks: Husk[];
-    userCounts: Record<string, number>;
-    channelCounts: Record<string, number>;
+const DATA_KEY = "ReactionTracker_data";
+const DEFAULT_LABEL = "reaction";
+
+interface Counts {
+    users: Record<string, number>;
+    channels: Record<string, number>;
 }
 
-function normalizeStoredHusks(value: unknown): StoredHusks {
-    const husks = Array.isArray(value)
-        ? value.filter((husk): husk is Husk => typeof husk?.userId === "string" && typeof husk.channelId === "string" && typeof husk.messageId === "string")
-        : value && typeof value === "object" && Array.isArray((value as Partial<StoredHusks>).husks)
-            ? (value as Partial<StoredHusks>).husks!.filter((husk): husk is Husk => typeof husk?.userId === "string" && typeof husk.channelId === "string" && typeof husk.messageId === "string")
-            : [];
-    const data: StoredHusks = { version: 1, husks: husks.slice(-MAX_HUSKS), userCounts: {}, channelCounts: {} };
-    for (const husk of data.husks) {
-        data.userCounts[husk.userId] = (data.userCounts[husk.userId] ?? 0) + 1;
-        data.channelCounts[husk.channelId] = (data.channelCounts[husk.channelId] ?? 0) + 1;
+function emptyCounts(): Counts {
+    return { users: {}, channels: {} };
+}
+
+function normalize(value: unknown): Counts {
+    if (!value || typeof value !== "object") return emptyCounts();
+
+    const source = value as Partial<Counts>;
+    const pick = (record: unknown) => (record && typeof record === "object" ? record as Record<string, number> : {});
+
+    return { users: pick(source.users), channels: pick(source.channels) };
+}
+
+function add(counts: Counts, userId: string, channelId: string) {
+    counts.users[userId] = (counts.users[userId] ?? 0) + 1;
+    counts.channels[channelId] = (counts.channels[channelId] ?? 0) + 1;
+}
+
+function decrement(counts: Counts, userId: string, channelId: string) {
+    for (const [record, id] of [[counts.users, userId], [counts.channels, channelId]] as const) {
+        const next = (record[id] ?? 0) - 1;
+        if (next > 0) record[id] = next;
+        else delete record[id];
     }
-    return data;
 }
 
-function sortedCounts(counts: Record<string, number>) {
+function ranked(counts: Record<string, number>) {
     return Object.entries(counts)
         .map(([id, count]) => ({ id, count }))
         .sort((a, b) => b.count - a.count);
 }
 
-function decrementCount(counts: Record<string, number>, id: string) {
-    const next = (counts[id] ?? 0) - 1;
-    if (next > 0) counts[id] = next;
-    else delete counts[id];
-}
+function Leaderboard({ title, counts, mention }: { title: string; counts: Record<string, number>; mention: (id: string) => string }) {
+    const data = ranked(counts);
+    if (data.length === 0) return null;
 
-function getMessage(channelId: string, messageId: string): Message | undefined {
-    return MessageStore.getMessage(channelId, messageId);
-}
-const UserData = () => {
-    const [data, setData] = useState<SortedHusk[]>([]);
-    const [collapsed, collapse] = useState(true);
+    const label = settings.plain.label || DEFAULT_LABEL;
+    const row = (entry: { id: string; count: number }) => (
+        <div key={entry.id} className="vc-reactiontracker-row">
+            {Parser.parse(mention(entry.id))}
+            <span>{entry.count} {pluralize(entry.count, label)}</span>
+        </div>
+    );
 
-    useEffect(() => {
-        const fetchData = async () => {
-            const stored = normalizeStoredHusks(await DataStore.get(DATA_STORE_KEY));
-            setData(sortedCounts(stored.userCounts));
-        };
-        fetchData();
-    }, []);
+    const overflow = data.slice(6);
 
     return (
         <>
-            <Forms.FormText style={{ fontSize: "1.07rem", fontWeight: "500" }}>User stats {data.length > 6 && <a onClick={() => { collapsed ? collapse(false) : collapse(true); }}>[{collapsed ? "View all" : "Collapse"}]</a>}</Forms.FormText>
-            <div style={{ display: "grid", gridTemplateColumns: "auto auto" }}>
-                {
-                    data.length === 0 && <Forms.FormText style={{ marginTop: "7px" }}>Nothing to see here.</Forms.FormText>
-                }
-                {
-                    data.map((user, index) => <>
-                        {
-                            collapsed && <>
-                                {
-                                    index < 6 &&
-                                    <div style={{ marginTop: index < 2 ? "0" : "7px" }}>
-                                        {Parser.parse(`<@${user.id}>`)} <Forms.FormText style={{ marginTop: "4px" }}>with {user.count} {user.count > 1 ? "husks" : "husk"}</Forms.FormText>
-                                    </div>
-                                }
-                            </>
-                        }
-                        {
-                            !collapsed && <>
-                                {
-                                    <div style={{ marginTop: index < 2 ? "0" : "7px" }}>
-                                        {Parser.parse(`<@${user.id}>`)} <Forms.FormText style={{ marginTop: "4px" }}>with {user.count} {user.count > 1 ? "husks" : "husk"}</Forms.FormText>
-                                    </div>
-                                }
-                            </>
-                        }
-                    </>)
-                }
+            <p className="vc-reactiontracker-title">{title}</p>
+            <div className="vc-reactiontracker-rows">
+                {data.slice(0, 6).map(row)}
+                {overflow.length > 0 && (
+                    <details>
+                        <summary>{overflow.length} more</summary>
+                        {overflow.map(row)}
+                    </details>
+                )}
             </div>
         </>
     );
-};
-const ChannelData = () => {
-    const [data, setData] = useState<SortedHusk[]>([]);
-    const [collapsed, collapse] = useState(true);
+}
 
-    useEffect(() => {
-        const fetchData = async () => {
-            const stored = normalizeStoredHusks(await DataStore.get(DATA_STORE_KEY));
-            setData(sortedCounts(stored.channelCounts));
-        };
-        fetchData();
-    }, []);
+function Stats() {
+    const [counts] = useAwaiter(async () => normalize(await DataStore.get(DATA_KEY)), { fallbackValue: emptyCounts() });
+
+    if (Object.keys(counts.users).length === 0) {
+        return <p className="vc-reactiontracker-empty">Nothing tracked yet.</p>;
+    }
 
     return (
         <>
-            <Forms.FormText style={{ fontSize: "1.07rem", fontWeight: "500" }}>Channel stats {data.length > 6 && <a onClick={() => { collapsed ? collapse(false) : collapse(true); }}>[{collapsed ? "View all" : "Collapse"}]</a>}</Forms.FormText>
-            <div style={{ display: "grid", gridTemplateColumns: "auto auto" }}>
-                {
-                    data.length === 0 && <Forms.FormText style={{ marginTop: "7px" }}>Nothing to see here.</Forms.FormText>
-                }
-                {
-                    data.map((channel, index) => <>
-                        {
-                            collapsed && <>
-                                {
-                                    index < 6 &&
-                                    <div style={{ marginTop: index < 2 ? "0" : "7px" }}>
-                                        {Parser.parse(`<#${channel.id}>`)} <Forms.FormText style={{ marginTop: "4px" }}>with {channel.count} {channel.count > 1 ? "husks" : "husk"}</Forms.FormText>
-                                    </div>
-                                }
-                            </>
-                        }
-                        {
-                            !collapsed && <>
-                                {
-                                    <div style={{ marginTop: index < 2 ? "0" : "7px" }}>
-                                        {Parser.parse(`<#${channel.id}>`)} <Forms.FormText style={{ marginTop: "4px" }}>with {channel.count} {channel.count > 1 ? "husks" : "husk"}</Forms.FormText>
-                                    </div>
-                                }
-                            </>
-                        }
-                    </>)
-                }
-            </div>
+            <Leaderboard title="Top reactors" counts={counts.users} mention={id => `<@${id}>`} />
+            <Leaderboard title="Top channels" counts={counts.channels} mention={id => `<#${id}>`} />
         </>
     );
-};
+}
+
 const settings = definePluginSettings({
     emojiToTrack: {
+        description: "Only count reactions whose emoji name contains this",
         type: OptionType.STRING,
-        description: "The emoji to track (type its name, any emoji containing that name will be tracked)",
-        default: "husk",
-        placeholder: "emojiname (no :)"
+        default: DEFAULT_LABEL,
+        placeholder: "emojiname (no colons)"
     },
-    buttons: {
-        type: OptionType.COMPONENT,
-        description: "stats",
-        component: () => (
-            <>
-                <UserData />
-                <ChannelData />
-            </>
-        )
+    label: {
+        description: "What to call one tracked reaction",
+        type: OptionType.STRING,
+        default: DEFAULT_LABEL
     },
-    clearAll: {
+    stats: {
         type: OptionType.COMPONENT,
-        description: "clear",
+        description: "",
+        component: Stats
+    },
+    clear: {
+        type: OptionType.COMPONENT,
+        description: "",
         component: () => (
-            <Button color={Button.Colors.RED} onClick={() => {
-                DataStore.set(DATA_STORE_KEY, { version: 1, husks: [], userCounts: {}, channelCounts: {} } satisfies StoredHusks); Toasts.show({
-                    id: Toasts.genId(),
-                    message: "Cleared all data, reopen settings to see changes",
-                    type: Toasts.Type.SUCCESS,
-                    options: {
-                        position: Toasts.Position.BOTTOM, // NOBODY LIKES TOASTS AT THE TOP
-                    },
-                });
-            }}>
+            <Button
+                variant="dangerPrimary"
+                onClick={async () => {
+                    await DataStore.set(DATA_KEY, emptyCounts());
+                    showToast("Cleared. Reopen settings to see the change.", Toasts.Type.SUCCESS);
+                }}
+            >
                 Clear all data
             </Button>
         )
@@ -189,34 +136,34 @@ const settings = definePluginSettings({
 
 export default definePlugin({
     name: "ReactionTracker",
-    description: "See how much you've been reacted with a specific emoji, and by who",
+    description: "Count who reacts to your messages with a given emoji",
     tags: ["Reactions", "Utility"],
     authors: [TestcordDevs.x2b],
+    settings,
+
     flux: {
-        async MESSAGE_REACTION_ADD(event) {
-            const msg = getMessage(event.channelId, event.messageId);
-            if (!msg) return;
-            if (msg.author.id !== UserStore.getCurrentUser().id) return;
-            if (!event.emoji.name.includes(settings.store.emojiToTrack)) return;
-            await DataStore.update<unknown>(DATA_STORE_KEY, value => {
-                const data = normalizeStoredHusks(value);
-                const husk = {
-                    userId: event.userId,
-                    channelId: event.channelId,
-                    messageId: event.messageId
-                };
-                data.husks.push(husk);
-                data.userCounts[husk.userId] = (data.userCounts[husk.userId] ?? 0) + 1;
-                data.channelCounts[husk.channelId] = (data.channelCounts[husk.channelId] ?? 0) + 1;
-                while (data.husks.length > MAX_HUSKS) {
-                    const removed = data.husks.shift();
-                    if (!removed) break;
-                    decrementCount(data.userCounts, removed.userId);
-                    decrementCount(data.channelCounts, removed.channelId);
-                }
-                return data;
+        MESSAGE_REACTION_ADD({ channelId, messageId, userId, emoji }) {
+            const message = MessageStore.getMessage(channelId, messageId);
+            if (!message || message.author.id !== UserStore.getCurrentUser()?.id) return;
+            if (!emoji.name?.includes(settings.plain.emojiToTrack)) return;
+
+            void DataStore.update(DATA_KEY, value => {
+                const counts = normalize(value);
+                add(counts, userId, channelId);
+                return counts;
+            });
+        },
+
+        MESSAGE_REACTION_REMOVE({ channelId, messageId, userId, emoji }) {
+            const message = MessageStore.getMessage(channelId, messageId);
+            if (!message || message.author.id !== UserStore.getCurrentUser()?.id) return;
+            if (!emoji.name?.includes(settings.plain.emojiToTrack)) return;
+
+            void DataStore.update(DATA_KEY, value => {
+                const counts = normalize(value);
+                decrement(counts, userId, channelId);
+                return counts;
             });
         }
-    },
-    settings,
+    }
 });

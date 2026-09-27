@@ -6,48 +6,36 @@
 
 import { dialog } from "electron";
 
-export async function evalCode(_, code: string) {
-    const d = await dialog.showMessageBox({
+import { createConsole, prepare, report } from "./shared";
+
+export async function evalCode(_: Electron.IpcMainInvokeEvent, code: string) {
+    const { response } = await dialog.showMessageBox({
+        type: "warning",
         title: "Confirm code eval",
-        message: "IF YOU DID NOT INITIATE THIS, PRESS NO. The following code will be ran in the NodeJS context, meaning it will have FULL access to your computer. Do you still want to continue?\n\n" + code,
-        buttons: ["Yes", "No"],
+        message: "If you did not start this, press Cancel. The code below runs in the Node context of the desktop client, so it has full access to your computer.",
+        detail: code,
+        buttons: ["Run it", "Cancel"],
         defaultId: 1,
-        cancelId: 1
+        cancelId: 1,
+        noLink: true
     });
 
-    if (d.response === 1) throw "Cancelled by user";
+    if (response !== 0) return report(code, "Cancelled.", []);
 
-    // lines 12 to 36 shamelessly stolen from codeberg.org/vee/bot
-    const console: any = {
-        _lines: [] as string[],
-        _log(...things: string[]) {
-            this._lines.push(
-                ...things
-                    .join(" ")
-                    .split("\n")
-            );
-        }
-    };
-    console.log = console.error = console.warn = console.info = console._log.bind(console);
+    const { lines, fake } = createConsole();
+    const script = prepare(code);
 
-    const fs = require("fs");
-    const http = require("http");
-    const https = require("https");
-    const crypto = require("crypto");
-    const net = require("net");
-    const path = require("path");
-    const util = require("util");
-    const assert = require("assert");
-    const os = require("os");
+    // the names are passed in rather than read from module scope, because a function built
+    // with new Function only sees globals. eval stays a direct eval, so the snippet can
+    // still reach them the same way it would in a real console.
+    const runner = new Function("require", "process", "Buffer", "console", "return eval(arguments[0]);");
 
-    let script = code.replace(/(^`{3}(js|javascript)?|`{3}$)/g, "");
-    if (script.includes("await")) script = `(async () => { ${script} })()`;
-
+    let result: unknown;
     try {
-        var result = await (0, eval)(script);
-    } catch (e: any) {
-        var result = e;
+        result = await runner(require, process, Buffer, fake, script);
+    } catch (error) {
+        result = error;
     }
 
-    return `${result}\n\n${console._lines.join("\n")}`;
+    return report(script, result, lines);
 }

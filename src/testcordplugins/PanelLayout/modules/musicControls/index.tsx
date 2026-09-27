@@ -12,7 +12,7 @@ import ErrorBoundary from "@components/ErrorBoundary";
 import { Flex } from "@components/Flex";
 import { FormSwitch } from "@components/FormSwitch";
 import { Paragraph } from "@components/Paragraph";
-import { Input } from "@testcordplugins/jstextreplace/components/Input";
+import { Input } from "./Input";
 import { Devs, EquicordDevs } from "@utils/constants";
 import { makeRange } from "@utils/types";
 import type { RenderModalProps } from "@vencord/discord-types";

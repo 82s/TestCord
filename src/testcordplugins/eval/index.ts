@@ -4,99 +4,90 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { ApplicationCommandInputType, ApplicationCommandOptionType, ApplicationCommandType, sendBotMessage } from "@api/Commands";
-import { Devs } from "@utils/constants";
-import { getCurrentChannel, sendMessage } from "@utils/discord";
-import definePlugin from "@utils/types";
+import { ApplicationCommandInputType, ApplicationCommandOptionType, ApplicationCommandType, findOption, sendBotMessage } from "@api/Commands";
+import { TestcordDevs } from "@utils/constants";
+import { sendMessage } from "@utils/discord";
+import definePlugin, { PluginNative } from "@utils/types";
+
+import { createConsole, prepare, report } from "./shared";
+
+const Native = VencordNative.pluginHelpers.Eval as PluginNative<typeof import("./native")>;
+
+async function run(code: string) {
+    const { lines, fake } = createConsole();
+    const script = prepare(code);
+
+    let result: unknown;
+    try {
+        result = await (0, eval)(script);
+    } catch (error) {
+        result = error;
+    }
+
+    return report(script, result, lines);
+}
 
 export default definePlugin({
     name: "Eval",
-    description: "Adds a / command to evaluate JavaScript on your client",
+    description: "Adds a slash command to run JavaScript on your own client",
     tags: ["Developers", "Console"],
-    authors: [Devs.nin0dev],
-    commands: [{
-        name: "eval",
-        description: "Evaluate JavaScript in your client (USE WITH EXTREME CAUTION)",
-        async execute(args, ctx) {
-            // thank you vee
-            const console: any = {
-                _lines: [] as string[],
-                _log(...things: string[]) {
-                    this._lines.push(
-                        ...things
-                            .join(" ")
-                            .split("\n")
-                    );
+    authors: [TestcordDevs.x2b],
+    commands: [
+        {
+            name: "eval",
+            description: "Run JavaScript in your client. You are running this at your own risk.",
+            type: ApplicationCommandType.CHAT_INPUT,
+            inputType: ApplicationCommandInputType.BUILT_IN,
+            options: [
+                {
+                    name: "code",
+                    description: "The code to run",
+                    type: ApplicationCommandOptionType.STRING,
+                    required: true
+                },
+                {
+                    name: "send",
+                    description: "Post the result in chat instead of only showing it to you",
+                    type: ApplicationCommandOptionType.BOOLEAN,
+                    required: false
                 }
-            };
-            console.log = console.error = console.warn = console.info = console._log.bind(console);
-
-            let script = args[0].value.replace(/(^`{3}(js|javascript)?|`{3}$)/g, "");
-            if (script.includes("await")) script = `(async () => { ${script} })()`;
-
-            try {
-                var result = await (0, eval)(script);
-            } catch (e: any) {
-                var result = e;
-            }
-
-            if (args[1] && args[1].value) {
-                sendMessage(getCurrentChannel()!.id, {
-                    content: "```\n" + args[0].value + "\n```\n\n```js\n" + `${result}\n\n${console._lines.join("\n")}` + "\n```"
-                });
-            }
-            else {
-                sendBotMessage(getCurrentChannel()!.id, {
-                    content: "```\n" + args[0].value + "\n```\n```js\n" + `${result}\n\n${console._lines.join("\n")}` + "\n```"
-                });
+            ],
+            async execute(args, ctx) {
+                const content = await run(findOption(args, "code", ""));
+                if (findOption(args, "send", false)) await sendMessage(ctx.channel.id, { content });
+                else await sendBotMessage(ctx.channel.id, { content });
             }
         },
-        type: ApplicationCommandType.CHAT_INPUT,
-        inputType: ApplicationCommandInputType.BUILT_IN,
-        options: [{
-            name: "code",
-            description: "The code to run",
-            required: true,
-            type: ApplicationCommandOptionType.STRING
-        }, {
-            name: "send",
-            description: "Send the output in chat (default to false)",
-            type: ApplicationCommandOptionType.BOOLEAN,
-            required: false
-        }]
-    }, {
-        name: "native-eval",
-        description: "Evaluate JavaScript from a NodeJS context (USE WITH EXTREME CAUTION)",
-        async execute(args, ctx) {
-            try {
-                var result = await VencordNative.pluginHelpers.Eval.evalCode(args[0].value);
-            } catch (e: any) {
-                var result = e;
-            }
+        {
+            name: "native-eval",
+            description: "Run JavaScript in the Node context of the desktop client. You are running this at your own risk.",
+            type: ApplicationCommandType.CHAT_INPUT,
+            inputType: ApplicationCommandInputType.BUILT_IN,
+            options: [
+                {
+                    name: "code",
+                    description: "The code to run",
+                    type: ApplicationCommandOptionType.STRING,
+                    required: true
+                },
+                {
+                    name: "send",
+                    description: "Post the result in chat instead of only showing it to you",
+                    type: ApplicationCommandOptionType.BOOLEAN,
+                    required: false
+                }
+            ],
+            async execute(args, ctx) {
+                let content: string;
+                try {
+                    content = await Native.evalCode(findOption(args, "code", ""));
+                } catch (error) {
+                    content = report(findOption(args, "code", ""), error, []);
+                }
 
-            if (args[1] && args[1].value) {
-                sendMessage(getCurrentChannel()!.id, {
-                    content: "```\n" + args[0].value + "\n```\n\n```js\n" + result + "\n```"
-                });
+                if (findOption(args, "send", false)) await sendMessage(ctx.channel.id, { content });
+                else await sendBotMessage(ctx.channel.id, { content });
             }
-            else {
-                sendBotMessage(getCurrentChannel()!.id, {
-                    content: "```\n" + args[0].value + "\n```\n\n```js\n" + result + "\n```"
-                });
-            }
-        },
-        type: ApplicationCommandType.CHAT_INPUT,
-        inputType: ApplicationCommandInputType.BUILT_IN,
-        options: [{
-            name: "code",
-            description: "The code to run",
-            required: true,
-            type: ApplicationCommandOptionType.STRING
-        }, {
-            name: "send",
-            description: "Send the output in chat (default to false)",
-            type: ApplicationCommandOptionType.BOOLEAN,
-            required: false
-        }]
-    }]
+        }
+    ]
 });

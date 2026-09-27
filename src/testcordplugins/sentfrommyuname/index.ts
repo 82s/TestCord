@@ -1,53 +1,79 @@
 /*
  * Vencord, a Discord client mod
- * Copyright (c) 2025 Vendicated and contributors
+ * Copyright (c) 2026 Vendicated and contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { definePluginSettings, Settings } from "@api/Settings";
+import { definePluginSettings } from "@api/Settings";
 import { TestcordDevs } from "@utils/constants";
 import definePlugin, { OptionType, PluginNative } from "@utils/types";
 
-export const Native = VencordNative.pluginHelpers.SentFromMyUname as PluginNative<typeof import("./native")>;
+const Native = VencordNative.pluginHelpers.SentFromMyUname as PluginNative<typeof import("./native")>;
 
-async function getWhateverShouldBeSentFromMy() {
-    if ((IS_DISCORD_DESKTOP || IS_VESKTOP) && Settings.plugins.SentFromMyUname.signatureToUse === "uname") {
+const ESCAPE_PREFIX = "nouname";
+
+let cached: { value: string; at: number } | null = null;
+
+async function signature() {
+    const { signatureToUse } = settings.plain;
+    const wantsUname = signatureToUse === "uname" && (IS_DISCORD_DESKTOP || IS_VESKTOP);
+
+    if (cached && Date.now() - cached.at < 60_000) return cached.value;
+
+    let value = navigator.userAgent;
+    if (wantsUname) {
         try {
-            return await Native.getUname();
-        }
-        catch {
-            return navigator.userAgent;
+            value = await Native.getUname();
+        } catch {
+            value = navigator.userAgent;
         }
     }
-    else return navigator.userAgent;
+
+    cached = { value, at: Date.now() };
+    return value;
 }
+
+function listed(value: string) {
+    return value.split(",").map(entry => entry.trim()).filter(Boolean);
+}
+
+const settings = definePluginSettings({
+    signatureToUse: {
+        description: "What to show after Sent from my",
+        type: OptionType.SELECT,
+        options: [
+            { label: "Try uname first, fall back to the user agent", value: "uname", default: true },
+            { label: "Always use the user agent", value: "useragent" }
+        ]
+    },
+    channelWhitelist: {
+        description: "Only sign messages in these channels (comma separated, empty for all)",
+        type: OptionType.STRING,
+        default: ""
+    }
+});
 
 export default definePlugin({
     name: "SentFromMyUname",
-    description: "Add your uname/useragent to every single message you send",
+    description: "Sign every message you send with your uname or user agent",
     tags: ["Chat", "Customisation"],
     authors: [TestcordDevs.x2b],
-    settings: definePluginSettings({
-        signatureToUse: {
-            description: "What to show after 'Sent from my'",
-            type: OptionType.SELECT,
-            options: [{
-                label: "Attempt to use uname, useragent if can't use uname",
-                value: "uname"
-            }, {
-                label: "Always use useragent",
-                value: "useragent"
-            }],
-            default: "uname"
-        },
-        channelWhitelist: {
-            description: "If set, only use plugin in this comma-separated channel whitelist",
-            type: OptionType.STRING
+    settings,
+
+    async onBeforeMessageSend(channelId, message) {
+        const { channelWhitelist } = settings.plain;
+
+        if (channelWhitelist && !listed(channelWhitelist).includes(channelId)) return;
+
+        if (message.content.startsWith(`${ESCAPE_PREFIX} `)) {
+            message.content = message.content.slice(ESCAPE_PREFIX.length + 1);
+            return;
         }
-    }),
-    onBeforeMessageSend: async (c, msg) => {
-        if (Settings.plugins.SentFromMyUname.channelWhitelist && !Settings.plugins.SentFromMyUname.channelWhitelist.includes(c)) return;
-        if (msg.content.startsWith("nouname ")) { msg.content = msg.content.replace("nouname ", ""); return; }
-        msg.content += `\n\nSent from my ${await getWhateverShouldBeSentFromMy()}`;
+
+        message.content += `\n\nSent from my ${await signature()}`;
+    },
+
+    stop() {
+        cached = null;
     }
 });

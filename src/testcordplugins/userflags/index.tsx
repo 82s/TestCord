@@ -1,170 +1,164 @@
 /*
  * Vencord, a Discord client mod
- * Copyright (c) 2024 Vendicated and contributors
+ * Copyright (c) 2026 Vendicated and contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 import { ApplicationCommandInputType, ApplicationCommandOptionType, findOption, sendBotMessage } from "@api/Commands";
 import { DataStore } from "@api/index";
-import { addMessageAccessory, removeMessageAccessory } from "@api/MessageAccessories";
 import { TestcordDevs } from "@utils/constants";
 import definePlugin from "@utils/types";
 import { Parser, React, Text } from "@webpack/common";
 
-let userFlags = new Map<string, Flag>();
+const DATA_KEY = "UserFlags_data";
 
-enum FlagType {
-    DANGER = "danger",
-    WARNING = "warning",
-    INFO = "info",
-    POSITIVE = "positive"
-}
+const FlagType = {
+    danger: { label: "Danger", color: "#ff7473", emoji: "\u{1F6D1}" },
+    warning: { label: "Warning", color: "#ffb02e", emoji: "⚠️" },
+    info: { label: "Info", color: "#62a8ff", emoji: "ℹ️" },
+    positive: { label: "Positive", color: "#62ff74", emoji: "✅" }
+} as const;
 
-type FlagRegistryEntry = {
-    label: string;
-    color: string;
-    emoji: string;
-};
+type FlagType = keyof typeof FlagType;
 
-const flagRegistry: Record<FlagType, FlagRegistryEntry> = {
-    [FlagType.DANGER]: {
-        label: "Danger",
-        color: "#ff7473",
-        emoji: "🛑"
-    },
-    [FlagType.WARNING]: {
-        label: "Warning",
-        color: "#ffb02e",
-        emoji: "⚠️"
-    },
-    [FlagType.INFO]: {
-        label: "Info",
-        color: "#62a8ff",
-        emoji: "ℹ️"
-    },
-    [FlagType.POSITIVE]: {
-        label: "Positive",
-        color: "#62ff74",
-        emoji: "✅"
-    }
-};
-
-type Flag = {
+interface Flag {
     type: FlagType;
     text: string;
-};
-
-const subscribers = new Set<() => void>();
-function subscribe(callback: () => void) {
-    subscribers.add(callback);
-    return () => subscribers.delete(callback);
 }
 
-function Flag({ id }: { id: string; }) {
-    const flag = React.useSyncExternalStore(subscribe, () => userFlags.get(id));
+let flags = new Map<string, Flag>();
+let flushTimer: number | undefined;
+let flushing: Promise<unknown> | null = null;
+
+const subscribers = new Set<() => void>();
+const subscribe = (callback: () => void) => {
+    subscribers.add(callback);
+    return () => subscribers.delete(callback);
+};
+
+function notifyChanged() {
+    for (const callback of subscribers) callback();
+}
+
+async function flush() {
+    flushing ??= DataStore.set(DATA_KEY, [...flags]).finally(() => { flushing = null; });
+    await flushing;
+}
+
+function scheduleFlush() {
+    if (flushTimer !== undefined) return;
+    // reactions arrive in bursts, so coalesce the writes instead of hitting idb per event
+    flushTimer = window.setTimeout(() => {
+        flushTimer = undefined;
+        void flush();
+    }, 1000);
+}
+
+function setFlag(userId: string, flag: Flag | null) {
+    if (flag) flags.set(userId, flag);
+    else flags.delete(userId);
+
+    notifyChanged();
+    scheduleFlush();
+}
+
+function FlagBadge({ userId }: { userId: string }) {
+    const flag = React.useSyncExternalStore(subscribe, () => flags.get(userId));
     if (!flag) return null;
+
+    const kind = FlagType[flag.type];
     return (
-        <div>
-            <Text
-                variant="text-md/bold"
-                style={{ color: flagRegistry[flag.type].color }}
-            >
-                {Parser.parse(flagRegistry[flag.type].emoji)} {flag.text}
-            </Text>
-        </div>
+        <Text variant="text-md/bold" style={{ color: kind.color }}>
+            {Parser.parse(`${kind.emoji} ${flag.text}`)}
+        </Text>
     );
 }
 
 export default definePlugin({
     name: "UserFlags",
-    description: "Add flags to users that will always show under their messages",
+    description: "Attach a label under a user's messages",
     tags: ["Utility", "Appearance"],
     authors: [TestcordDevs.x2b],
-    dependencies: ["MessageAccessoriesAPI"],
+
     async start() {
-        const savedFlags = await DataStore.get("USERFLAGS");
-        if (savedFlags) {
-            if (typeof savedFlags === "string") {
-                userFlags = new Map<string, Flag>(JSON.parse(savedFlags));
-            } else {
-                userFlags = new Map<string, Flag>(savedFlags);
-            }
-        }
-        addMessageAccessory("flag", (props: Record<string, any>) => (
-            <Flag id={props.message.author.id} />
-        ), 4);
+        const stored = await DataStore.get(DATA_KEY);
+        const entries = Array.isArray(stored) ? stored : [];
+
+        flags = new Map(
+            entries.filter((entry): entry is [string, Flag] => Array.isArray(entry) && typeof entry[0] === "string")
+        );
+
+        this.addMessageAccessory(4, props => <FlagBadge userId={props.message.author.id} />);
     },
+
     stop() {
-        removeMessageAccessory("flag");
+        if (flushTimer !== undefined) {
+            clearTimeout(flushTimer);
+            flushTimer = undefined;
+        }
+        this.removeMessageAccessory(4);
     },
+
     commands: [
         {
             name: "flag set",
-            description: "Set a flag on a user",
+            description: "Attach a label to a user",
             inputType: ApplicationCommandInputType.BOT,
             options: [
                 {
                     name: "user",
+                    description: "Who to label",
                     type: ApplicationCommandOptionType.USER,
-                    description: "The user to set a flag to",
                     required: true
                 },
                 {
                     name: "type",
+                    description: "How the label should look",
                     type: ApplicationCommandOptionType.STRING,
-                    description: "The type of flag to add",
-                    choices: Object.entries(flagRegistry).map(([key, flag]) => ({
-                        name: key,
-                        label: flag.label,
-                        displayName: flag.label,
-                        value: key,
-                    })),
-                    required: true
+                    required: true,
+                    choices: Object.entries(FlagType).map(([value, kind]) => ({
+                        name: value,
+                        label: kind.label,
+                        displayName: kind.label,
+                        value
+                    }))
                 },
                 {
                     name: "message",
+                    description: "What the label should say",
                     type: ApplicationCommandOptionType.STRING,
-                    description: "The flag content",
                     required: true
-                },
+                }
             ],
-            execute: async (args, ctx) => {
+            async execute(args, ctx) {
                 const user = findOption(args, "user", "");
-                const type = findOption<FlagType>(args, "type", FlagType.INFO);
-                const text = findOption(args, "message", "");
-                userFlags.set(user, {
-                    type,
-                    text
-                });
-                subscribers.forEach(cb => cb());
-                sendBotMessage(ctx.channel.id, {
-                    content: `Flag set on <@${user}> with content \`${text}\`!`
-                });
-                await DataStore.set("USERFLAGS", userFlags);
-                return;
+                const text = findOption(args, "message", "").trim();
+                if (!text) return sendBotMessage(ctx.channel.id, { content: "The label cannot be empty." });
+
+                setFlag(user, { type: findOption<FlagType>(args, "type", "info"), text });
+                await flush();
+                await sendBotMessage(ctx.channel.id, { content: `Labelled <@${user}> as ${text}.` });
             }
         },
         {
             name: "flag delete",
-            description: "Delete the flag from a user",
+            description: "Remove the label from a user",
             inputType: ApplicationCommandInputType.BOT,
             options: [
                 {
                     name: "user",
+                    description: "Who to unlabel",
                     type: ApplicationCommandOptionType.USER,
-                    description: "The user to delete the flag from",
                     required: true
                 }
             ],
-            execute: async (args, ctx) => {
+            async execute(args, ctx) {
                 const user = findOption(args, "user", "");
-                userFlags.delete(user);
-                subscribers.forEach(cb => cb());
-                sendBotMessage(ctx.channel.id, {
-                    content: `Flag removed from <@${user}>`
-                });
-                await DataStore.set("USERFLAGS", userFlags);
-                return;
+                if (!flags.has(user)) return sendBotMessage(ctx.channel.id, { content: `<@${user}> has no label.` });
+
+                setFlag(user, null);
+                await flush();
+                await sendBotMessage(ctx.channel.id, { content: `Removed the label from <@${user}>.` });
             }
         }
     ]

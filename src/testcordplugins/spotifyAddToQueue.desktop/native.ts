@@ -1,41 +1,83 @@
 /*
  * Vencord, a Discord client mod
- * Copyright (c) 2025 nin0dev
+ * Copyright (c) 2026 Vendicated and contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 import { RendererSettings } from "@main/settings";
 import { app } from "electron";
 
+const EMBED_ORIGIN = "https://open.spotify.com";
+const RETRY_INTERVAL = 150;
+const RETRY_BUDGET = 100;
+
+/**
+ * Runs inside the Spotify embed, so it cannot touch anything but its own document.
+ * Anchoring on the aria labels of the transport buttons rather than on a class name,
+ * since Spotify rebuilds and re-hashes its own stylesheet often enough that a hashed
+ * selector stops matching without warning.
+ */
+const INJECT = `
+(() => {
+    const MESSAGE = "vc-spotifyaddtoqueue__";
+    let attempts = 0;
+
+    const trackId = () => location.href.match(/\\/embed\\/(?:track|episode)\\/([A-Za-z0-9]{1,64})/)?.[1] ?? null;
+
+    const mount = () => {
+        const next = document.querySelector('[aria-label="Next"], [aria-label="Next track"]');
+        const play = document.querySelector('[aria-label="Play"], [aria-label="Pause"]');
+        const host = next?.parentElement ?? play?.parentElement;
+        if (!host || host.querySelector('[data-vc-add-to-queue]')) return true;
+
+        const button = document.createElement("button");
+        button.dataset.vcAddToQueue = "true";
+        button.type = "button";
+        button.title = "Add to queue";
+        button.setAttribute("aria-label", "Add to queue");
+        Object.assign(button.style, {
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: "32px",
+            height: "32px",
+            padding: "0",
+            border: "none",
+            borderRadius: "50%",
+            background: "transparent",
+            color: "inherit",
+            cursor: "pointer",
+            opacity: "0.7"
+        });
+
+        button.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" height="24" width="24" viewBox="0 -960 960 960" fill="currentColor"><path d="M440-520H200v-80h240v-80h80v160h240v80H520v200h160v80H520v240h-80v-240H200v-80h240v-200Z"/></svg>';
+
+        button.addEventListener("click", () => {
+            const id = trackId();
+            if (id) window.top.postMessage(MESSAGE + id, "*");
+        });
+        button.addEventListener("mouseenter", () => { button.style.opacity = "1"; });
+        button.addEventListener("mouseleave", () => { button.style.opacity = "0.7"; });
+
+        next ? host.insertBefore(button, next) : host.appendChild(button);
+        return true;
+    };
+
+    const timer = setInterval(() => {
+        if (mount() || ++attempts > ${RETRY_BUDGET}) clearInterval(timer);
+    }, ${RETRY_INTERVAL});
+
+    globalThis.addEventListener("pagehide", () => clearInterval(timer), { once: true });
+})();
+`;
+
 app.on("browser-window-created", (_, win) => {
     win.webContents.on("frame-created", (_, { frame }) => {
         frame?.once("dom-ready", () => {
-            if (frame.url.startsWith("https://open.spotify.com/embed/")) {
-                const settings = RendererSettings.store.plugins?.SpotifyAddToQueue;
-                if (!settings?.enabled) return;
+            if (!frame.url.startsWith(`${EMBED_ORIGIN}/embed/`)) return;
+            if (!RendererSettings.store.plugins?.SpotifyAddToQueue?.enabled) return;
 
-                frame.executeJavaScript(`
-                    const interval = setInterval(() => {
-                        const actions = document.querySelector("[class^='PlayerControlsShort_playerControlsWrapper__']");
-                        if(actions) {
-                            const addToQueueButton = document.createElement("button");
-                            Object.assign(addToQueueButton.style, {
-                                position: "relative",
-                                top: "11px",
-                                left: "0px"
-                            });
-                            addToQueueButton.classList.add('gIjhme');
-                            addToQueueButton.title = "Add to queue";
-                            addToQueueButton.addEventListener("click", () => {
-                                window.top.postMessage("vc-spotifyaddtoqueue__" + location.href.match(/https:\\/\\/open\\.spotify.com\\/embed\\/track\\/([a-zA-Z0-9]{0,200})\\?/ )[1], "*");
-                            });
-                            addToQueueButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" height="48px" viewBox="0 -960 960 960" width="32px" fill="#e3e3e3"><path d="M642.94-160q-47.94 0-81.44-33.56t-33.5-81.5q0-47.94 32.67-81.44Q593.33-390 640-390q15.97 0 30.48 3Q685-384 698-377v-343h182v71H758v375q0 47.5-33.56 80.75T642.94-160ZM120-320v-60h306v60H120Zm0-170v-60h473v60H120Zm0-170v-60h473v60H120Z"/></svg>';
-                            actions.insertBefore(addToQueueButton, actions.firstChild);
-                            clearInterval(interval);
-                        }
-                    }, 100);
-                `);
-            }
+            frame.executeJavaScript(INJECT).catch(() => { });
         });
     });
 });

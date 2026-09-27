@@ -1,158 +1,249 @@
 /*
  * Vencord, a Discord client mod
- * Copyright (c) 2025 nin0
+ * Copyright (c) 2026 Vendicated and contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import "./misc/style.css";
+import "./style.css";
 
 import { showNotification } from "@api/Notifications";
 import { definePluginSettings } from "@api/Settings";
 import { Button } from "@components/Button";
-import { PluginsIcon } from "@components/Icons";
-import SettingsPlugin from "@plugins/_core/settings";
-import { Devs, TestcordDevs } from "@utils/constants";
-import { removeFromArray } from "@utils/misc";
-import definePlugin, { OptionType, PluginNative, StartAt } from "@utils/types";
-import { findByPropsLazy } from "@webpack";
+import { ErrorCard } from "@components/ErrorCard";
+import { Flex } from "@components/Flex";
+import { Paragraph } from "@components/Paragraph";
+import { TestcordDevs } from "@utils/constants";
+import { ModalContent, ModalFooter, ModalHeader, ModalRoot, ModalSize, openModal } from "@utils/modal";
+import { useAwaiter, useForceUpdater } from "@utils/react";
+import definePlugin, { OptionType, PluginNative } from "@utils/types";
+import { showToast, Toasts, useState } from "@webpack/common";
 
-import SettingsTab from "./components/SettingsTab";
-import UserpluginInstallButton from "./components/UserpluginInstallButton";
-import { CLONE_LINK_REGEX } from "./misc/constants";
-import { VariableWithCallbacks } from "./VariableWithCallbacks";
+import { type Commit, isRepoLink, type PluginMeta } from "./repo";
 
-// @ts-ignore
-export const Native: PluginNative<typeof import("./native")> = new Proxy({} as any, {
-    get: (_, prop: string) => (VencordNative.pluginHelpers as any)?.UserpluginInstaller?.[prop]
-});
-export const OpenSettingsModule = findByPropsLazy("openUserSettings");
+const Native = VencordNative.pluginHelpers.UserpluginInstaller as PluginNative<typeof import("./native")>;
 
-export const settings = definePluginSettings({
-    allowlistedChannels: {
+const settings = definePluginSettings({
+    channels: {
+        description: "Only offer the install button in these channels (comma separated, empty for all)",
         type: OptionType.STRING,
-        description: "Comma separated list of channels where the Install Plugin button should be displayed"
-    },
-    notifyIfUpdate: {
-        type: OptionType.BOOLEAN,
-        description: "Show a Vencord notification if UserPlugins need to be updated",
-        default: true
-    },
-    neverNotifyForPlugins: {
-        type: OptionType.STRING,
-        description: "Never show update notifications for these plugins (comma separated)",
         default: ""
     },
-    setGitPath: {
+    notifyOnUpdate: {
+        description: "Tell me when an installed plugin has updates waiting",
+        type: OptionType.BOOLEAN,
+        default: true
+    },
+    ignoreUpdates: {
+        description: "Never notify about updates for these plugins (comma separated)",
+        type: OptionType.STRING,
+        default: ""
+    },
+    git: {
         type: OptionType.COMPONENT,
-        component: () => <Button onClick={() => {
-            Native?.openGitPathModal?.();
-        }} variant="secondary">
-            Set Git path
-        </Button>
+        description: "Git has to be installed and reachable for any of this to work",
+        component: () => (
+            <Flex gap="4px">
+                <Button
+                    variant="secondary"
+                    size="small"
+                    onClick={async () => {
+                        try {
+                            showToast(`Found ${await Native.checkGit()}`, Toasts.Type.SUCCESS);
+                        } catch (error) {
+                            showToast((error as Error).message, Toasts.Type.FAILURE);
+                        }
+                    }}
+                >
+                    Check git
+                </Button>
+                <Button
+                    variant="secondary"
+                    size="small"
+                    onClick={async () => {
+                        await Native.ensurePluginsDirectory();
+                        showToast("The userplugins folder is ready", Toasts.Type.SUCCESS);
+                    }}
+                >
+                    Create the folder
+                </Button>
+            </Flex>
+        )
+    },
+    installed: {
+        type: OptionType.COMPONENT,
+        description: "Plugins you have installed",
+        component: InstalledPlugins
     }
 });
 
+function listed(value: string) {
+    return value.split(",").map(entry => entry.trim()).filter(Boolean);
+}
+
+function reloadSoon() {
+    window.setTimeout(() => window.location.reload(), 1200);
+}
+
+async function install(link: string) {
+    let meta: PluginMeta;
+    try {
+        meta = await Native.clonePlugin(link);
+    } catch (error) {
+        showToast((error as Error).message, Toasts.Type.FAILURE);
+        return;
+    }
+
+    openModal(props => (
+        <ModalRoot {...props} size={ModalSize.DYNAMIC}>
+            <ModalHeader>
+                <Paragraph>Install {meta.name}?</Paragraph>
+            </ModalHeader>
+            <ModalContent>
+                <Paragraph size="sm">{meta.description}</Paragraph>
+                {meta.remote && <Paragraph size="xs">From {meta.remote}</Paragraph>}
+
+                {(meta.usesNative || meta.usesPreSend) && (
+                    <ErrorCard>
+                        <Paragraph size="xs">
+                            {meta.usesPreSend
+                                ? "This plugin reads and rewrites messages before they are sent."
+                                : "This plugin ships native code that runs on your machine."}
+                            {" "}Only install it if you trust the author.
+                        </Paragraph>
+                    </ErrorCard>
+                )}
+            </ModalContent>
+            <ModalFooter>
+                <Flex gap="4px" justifyContent="end">
+                    <Button variant="secondary" onClick={() => props.onClose()}>Cancel</Button>
+                    <Button
+                        variant="primary"
+                        onClick={async () => {
+                            props.onClose();
+                            try {
+                                await Native.build();
+                            } catch (error) {
+                                await Native.discardPlugin(meta.directory);
+                                showToast(`The build failed, nothing was installed: ${(error as Error).message}`, Toasts.Type.FAILURE);
+                                return;
+                            }
+                            showToast(`${meta.name} installed, reloading`, Toasts.Type.SUCCESS);
+                            reloadSoon();
+                        }}
+                    >
+                        Install
+                    </Button>
+                </Flex>
+            </ModalFooter>
+        </ModalRoot>
+    ));
+}
+
+function PluginRow({ plugin }: { plugin: PluginMeta }) {
+    const [commits] = useAwaiter(() => Native.pendingCommits(plugin.directory), { fallbackValue: [] as Commit[] });
+    const [busy, setBusy] = useState(false);
+    const forceUpdate = useForceUpdater();
+
+    const run = async (action: () => Promise<unknown>) => {
+        setBusy(true);
+        try {
+            await action();
+        } catch (error) {
+            showToast((error as Error).message, Toasts.Type.FAILURE);
+        } finally {
+            setBusy(false);
+            forceUpdate();
+        }
+    };
+
+    return (
+        <div className="vc-userplugin-row">
+            <div>
+                <Paragraph size="sm">{plugin.name}</Paragraph>
+                <Paragraph size="xs">{plugin.description}</Paragraph>
+                {commits.length > 0 && (
+                    <Paragraph size="xs">
+                        {commits.length} update{commits.length === 1 ? "" : "s"} waiting, newest{" "}
+                        {commits[0].shortHash} by {commits[0].author}
+                    </Paragraph>
+                )}
+            </div>
+            <Flex gap="4px">
+                <Button
+                    variant="secondary"
+                    size="small"
+                    disabled={busy || commits.length === 0}
+                    onClick={() => run(async () => {
+                        await Native.updatePlugin(plugin.directory);
+                        await Native.build();
+                        showToast(`${plugin.name} updated, reloading`, Toasts.Type.SUCCESS);
+                        reloadSoon();
+                    })}
+                >
+                    Update
+                </Button>
+                <Button
+                    variant="dangerSecondary"
+                    size="small"
+                    disabled={busy}
+                    onClick={() => run(() => Native.removePlugin(plugin.directory))}
+                >
+                    Remove
+                </Button>
+            </Flex>
+        </div>
+    );
+}
+
+function InstalledPlugins() {
+    const [plugins] = useAwaiter(() => Native.getUserplugins(), { fallbackValue: [] as PluginMeta[] });
+
+    if (plugins.length === 0) return <Paragraph size="xs">No userplugins installed yet.</Paragraph>;
+
+    return (
+        <div className="vc-userplugin-list">
+            {plugins.map(plugin => <PluginRow key={plugin.directory} plugin={plugin} />)}
+        </div>
+    );
+}
+
 export default definePlugin({
     name: "UserpluginInstaller",
-    description: "Install userplugins with a simple button click",
+    description: "Install and update userplugins without leaving Discord",
     tags: ["Utility", "Developers"],
-    authors: [Devs.nin0dev, TestcordDevs.sirphantom89],
-    dependencies: ["Settings"],
-    startAt: StartAt.WebpackReady,
+    authors: [TestcordDevs.x2b],
     settings,
 
-    plugins: new VariableWithCallbacks<{
-        name: string;
-        description: string;
-        usesPreSend: boolean;
-        usesNative: boolean;
-        directory: string;
-        remote: string;
-    }[]>([]),
+    async start() {
+        const ignored = listed(settings.plain.ignoreUpdates).map(entry => entry.toLowerCase());
+        const plugins = await Native.getUserplugins();
 
-    pluginsWithUpdates: new VariableWithCallbacks<{
-        finished: boolean;
-        plugins: string[];
-    }>({
-        finished: false,
-        plugins: []
-    }),
-
-    async checkPluginUpdates() {
-        for (const p of this.plugins.value()) {
-            try {
-                if (await Native?.isUpdateAvailableForPlugin?.(p.directory!)) {
-                    const t = this.pluginsWithUpdates.value().plugins;
-                    if (!t.includes(p.directory!)) {
-                        t.push(p.directory!);
-                        this.pluginsWithUpdates.value({
-                            finished: false,
-                            plugins: t
-                        });
-                    }
-                }
-            } catch { }
-        }
-        const t = this.pluginsWithUpdates.value().plugins;
-        this.pluginsWithUpdates.value({
-            finished: true,
-            plugins: t
-        });
-    },
-
-    start() {
-        if (!SettingsPlugin.customEntries.some(e => e.key === "vencord_userplugins")) {
-            SettingsPlugin.customEntries.push({
-                key: "vencord_userplugins",
-                title: "UserPlugins",
-                Component: SettingsTab,
-                Icon: PluginsIcon
-            });
+        const stale: string[] = [];
+        for (const plugin of plugins) {
+            if (ignored.includes(plugin.directory.toLowerCase())) continue;
+            if (await Native.hasUpdates(plugin.directory)) stale.push(plugin.name);
         }
 
-        this.initBackground();
-    },
+        if (stale.length === 0 || !settings.plain.notifyOnUpdate) return;
 
-    stop() {
-        removeFromArray(SettingsPlugin.customEntries, e => e.key === "vencord_userplugins");
-    },
-
-    async initBackground() {
-        try {
-            await Native?.ensurePluginsDirectory?.();
-        } catch { }
-
-        this.pluginsWithUpdates.registerCallback((value, id) => {
-            if (!value?.plugins || value.plugins.length === 0) return;
-            const neverList = (settings.store.neverNotifyForPlugins || "").split(",").map(t => t.trim().toLowerCase());
-            if (neverList.includes(value.plugins[value.plugins.length - 1]?.toLowerCase()))
-                return;
-            this.pluginsWithUpdates.deregisterCallback(id);
-            if (settings.store.notifyIfUpdate)
-                showNotification({
-                    title: "Some UserPlugins are out of date!",
-                    body: "Click to open the UserPlugin Updater",
-                    noPersist: true,
-                    permanent: true,
-                    onClick() {
-                        OpenSettingsModule.openUserSettings("vencord_userplugins_panel");
-                    },
-                });
+        showNotification({
+            title: "Userplugin updates available",
+            body: `${stale.join(", ")} ${stale.length === 1 ? "has" : "have"} updates waiting.`
         });
-
-        try {
-            const pls = await Native?.getUserplugins?.();
-            if (pls && Array.isArray(pls)) {
-                // @ts-ignore :trolley:
-                this.plugins.value(pls);
-                await this.checkPluginUpdates();
-            }
-        } catch { }
     },
 
     renderMessageAccessory: props => {
-        if (!props?.message?.content) return null;
-        if (!CLONE_LINK_REGEX.test(props.message.content)) return null;
-        return <UserpluginInstallButton props={props} />;
+        const { channels } = settings.plain;
+        if (channels && !listed(channels).includes(props.message.channel_id)) return null;
+
+        const links = (props.message.content ?? "").match(/https:\/\/\S+/g) ?? [];
+        const repos = links.filter(isRepoLink);
+        if (repos.length === 0) return null;
+
+        return (
+            <Button variant="secondary" size="small" onClick={() => install(repos[0])}>
+                {repos.length === 1 ? "Install this plugin" : `Install a plugin (${repos.length} found)`}
+            </Button>
+        );
     }
 });
