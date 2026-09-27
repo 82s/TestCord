@@ -539,6 +539,7 @@ function patchFactory(moduleId: PropertyKey, originalFactory: AnyModuleFactory):
 
     // 0, prefix to turn it into an expression: 0,function(){} would be invalid syntax without the 0,
     let patchedCode = "0," + (!isArrowFunction ? "function" : "") + originalFactoryCode.slice(originalFactoryCode.indexOf("("));
+    const originalPatchedCode = patchedCode;
     let patchedSource = patchedCode;
     let patchedFactory = originalFactory;
 
@@ -646,20 +647,6 @@ function patchFactory(moduleId: PropertyKey, originalFactory: AnyModuleFactory):
                     continue;
                 }
 
-                const fixedCode = newPatchedCode.replace(/\breturn(false|true|null|undefined)\b/g, "return $1");
-                const moduleIdStr = String(moduleId);
-                let newPatchedSource: string;
-                if (IS_DEV) {
-                    const pluginsList = [...patchedBy];
-                    if (!patchedBy.has(patch.plugin)) {
-                        pluginsList.push(patch.plugin);
-                    }
-                    newPatchedSource = `// Webpack Module ${moduleIdStr} - Patched by ${pluginsList.join(", ")}\n${fixedCode}\n//# sourceURL=file:///WebpackModule${moduleIdStr}`;
-                } else {
-                    newPatchedSource = `${fixedCode}\n//# sourceURL=file:///WebpackModule${moduleIdStr}`;
-                }
-                const newPatchedFactory = (0, eval)(newPatchedSource);
-
                 if (!patchedBy.has(patch.plugin)) {
                     // Conflict detection: if another plugin already patched this
                     // module, log for dev awareness. This doesn't mean the patches are
@@ -674,8 +661,6 @@ function patchFactory(moduleId: PropertyKey, originalFactory: AnyModuleFactory):
                 }
 
                 patchedCode = newPatchedCode;
-                patchedSource = newPatchedSource;
-                patchedFactory = newPatchedFactory;
             } catch (err) {
                 // FIXME: Maybe fix this properly
                 const shouldSuppressError = patch.plugin === "ContextMenuAPI" && err instanceof SyntaxError && err.message.includes("arguments");
@@ -747,6 +732,25 @@ function patchFactory(moduleId: PropertyKey, originalFactory: AnyModuleFactory):
                 String(moduleId)
             );
         }
+    }
+
+    // One eval for the whole module, not one per replacement. Every replacement used to
+    // re-serialise and re-eval the entire module, so a module that nine plugins patch was
+    // parsed, compiled and *executed* nine times before it was handed to webpack. Nothing
+    // inside the loop reads the factory, and a group rollback only ever restores the code,
+    // so the factory is derived once here from whatever survived the loop. The `return`
+    // fixup is applied to that final code for the same reason it used to be applied to the
+    // last replacement: `patchedCode` itself is kept unfixed so later anchors still match
+    // the shape the previous replacement produced.
+    const moduleIdStr = String(moduleId);
+    if (patchedCode !== originalPatchedCode) {
+        const fixedCode = patchedCode.replace(/\breturn(false|true|null|undefined)\b/g, "return $1");
+        if (IS_DEV) {
+            patchedSource = `// Webpack Module ${moduleIdStr} - Patched by ${[...patchedBy].join(", ")}\n${fixedCode}\n//# sourceURL=file:///WebpackModule${moduleIdStr}`;
+        } else {
+            patchedSource = `${fixedCode}\n//# sourceURL=file:///WebpackModule${moduleIdStr}`;
+        }
+        patchedFactory = (0, eval)(patchedSource);
     }
 
     if (patchedFactory !== originalFactory) {

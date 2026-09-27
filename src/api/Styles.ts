@@ -28,10 +28,35 @@ export interface Style {
     name: string;
     source: string;
     classNames: Record<string, string>;
-    dom: HTMLStyleElement | null;
+    /** Set while the style is enabled. Kept for the enable/disable guards. */
+    enabled: boolean;
+    /**
+     * Position in the cascade, assigned on first enable. The composed sheet has to list
+     * styles in the order they were enabled, because that is the order `appendChild` used
+     * to give them when each one had its own element.
+     */
+    order?: number;
+    /** The style's own interpolated CSS, recomputed by {@link compileStyle}. */
+    compiled: string;
 }
 
 export const styleMap = window.VencordStyles ??= new Map();
+
+/**
+ * Every managed style used to get its own `<style>` element appended to
+ * {@link managedStyleRootNode}. With several hundred plugins enabled that is several
+ * hundred stylesheet objects, each with its own CSSOM and its own bookkeeping in the
+ * style invalidation pass, all of which the engine has to walk on a recalc. They share a
+ * single container and have no ordering requirement against each other beyond enable
+ * order, so they are composed into one element instead.
+ */
+const managedStyleNode = document.createElement("style");
+let managedEnableCounter = 0;
+
+function composeManagedStyles() {
+    const enabled = [...styleMap.values()].filter(s => s.enabled).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    managedStyleNode.textContent = enabled.map(s => s.compiled).join("\n");
+}
 
 export const vencordRootNode = document.createElement("vencord-root");
 /**
@@ -111,16 +136,16 @@ export function requireStyle(name: string) {
 export function enableStyle(name: string) {
     const style = requireStyle(name);
 
-    if (style.dom?.isConnected)
+    if (style.enabled)
         return false;
 
-    if (!style.dom) {
-        style.dom = document.createElement("style");
-        style.dom.dataset.vencordName = style.name;
-    }
+    style.enabled = true;
+    if (style.order === undefined)
+        style.order = managedEnableCounter++;
     compileStyle(style);
 
-    managedStyleRootNode.appendChild(style.dom);
+    if (!managedStyleNode.isConnected)
+        managedStyleRootNode.appendChild(managedStyleNode);
     return true;
 }
 
@@ -131,11 +156,12 @@ export function enableStyle(name: string) {
  */
 export function disableStyle(name: string) {
     const style = requireStyle(name);
-    if (!style.dom?.isConnected)
+    if (!style.enabled)
         return false;
 
-    style.dom.remove();
-    style.dom = null;
+    style.enabled = false;
+    style.order = undefined;
+    composeManagedStyles();
     return true;
 }
 
@@ -151,13 +177,13 @@ export const toggleStyle = (name: string) => isStyleEnabled(name) ? disableStyle
  * @returns Whether the style is enabled
  * @see {@link enableStyle} for info on getting the name of an imported style
  */
-export const isStyleEnabled = (name: string) => requireStyle(name).dom?.isConnected ?? false;
+export const isStyleEnabled = (name: string) => requireStyle(name).enabled;
 
 export function removeStyle(name: string) {
     const style = styleMap.get(name);
     if (!style) return false;
-    if (style.dom) style.dom.remove();
     styleMap.delete(name);
+    composeManagedStyles();
     return true;
 }
 
@@ -195,17 +221,15 @@ export const setStyleClassNames = (name: string, classNames: Record<string, stri
 };
 
 /**
- * Updates the stylesheet after doing the following to the sourcecode:
- *   - Interpolate style classnames
- * @param style **_Must_ be a style with a DOM element**
+ * Recomputes a style's interpolated CSS and refreshes the composed sheet.
  * @see {@link setStyleClassNames} for more info on style classnames
  */
 export const compileStyle = (style: Style) => {
-    if (!style.dom) throw new Error("Style has no DOM element");
-
-    style.dom.textContent = style.source
+    style.compiled = style.source
         .replace(/\[--(\w+)\]/g, (match, name) => {
             const className = style.classNames[name];
             return className ? classNameToSelector(className) : match;
         });
+
+    composeManagedStyles();
 };

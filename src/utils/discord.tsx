@@ -26,6 +26,7 @@ import { runtimeHashMessageKey } from "./intlHash";
 import { Logger } from "./Logger";
 
 const IntlManagerLogger = new Logger("IntlManager");
+const logger = new Logger("Discord");
 
 /**
  * Get an internationalized message from a non hashed key
@@ -115,7 +116,20 @@ export function insertTextIntoChatInputBox(text: string) {
 }
 
 export async function copyWithToast(text: string, toastMessage = "Copied to clipboard!") {
-    await copyToClipboard(text);
+    try {
+        await copyToClipboard(text);
+    } catch (e) {
+        // Most callers fire this off with `void copyWithToast(...)`, so a rejection here
+        // used to surface as an unhandled rejection and the button simply did nothing.
+        logger.error("Failed to copy to the clipboard", e);
+        Toasts.show({
+            message: "Could not copy to the clipboard.",
+            id: Toasts.genId(),
+            type: Toasts.Type.FAILURE
+        });
+        return;
+    }
+
     Toasts.show({
         message: toastMessage,
         id: Toasts.genId(),

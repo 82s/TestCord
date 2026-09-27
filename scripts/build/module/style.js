@@ -20,7 +20,8 @@
     name: STYLE_NAME,
     source: STYLE_SOURCE,
     classNames: {},
-    dom: null,
+    enabled: false,
+    compiled: "",
 });
 
 export default STYLE_NAME;

@@ -59,6 +59,20 @@ import { SettingsGearIcon } from "./modules/icons";
 migratePluginSettings("deraculpanellayout", "PanelLayout");
 migratePluginSettings("deracul-panel-layout", "PanelLayout");
 
+// PanelLayout was `required`, and isPluginEnabled short-circuits to true on that flag, so it
+// ran for everyone without ever writing an `enabled` key. Now that it is an ordinary optional
+// plugin, a missing key reads as off and would silently disable it for anyone who had it.
+// Presence of its own settings is what distinguishes "was running" from "never used it", so
+// only those get the state `required` used to imply. An explicit false is left alone, so
+// turning it off later is never undone.
+{
+    const existing = SettingsStore.plain.plugins.PanelLayout;
+    if (existing && existing.enabled === undefined) {
+        SettingsStore.plain.plugins.PanelLayout = { ...existing, enabled: true };
+        SettingsStore.markAsChanged();
+    }
+}
+
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
 export const settings = definePluginSettings({
