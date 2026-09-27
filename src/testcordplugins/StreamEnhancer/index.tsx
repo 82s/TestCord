@@ -28,6 +28,7 @@ import { streamEnhancerRuntime, streamEnhancerSettings } from "./settings";
 import * as streamState from "./state";
 import managedStyle from "./styles.css?managed";
 import type { StreamParticipant } from "./types";
+import { installOutgoingVideoFilterInterceptor, uninstallOutgoingVideoFilterInterceptor } from "./videoFilters";
 
 const streamEnhancer = definePlugin({
     name: "StreamEnhancer",
@@ -43,9 +44,11 @@ const streamEnhancer = definePlugin({
     patches: streamEnhancerPatches,
     start() {
         installMicrophoneInterceptor();
+        installOutgoingVideoFilterInterceptor();
         streamState.startAutoWatch();
     },
     stop() {
+        uninstallOutgoingVideoFilterInterceptor();
         uninstallMicrophoneInterceptor();
         streamState.stopStreamEnhancerState();
     },

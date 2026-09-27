@@ -436,7 +436,11 @@ export const streamEnhancerPatches: Array<Omit<Patch, "plugin">> = [
             // (`(0,ek.X)(...,FULL_SCREEN,...)` before `this.handleFullScreen()`), and the
             // button is preceded by the popout button's `}}):null` rather than a bare comma.
             match: /(\}\}\):null),((\i)\?\(0,\i\.jsx\)\((\i\.A),\{themeable:\i,node:this\.getRootNode\(\),guestWindow:\i,className:\i\.\i,onClick:\(\)=>\{.{0,200}?this\.handleFullScreen\(\)\}\}\):null)/,
-            replace: "$1,null!=this.props.selectedParticipant&&$self.isMediaParticipant(this.props.selectedParticipant)?$self.renderViewerControls(this.props.selectedParticipant):null"
+            // $2 is Discord's fullscreen button and has to be put back verbatim; emitting only
+            // $1 deleted it entirely, leaving no way to fullscreen a stream. Our controls are
+            // injected before $2, not after, because this toolbar lays out in reverse and
+            // anything appended past the fullscreen button ends up rendered to its left.
+            replace: "$1,null!=this.props.selectedParticipant&&$self.isMediaParticipant(this.props.selectedParticipant)?$self.renderViewerControls(this.props.selectedParticipant):null,$2"
         }
     },
     {

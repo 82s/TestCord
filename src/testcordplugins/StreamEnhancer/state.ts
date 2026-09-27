@@ -24,8 +24,10 @@ type RenderedVideoStyle = CSSProperties & {
     "--vc-stream-enhancer-video-width"?: string;
 };
 
+type DiscordStreamFit = "contain" | "cover";
+
 type RenderedStreamVideoState = {
-    fit: "contain" | "cover";
+    fit: DiscordStreamFit;
     className: string | undefined;
     style: CSSProperties | undefined;
     wrapperClassName: string | undefined;
@@ -607,65 +609,230 @@ const getStreamFitObjectFit = (mode: StreamFitMode) =>
 
 const streamFitAnchors = new Map<string, HTMLElement>();
 
+const streamFitTargets = new Set<string>();
+
 // Opt-in diagnostics: run localStorage.setItem("vc-stream-enhancer-debug-fit", "1")
 // in the Discord console to log every applied fit mode and the video element found.
 const isStreamFitDebugEnabled = () => typeof localStorage !== "undefined"
     && localStorage.getItem("vc-stream-enhancer-debug-fit") === "1";
 
-const findVideoFromAnchor = (anchor: HTMLElement): HTMLVideoElement | null => {
-    // The fit button renders inside the stream tile, so the <video> lives in one
-    // of its ancestors. Walk up until an ancestor contains one.
+const minStreamVideoArea = 200 * 113;
+
+const isStreamSizedVideo = (video: HTMLVideoElement): boolean => {
+    if (video.videoWidth <= 0 || video.videoHeight <= 0) return false;
+    if (video.dataset.vcStreamEnhancerFilterSink != null) return false;
+    const box = video.getBoundingClientRect();
+    return box.width * box.height >= minStreamVideoArea;
+};
+
+// Anything we write to the tile has to get out of the way the moment the stream goes
+// fullscreen, otherwise our inline !important sizing and the plugin's own overflow rules
+// fight the top-layer element and the frame never expands.
+const isInFullscreen = (video: HTMLVideoElement): boolean => {
+    if (document.fullscreenElement != null) return true;
+    if (typeof video.matches === "function" && video.matches(":fullscreen")) return true;
+
+    for (let node: HTMLElement | null = video; node != null; node = node.parentElement) {
+        if (typeof node.matches === "function" && node.matches(":fullscreen")) return true;
+    }
+
+    return false;
+};
+
+const findVideoByAncestry = (anchor: HTMLElement): HTMLVideoElement | null => {
     let node: HTMLElement | null = anchor;
 
     for (let depth = 0; node != null && depth < 12; depth++) {
-        const video = node.querySelector<HTMLVideoElement>("video");
-        if (video) return video;
+        const videos = Array.from(node.querySelectorAll<HTMLVideoElement>("video"));
+        const best = videos
+            .filter(isStreamSizedVideo)
+            .sort((a, b) => {
+                const aBox = a.getBoundingClientRect();
+                const bBox = b.getBoundingClientRect();
+                return bBox.width * bBox.height - aBox.width * aBox.height;
+            })[0];
+
+        if (best != null) return best;
         node = node.parentElement;
     }
 
     return null;
 };
 
+const findNearestStreamVideo = (anchor: HTMLElement | null): HTMLVideoElement | null => {
+    const candidates = Array.from(document.querySelectorAll<HTMLVideoElement>("video")).filter(isStreamSizedVideo);
+    if (candidates.length === 0) return null;
+
+    if (anchor?.isConnected !== true) {
+        return candidates.sort((a, b) => {
+            const aBox = a.getBoundingClientRect();
+            const bBox = b.getBoundingClientRect();
+            return bBox.width * bBox.height - aBox.width * aBox.height;
+        })[0];
+    }
+
+    const anchorBox = anchor.getBoundingClientRect();
+    const anchorCenterX = anchorBox.left + anchorBox.width / 2;
+    const anchorCenterY = anchorBox.top + anchorBox.height / 2;
+
+    return candidates.sort((a, b) => {
+        const aBox = a.getBoundingClientRect();
+        const bBox = b.getBoundingClientRect();
+        const aDistance = Math.hypot(aBox.left + aBox.width / 2 - anchorCenterX, aBox.top + aBox.height / 2 - anchorCenterY);
+        const bDistance = Math.hypot(bBox.left + bBox.width / 2 - anchorCenterX, bBox.top + bBox.height / 2 - anchorCenterY);
+        return aDistance - bDistance;
+    })[0];
+};
+
+const findVideoFromAnchor = (anchor: HTMLElement | null | undefined): HTMLVideoElement | null =>
+    (anchor != null ? findVideoByAncestry(anchor) : null) ?? findNearestStreamVideo(anchor ?? null);
+
+type StyleSnapshot = {
+    element: HTMLElement;
+    props: readonly string[];
+    values: readonly string[];
+    priorities: readonly string[];
+};
+
+const snapshotStyle = (element: HTMLElement, props: readonly string[]): StyleSnapshot => ({
+    element,
+    props,
+    values: props.map(prop => element.style.getPropertyValue(prop)),
+    priorities: props.map(prop => element.style.getPropertyPriority(prop))
+});
+
+const setImportantStyle = (element: HTMLElement, declarations: Readonly<Record<string, string>>) => {
+    for (const prop of Object.keys(declarations)) {
+        element.style.setProperty(prop, declarations[prop], "important");
+    }
+};
+
+const restoreStyle = (snapshot: StyleSnapshot) => {
+    for (let i = 0; i < snapshot.props.length; i++) {
+        snapshot.element.style.removeProperty(snapshot.props[i]);
+        if (snapshot.values[i] !== "") {
+            snapshot.element.style.setProperty(snapshot.props[i], snapshot.values[i], snapshot.priorities[i]);
+        }
+    }
+};
+
+const LAYER_FIT_PROPS = ["width", "height", "max-width", "max-height", "aspect-ratio"] as const;
+const VIDEO_FIT_PROPS = ["width", "height", "max-width", "max-height", "object-fit"] as const;
+
+let applyingStreamStyles = false;
+let fitFrameRefreshQueued = false;
+
+type ActiveFitOverride = {
+    layer: HTMLElement;
+    mode: StreamFitMode;
+    snapshots: StyleSnapshot[];
+    video: HTMLVideoElement;
+};
+
+const activeFitOverrides = new Map<string, ActiveFitOverride>();
+
+const restoreStreamFit = (streamKey: string) => {
+    const override = activeFitOverrides.get(streamKey);
+    if (override == null) return;
+
+    activeFitOverrides.delete(streamKey);
+    for (const snapshot of override.snapshots) restoreStyle(snapshot);
+};
+
 const applyStreamFitToVideo = (streamKey: string) => {
     const anchor = streamFitAnchors.get(streamKey);
-    if (anchor?.isConnected !== true) return;
-
     const mode = getRenderedStreamFitMode(streamKey);
-    const objectFit = getStreamFitObjectFit(mode);
+    const video = streamFitTargets.has(streamKey) ? findVideoFromAnchor(anchor) : null;
+    const layer = video?.parentElement ?? null;
+    const current = activeFitOverrides.get(streamKey);
 
-    // Re-resolve every time: Discord recreates the <video> element when the
-    // stream quality or fit changes, which would orphan a cached reference.
-    const video = findVideoFromAnchor(anchor);
-    if (!video) {
-        if (isStreamFitDebugEnabled()) console.warn(`[StreamEnhancer] no <video> found above anchor for ${streamKey}`);
+    if (current != null && current.mode === mode && current.video === video && current.layer === layer) return;
+
+    restoreStreamFit(streamKey);
+
+    if (video == null) {
+        if (isStreamFitDebugEnabled()) console.warn(`[StreamEnhancer] no stream <video> found for ${streamKey}`);
         return;
     }
 
-    video.style.setProperty("object-fit", objectFit, "important");
+    if (isInFullscreen(video)) {
+        restoreStreamFit(streamKey);
+        restoreStreamScale(streamKey);
+        return;
+    }
+
     video.dataset.vcStreamFit = mode;
 
-    if (isStreamFitDebugEnabled()) console.log(`[StreamEnhancer] fit ${streamKey} -> ${mode} (${objectFit})`);
+    if (mode === "contain" || layer == null) {
+        if (isStreamFitDebugEnabled()) console.log(`[StreamEnhancer] fit ${streamKey} -> contain (restored)`);
+        return;
+    }
+
+    const snapshots: StyleSnapshot[] = [];
+
+    snapshots.push(snapshotStyle(layer, LAYER_FIT_PROPS));
+    setImportantStyle(layer, {
+        width: "100%",
+        height: "100%",
+        "max-width": "none",
+        "max-height": "none",
+        "aspect-ratio": "auto"
+    });
+
+    snapshots.push(snapshotStyle(video, VIDEO_FIT_PROPS));
+    setImportantStyle(video, {
+        width: "100%",
+        height: "100%",
+        "max-width": "none",
+        "max-height": "none",
+        "object-fit": getStreamFitObjectFit(mode)
+    });
+
+    activeFitOverrides.set(streamKey, { layer, mode, snapshots, video });
+
+    if (isStreamFitDebugEnabled()) console.log(`[StreamEnhancer] fit ${streamKey} -> ${mode} (${getStreamFitObjectFit(mode)})`);
+};
+
+const runGuardedApply = (apply: () => void) => {
+    if (applyingStreamStyles) return;
+
+    applyingStreamStyles = true;
+    try {
+        apply();
+    } finally {
+        applyingStreamStyles = false;
+    }
 };
 
 export const applyStreamFitToDom = (streamKey?: string | null) => {
     if (!hasStreamKey(streamKey)) return;
 
-    applyStreamFitToVideo(streamKey);
+    runGuardedApply(() => applyStreamFitToVideo(streamKey));
 
-    if (streamFitAnchors.size > 0) ensureSharedFitObserver();
+    if (streamFitTargets.size > 0) ensureSharedFitObserver();
 };
 
-// Applies the + / - scale directly to the DOM. Like the fit handling above this
-// bypasses the webpack patches, which are not applying on the current Discord build.
-// Scaling the wrapper element (not the <video>) keeps the black background frame in
-// step with the picture, matching what the transform-based implementation did.
+const SCALE_STYLE_PROPS = ["transform", "transform-origin"] as const;
+
+const activeScaleOverrides = new Map<string, { snapshot: StyleSnapshot; transform: string; }>();
+
+const restoreStreamScale = (streamKey: string) => {
+    const override = activeScaleOverrides.get(streamKey);
+    if (override == null) return;
+
+    activeScaleOverrides.delete(streamKey);
+    restoreStyle(override.snapshot);
+    delete override.snapshot.element.dataset.vcStreamScale;
+};
+
 const applyStreamScaleToVideo = (streamKey: string) => {
     const anchor = streamFitAnchors.get(streamKey);
-    if (anchor?.isConnected !== true) return;
-
-    const video = findVideoFromAnchor(anchor);
+    const video = streamFitTargets.has(streamKey) ? findVideoFromAnchor(anchor) : null;
     const target = video?.parentElement ?? null;
-    if (!target) return;
+    if (video == null || target == null || isInFullscreen(video)) {
+        restoreStreamScale(streamKey);
+        return;
+    }
 
     const scale = getRenderedStreamScale(streamKey);
     const videoWidth = renderedVideoWidths.get(streamKey) ?? defaultRenderedVideoWidth;
@@ -673,8 +840,19 @@ const applyStreamScaleToVideo = (streamKey: string) => {
     const sx = (videoWidth / 100) * scale;
     const sy = (videoHeight / 100) * scale;
 
-    target.style.setProperty("transform", `scaleX(${sx}) scaleY(${sy})`, "important");
-    target.style.setProperty("transform-origin", "center center", "important");
+    if (sx === 1 && sy === 1) {
+        restoreStreamScale(streamKey);
+        return;
+    }
+
+    const transform = `scaleX(${sx}) scaleY(${sy})`;
+    const current = activeScaleOverrides.get(streamKey);
+    if (current != null && current.snapshot.element === target && current.transform === transform) return;
+
+    restoreStreamScale(streamKey);
+    const snapshot = snapshotStyle(target, SCALE_STYLE_PROPS);
+    activeScaleOverrides.set(streamKey, { snapshot, transform });
+    setImportantStyle(target, { transform, "transform-origin": "center center" });
     target.dataset.vcStreamScale = String(scale);
 
     if (isStreamFitDebugEnabled()) console.log(`[StreamEnhancer] scale ${streamKey} -> ${scale}`);
@@ -682,34 +860,43 @@ const applyStreamScaleToVideo = (streamKey: string) => {
 
 export const applyStreamScaleToDom = (streamKey?: string | null) => {
     if (!hasStreamKey(streamKey)) return;
-    applyStreamScaleToVideo(streamKey);
+    runGuardedApply(() => applyStreamScaleToVideo(streamKey));
 
-    if (streamFitAnchors.size > 0) ensureSharedFitObserver();
+    if (streamFitTargets.size > 0) ensureSharedFitObserver();
 };
 
 // One shared document observer instead of one per stream. Discord recreates the
 // <video> whenever stream quality changes, which drops any inline style we set,
-// so re-apply on DOM mutations. Keys whose anchor has been removed are pruned
-// so this cannot grow unbounded.
+// so re-apply on DOM mutations. Registered streams are pruned when their controls
+// unmount, so this cannot grow unbounded.
 let sharedFitObserver: MutationObserver | null = null;
 
 function ensureSharedFitObserver() {
     if (sharedFitObserver || typeof MutationObserver === "undefined") return;
 
     sharedFitObserver = new MutationObserver(() => {
-        for (const [streamKey, anchor] of streamFitAnchors) {
-            if (anchor.isConnected) {
-                applyStreamFitToVideo(streamKey);
-                applyStreamScaleToVideo(streamKey);
-            } else {
-                streamFitAnchors.delete(streamKey);
-            }
-        }
+        if (applyingStreamStyles || fitFrameRefreshQueued) return;
+        fitFrameRefreshQueued = true;
 
-        if (streamFitAnchors.size === 0) {
-            sharedFitObserver?.disconnect();
-            sharedFitObserver = null;
-        }
+        requestAnimationFrame(() => {
+            fitFrameRefreshQueued = false;
+            if (applyingStreamStyles) return;
+
+            applyingStreamStyles = true;
+            try {
+                for (const streamKey of [...streamFitTargets]) {
+                    applyStreamFitToVideo(streamKey);
+                    applyStreamScaleToVideo(streamKey);
+                }
+            } finally {
+                applyingStreamStyles = false;
+            }
+
+            if (streamFitTargets.size === 0) {
+                sharedFitObserver?.disconnect();
+                sharedFitObserver = null;
+            }
+        });
     });
 
     sharedFitObserver.observe(document.body, {
@@ -728,6 +915,7 @@ export const setStreamFitAnchor = (streamKey: string | null | undefined, element
 
     if (element) {
         streamFitAnchors.set(streamKey, element);
+        streamFitTargets.add(streamKey);
         if (isStreamFitDebugEnabled()) {
             const video = findVideoFromAnchor(element);
             console.log(`[StreamEnhancer] anchor set for ${streamKey}; video found:`, video ?? "NONE");
@@ -735,6 +923,9 @@ export const setStreamFitAnchor = (streamKey: string | null | undefined, element
         applyStreamFitToDom(streamKey);
     } else {
         streamFitAnchors.delete(streamKey);
+        streamFitTargets.delete(streamKey);
+        restoreStreamFit(streamKey);
+        restoreStreamScale(streamKey);
     }
 };
 
@@ -743,11 +934,13 @@ export const setStreamFitAnchor = (streamKey: string | null | undefined, element
 export const debugStreamFitChain = () => {
     const report = {
         anchors: streamFitAnchors.size,
+        targets: streamFitTargets.size,
         observerActive: sharedFitObserver != null,
         entries: [] as unknown[]
     };
 
-    for (const [streamKey, anchor] of streamFitAnchors) {
+    for (const streamKey of streamFitTargets) {
+        const anchor = streamFitAnchors.get(streamKey) ?? null;
         const video = findVideoFromAnchor(anchor);
         const mode = getRenderedStreamFitMode(streamKey);
 
@@ -766,18 +959,51 @@ export const debugStreamFitChain = () => {
             streamKey,
             mode,
             expectedObjectFit: getStreamFitObjectFit(mode),
-            anchorConnected: anchor.isConnected,
-            anchorTag: anchor.tagName,
-            anchorClasses: anchor.className,
+            anchorConnected: anchor != null && anchor.isConnected,
+            anchorTag: anchor?.tagName ?? null,
+            anchorClasses: anchor?.className ?? null,
             videoFound: video != null,
             videoInlineObjectFit: video?.style.getPropertyValue("object-fit") ?? null,
             videoDataAttr: video?.dataset.vcStreamFit ?? null,
             videoComputedObjectFit: video != null ? getComputedStyle(video).objectFit : null,
+            fitOverrideActive: activeFitOverrides.has(streamKey),
+            fitLeftovers: (() => {
+                if (mode !== "contain" || video == null) return null;
+                const leftover: Record<string, string> = {};
+                for (const element of [video.parentElement, video]) {
+                    if (element == null) continue;
+                    for (const prop of [...LAYER_FIT_PROPS, ...VIDEO_FIT_PROPS]) {
+                        const value = element.style.getPropertyValue(prop);
+                        if (value !== "" && element.style.getPropertyPriority(prop) === "important") {
+                            leftover[prop] = value;
+                        }
+                    }
+                }
+                return Object.keys(leftover).length > 0 ? leftover : null;
+            })(),
+            layerPosition: video?.parentElement != null
+                ? getComputedStyle(video.parentElement).position
+                : null,
             scale: getRenderedStreamScale(streamKey),
             scaleAppliedTransform: video?.parentElement != null
                 ? getComputedStyle(video.parentElement).transform
                 : null,
             scaleDataAttr: video?.parentElement?.dataset.vcStreamScale ?? null,
+            videoBox: video != null
+                ? (() => { const r = video.getBoundingClientRect(); return `${Math.round(r.width)}x${Math.round(r.height)}`; })()
+                : null,
+            availableFrame: video != null
+                ? (() => {
+                    const box = video.parentElement?.getBoundingClientRect();
+                    return box ? `${Math.round(box.width)}x${Math.round(box.height)} (window ${window.innerWidth}x${window.innerHeight})` : null;
+                })()
+                : null,
+            boxMatchesFrame: video != null
+                ? (() => {
+                    const box = video.parentElement?.getBoundingClientRect();
+                    return box != null && Math.abs(box.width - window.innerWidth) < 2 && Math.abs(box.height - window.innerHeight) < 2;
+                })()
+                : null,
             videoIntrinsicSize: video ? `${video.videoWidth}x${video.videoHeight}` : null,
             containerSize: containerBox ? `${Math.round(containerBox.width)}x${Math.round(containerBox.height)}` : null,
             videoAspectRatio: videoRatio?.toFixed(3) ?? null,
@@ -869,11 +1095,13 @@ export const getSelectedStreamWidth = (participant: StreamParticipant | null | u
     return Math.round(width * getRenderedStreamScale(participant.id));
 };
 
-const normalizeStreamFit = (fit: unknown): "contain" | "cover" => fit === "cover" ? "cover" : "contain";
+const normalizeDiscordStreamFit = (fit: unknown): DiscordStreamFit => fit === "cover" ? "cover" : "contain";
+
+const toDiscordStreamFit = (mode: StreamFitMode): DiscordStreamFit => mode === "contain" ? "contain" : "cover";
 
 export const getRenderedStreamFit = (streamKey: string | null | undefined, fit: unknown) => {
     const mode = getRenderedStreamFitMode(streamKey);
-    return mode === "contain" ? normalizeStreamFit(fit) : "cover";
+    return mode === "contain" ? normalizeDiscordStreamFit(fit) : toDiscordStreamFit(mode);
 };
 
 /**
@@ -946,8 +1174,8 @@ export const getRenderedStreamWrapperStyle = (streamKey: string | null | undefin
     return { transform: `scaleX(${sx}) scaleY(${sy})`, transformOrigin: "center center" };
 };
 
-export const getRenderedStreamVideoStyle = (streamKey: string | null | undefined) => {
-    if (!hasStreamKey(streamKey)) return undefined;
+export const getStreamVideoFilterString = (streamKey: string | null | undefined) => {
+    if (!hasStreamKey(streamKey)) return null;
 
     const videoTintColor = renderedVideoTintColors.get(streamKey) ?? defaultRenderedVideoTintColor;
     const videoTintIsEnabled = renderedVideoTintEnabled.get(streamKey) ?? defaultRenderedVideoTintEnabled;
@@ -956,14 +1184,6 @@ export const getRenderedStreamVideoStyle = (streamKey: string | null | undefined
     const saturation = getRenderedStreamSaturationPercent(streamKey);
     const hue = getRenderedStreamHueDegrees(streamKey);
     const enhanceImage = getRenderedStreamEnhanceImageEnabled(streamKey);
-    const scale = getRenderedStreamScale(streamKey);
-    const videoWidth = renderedVideoWidths.get(streamKey) ?? defaultRenderedVideoWidth;
-    const videoHeight = renderedVideoHeights.get(streamKey) ?? defaultRenderedVideoHeight;
-    const style: RenderedVideoStyle = {};
-
-    if (scale !== defaultRenderedStreamScale) style["--vc-stream-enhancer-video-scale"] = String(scale);
-    if (videoWidth !== defaultRenderedVideoWidth) style["--vc-stream-enhancer-video-width"] = `${videoWidth}%`;
-    if (videoHeight !== defaultRenderedVideoHeight) style["--vc-stream-enhancer-video-height"] = `${videoHeight}%`;
 
     const filters: string[] = [];
     if (brightness !== defaultRenderedStreamBrightness) filters.push(`brightness(${brightness}%)`);
@@ -1009,7 +1229,28 @@ export const getRenderedStreamVideoStyle = (streamKey: string | null | undefined
         filters.push("drop-shadow(0 0 0.35rem rgb(255 255 255 / 0.16))");
     }
 
-    if (filters.length > 0) style.filter = filters.join(" ");
+    return filters.length > 0 ? filters.join(" ") : null;
+};
+
+export const getOutgoingStreamFilterString = () => {
+    const currentUserId = UserStore.getCurrentUser()?.id;
+    return getStreamVideoFilterString(currentUserId);
+};
+
+export const getRenderedStreamVideoStyle = (streamKey: string | null | undefined) => {
+    if (!hasStreamKey(streamKey)) return undefined;
+
+    const scale = getRenderedStreamScale(streamKey);
+    const videoWidth = renderedVideoWidths.get(streamKey) ?? defaultRenderedVideoWidth;
+    const videoHeight = renderedVideoHeights.get(streamKey) ?? defaultRenderedVideoHeight;
+    const style: RenderedVideoStyle = {};
+
+    if (scale !== defaultRenderedStreamScale) style["--vc-stream-enhancer-video-scale"] = String(scale);
+    if (videoWidth !== defaultRenderedVideoWidth) style["--vc-stream-enhancer-video-width"] = `${videoWidth}%`;
+    if (videoHeight !== defaultRenderedVideoHeight) style["--vc-stream-enhancer-video-height"] = `${videoHeight}%`;
+
+    const filter = getStreamVideoFilterString(streamKey);
+    if (filter != null) style.filter = filter;
 
     return Object.keys(style).length > 0 ? style : undefined;
 };
@@ -1072,30 +1313,28 @@ const renderedStreamVideoStateEqual = (a: RenderedStreamVideoState, b: RenderedS
     && isSameStyle(a.style, b.style)
     && isSameStyle(a.wrapperStyle, b.wrapperStyle);
 
-export const useRenderedStreamVideoState = (streamKey: string | null | undefined, fit: unknown) => useStateFromStores(
+export const useRenderedStreamVideoState = (_streamKey: string | null | undefined, _fit: unknown) => useStateFromStores(
     [renderedStreamScaleStore],
     () => {
-        const mode = getRenderedStreamFitMode(streamKey);
-        const normalizedFit = normalizeStreamFit(fit);
+        const mode = getRenderedStreamFitMode(_streamKey);
 
         const state: RenderedStreamVideoState = {
             // "contain" keeps Discord's own fit; "cover" and "stretch" both ask Discord for
             // the cover layout, and "stretch" is then forced to object-fit:fill by our CSS.
-            fit: mode === "contain" ? normalizedFit : "cover",
+            fit: toDiscordStreamFit(mode),
             // className goes on the video__48b20 div. Discord's own class is merged in by the
             // patches; this adds the video-<mode> class that drives object-fit.
-            className: getRenderedStreamVideoClassName(streamKey),
-            // style carries filter effects only (object-fit handled by CSS classes)
-            style: getRenderedStreamVideoStyle(streamKey),
+            className: getRenderedStreamVideoClassName(_streamKey),
+            style: getRenderedStreamVideoStyle(_streamKey),
             // wrapperClassName goes on the wrapper__48b20 div (the black background frame)
-            wrapperClassName: getRenderedStreamWrapperClassName(streamKey),
+            wrapperClassName: getRenderedStreamWrapperClassName(_streamKey),
             // wrapperStyle carries the transform:scale for width/height sliders
-            wrapperStyle: getRenderedStreamWrapperStyle(streamKey)
+            wrapperStyle: getRenderedStreamWrapperStyle(_streamKey)
         };
 
         return state;
     },
-    [streamKey, fit],
+    [_streamKey, _fit],
     renderedStreamVideoStateEqual
 );
 
@@ -1284,7 +1523,15 @@ export const resetRenderedStreamMenuState = (participant: StreamParticipant | nu
 const clearStreamFitAnchors = () => {
     sharedFitObserver?.disconnect();
     sharedFitObserver = null;
+
+    for (const streamKey of [...activeFitOverrides.keys()]) restoreStreamFit(streamKey);
+    for (const streamKey of [...activeScaleOverrides.keys()]) restoreStreamScale(streamKey);
+
+    activeFitOverrides.clear();
+    activeScaleOverrides.clear();
     streamFitAnchors.clear();
+
+    streamFitTargets.clear();
 };
 
 export const stopStreamEnhancerState = () => {
