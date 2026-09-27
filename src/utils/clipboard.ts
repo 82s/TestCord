@@ -48,13 +48,19 @@ function copyViaSelection(text: string): Promise<void> {
 }
 
 export async function copyToClipboard(text: string): Promise<void> {
-    // Captured once. Reading the property twice is not equivalent: on some clients
-    // `navigator.clipboard` is absent, and on others it is present for the guard and gone
-    // by the time the call is made, which is a TypeError on a bare `.writeText`.
+    // Both paths are guarded, not just the web one. `DiscordNative.clipboard.copy` is not
+    // dependable on every client: where the async clipboard is missing it reaches for
+    // `navigator.clipboard` internally and throws a TypeError on `.writeText` from inside
+    // its own implementation, which used to escape the copy entirely. Whichever path is
+    // taken, a throw falls through to the selection fallback.
     const native = IS_DISCORD_DESKTOP ? DiscordNative.clipboard : undefined;
     if (native?.copy) {
-        await native.copy(text);
-        return;
+        try {
+            await native.copy(text);
+            return;
+        } catch (e) {
+            logger.warn("DiscordNative clipboard copy failed, falling back", e);
+        }
     }
 
     try {
@@ -72,7 +78,13 @@ export async function copyToClipboard(text: string): Promise<void> {
 
 export async function readClipboard(): Promise<string> {
     const native = IS_DISCORD_DESKTOP ? DiscordNative.clipboard : undefined;
-    if (native?.read) return native.read();
+    if (native?.read) {
+        try {
+            return await native.read();
+        } catch (e) {
+            logger.warn("DiscordNative clipboard read failed, falling back", e);
+        }
+    }
 
     try {
         const { clipboard } = navigator;
