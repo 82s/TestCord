@@ -618,30 +618,11 @@ const isStreamFitDebugEnabled = () => typeof localStorage !== "undefined"
 
 const minStreamVideoArea = 200 * 113;
 
-// getBoundingClientRect forces synchronous layout, so it must be read once per element per
-// pass rather than once per predicate call plus twice per sort comparison. The old shape
-// re-read the rect O(n log n) times inside the comparator.
-const streamVideoArea = (video: HTMLVideoElement): number => {
-    if (video.videoWidth <= 0 || video.videoHeight <= 0) return 0;
-    if (video.dataset.vcStreamEnhancerFilterSink != null) return 0;
+const isStreamSizedVideo = (video: HTMLVideoElement): boolean => {
+    if (video.videoWidth <= 0 || video.videoHeight <= 0) return false;
+    if (video.dataset.vcStreamEnhancerFilterSink != null) return false;
     const box = video.getBoundingClientRect();
-    return box.width * box.height;
-};
-
-/** Largest stream-sized video in the list, or null. Ties resolve to document order. */
-const pickLargestStreamVideo = (videos: HTMLVideoElement[]): HTMLVideoElement | null => {
-    let best: HTMLVideoElement | null = null;
-    let bestArea = 0;
-
-    for (const video of videos) {
-        const area = streamVideoArea(video);
-        if (area >= minStreamVideoArea && (best == null || area > bestArea)) {
-            best = video;
-            bestArea = area;
-        }
-    }
-
-    return best;
+    return box.width * box.height >= minStreamVideoArea;
 };
 
 // Anything we write to the tile has to get out of the way the moment the stream goes
@@ -662,7 +643,15 @@ const findVideoByAncestry = (anchor: HTMLElement): HTMLVideoElement | null => {
     let node: HTMLElement | null = anchor;
 
     for (let depth = 0; node != null && depth < 12; depth++) {
-        const best = pickLargestStreamVideo(Array.from(node.querySelectorAll<HTMLVideoElement>("video")));
+        const videos = Array.from(node.querySelectorAll<HTMLVideoElement>("video"));
+        const best = videos
+            .filter(isStreamSizedVideo)
+            .sort((a, b) => {
+                const aBox = a.getBoundingClientRect();
+                const bBox = b.getBoundingClientRect();
+                return bBox.width * bBox.height - aBox.width * aBox.height;
+            })[0];
+
         if (best != null) return best;
         node = node.parentElement;
     }
@@ -671,64 +660,32 @@ const findVideoByAncestry = (anchor: HTMLElement): HTMLVideoElement | null => {
 };
 
 const findNearestStreamVideo = (anchor: HTMLElement | null): HTMLVideoElement | null => {
-    const candidates = Array.from(document.querySelectorAll<HTMLVideoElement>("video"));
+    const candidates = Array.from(document.querySelectorAll<HTMLVideoElement>("video")).filter(isStreamSizedVideo);
     if (candidates.length === 0) return null;
 
-    if (anchor?.isConnected !== true) return pickLargestStreamVideo(candidates);
+    if (anchor?.isConnected !== true) {
+        return candidates.sort((a, b) => {
+            const aBox = a.getBoundingClientRect();
+            const bBox = b.getBoundingClientRect();
+            return bBox.width * bBox.height - aBox.width * aBox.height;
+        })[0];
+    }
 
     const anchorBox = anchor.getBoundingClientRect();
     const anchorCenterX = anchorBox.left + anchorBox.width / 2;
     const anchorCenterY = anchorBox.top + anchorBox.height / 2;
 
-    let best: HTMLVideoElement | null = null;
-    let bestDistance = Infinity;
-    for (const video of candidates) {
-        if (streamVideoArea(video) < minStreamVideoArea) continue;
-        const box = video.getBoundingClientRect();
-        const distance = Math.hypot(box.left + box.width / 2 - anchorCenterX, box.top + box.height / 2 - anchorCenterY);
-        if (distance < bestDistance) {
-            best = video;
-            bestDistance = distance;
-        }
-    }
-
-    return best;
+    return candidates.sort((a, b) => {
+        const aBox = a.getBoundingClientRect();
+        const bBox = b.getBoundingClientRect();
+        const aDistance = Math.hypot(aBox.left + aBox.width / 2 - anchorCenterX, aBox.top + aBox.height / 2 - anchorCenterY);
+        const bDistance = Math.hypot(bBox.left + bBox.width / 2 - anchorCenterX, bBox.top + bBox.height / 2 - anchorCenterY);
+        return aDistance - bDistance;
+    })[0];
 };
 
-/**
- * Resolved `<video>` per anchor.
- *
- * Resolving is the expensive part of keeping fit and scale applied: the ancestry walk issues
- * a `querySelectorAll` per ancestor level over increasingly large subtrees, and the fallback
- * scans the whole document. Every candidate costs a `getBoundingClientRect`, which forces
- * synchronous layout. The shared observer queues that work on any frame Discord mutates a
- * class or style anywhere, and it ran twice per registered stream, so it turned ordinary
- * DOM churn into layout thrashing and showed up as jank rather than as time in a CPU profile.
- *
- * A cached video is still the answer while it is connected and still inside the anchor's
- * subtree - that containment is exactly the relationship the ancestry walk searches for. The
- * case the observer actually exists for, Discord replacing the `<video>` on a quality change,
- * detaches the old element and so invalidates the cache. Keyed by the anchor element so
- * unmounted tiles drop out with the DOM rather than needing explicit cleanup.
- *
- * The one case this does not re-resolve is a *new* video appearing strictly between the
- * anchor and the cached one, which would make the ancestry walk prefer it. Discord's stream
- * tile carries a single `<video>`, and the miss is cosmetic (styles land on the sibling
- * element of the same tile) rather than a crash or a leak.
- */
-const resolvedStreamVideos = new WeakMap<HTMLElement, HTMLVideoElement>();
-
-const findVideoFromAnchor = (anchor: HTMLElement | null | undefined): HTMLVideoElement | null => {
-    if (anchor == null) return findNearestStreamVideo(null);
-
-    const cached = resolvedStreamVideos.get(anchor);
-    if (cached != null && cached.isConnected && anchor.contains(cached)) return cached;
-
-    const video = findVideoByAncestry(anchor) ?? findNearestStreamVideo(anchor);
-    if (video != null) resolvedStreamVideos.set(anchor, video);
-    else resolvedStreamVideos.delete(anchor);
-    return video;
-};
+const findVideoFromAnchor = (anchor: HTMLElement | null | undefined): HTMLVideoElement | null =>
+    (anchor != null ? findVideoByAncestry(anchor) : null) ?? findNearestStreamVideo(anchor ?? null);
 
 type StyleSnapshot = {
     element: HTMLElement;
