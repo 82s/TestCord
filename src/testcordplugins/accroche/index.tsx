@@ -876,8 +876,13 @@ export default definePlugin({
     },
 
     start() {
-        log("🚀 Hook plugin started");
-        log(`⚙️ Current configuration:
+        // Startup banner is verbose output. It was unconditional, and this plugin was the
+        // slowest thing in the boot pass: two console writes per start, and the second one
+        // interpolates every setting and pushes a multi-line string through the console
+        // capture wrapper, which formats and truncates the arguments. Both go through
+        // verboseLog, which respects the setting, so nothing is lost by gating them.
+        verboseLog("🚀 Hook plugin started");
+        verboseLog(`⚙️ Current configuration:
 - Notifications: ${settings.store.showNotifications ? "ON" : "OFF"}
 - Verbose logs: ${settings.store.verboseLogs ? "ON" : "OFF"}
 - Prevent manual move: ${settings.store.preventSelfMove ? "ON" : "OFF"}

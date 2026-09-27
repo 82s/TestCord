@@ -28,6 +28,8 @@ export interface SourceSnippet {
     fn?: (() => string) | undefined;
 }
 
+export type ProfileScope = "window" | "session";
+
 export interface PluginProfileData {
     pluginName: string;
     totalCpuTimeMs: number;
@@ -53,6 +55,15 @@ export interface PluginProfileData {
     surfaces: Record<string, SurfaceStats>;
     hotSurface: string;
     snippets: SourceSnippet[];
+    /** Which scope the counters above were read from. */
+    scope: ProfileScope;
+    /** Session-lifetime totals, always present regardless of `scope`. */
+    sessionTotalCpuTimeMs: number;
+    sessionCallCount: number;
+    sessionMaxCallMs: number;
+    sessionSlowSpikes: number;
+    /** Age of the session in seconds, so the UI can label the range honestly. */
+    sessionAgeSeconds: number;
 }
 
 export type SignalFlag = "Noticeable CPU" | "Slow spike" | "Slow calls" | "Active listeners";
@@ -60,6 +71,15 @@ export type SignalFlag = "Noticeable CPU" | "Slow spike" | "Slow calls" | "Activ
 interface ActiveContext {
     pluginName: string;
     surface: string;
+}
+
+interface SessionTotals {
+    cpuTimeMs: number;
+    callCount: number;
+    maxCallMs: number;
+    slowSpikes: number;
+    asyncTimeMs: number;
+    surfaces: Record<string, SurfaceStats>;
 }
 
 interface RawPluginMetrics {
@@ -77,9 +97,19 @@ interface RawPluginMetrics {
     /** Slow-call log lines already emitted in the current window, so the budget resets with it. */
     warnedSlowCalls: number;
     surfaces: Record<string, SurfaceStats>;
+    /**
+     * Lifetime totals for the whole session. The windowed counters above are wiped every
+     * PROFILE_WINDOW_MS, which left the diagnostics able to answer "what is slow right
+     * now" but never "what was slow today". These accumulate for the life of the renderer
+     * and are only cleared by an explicit reset, so a slow plugin that ran once during
+     * boot is still attributable long after its window rolled over.
+     */
+    session: SessionTotals;
 }
 
 const metricsRegistry = new Map<string, RawPluginMetrics>();
+/** Wall-clock start of the session, used only to label the range in the UI. */
+const sessionStartedAt = Date.now();
 const listeners = new Set<() => void>();
 const activeStack: ActiveContext[] = [];
 const SLOW_CALL_WARN_LIMIT = 5;
@@ -114,6 +144,10 @@ function currentContext(): ActiveContext | undefined {
     return activeStack.length > 0 ? activeStack[activeStack.length - 1] : undefined;
 }
 
+function emptySession(): SessionTotals {
+    return { cpuTimeMs: 0, callCount: 0, maxCallMs: 0, slowSpikes: 0, asyncTimeMs: 0, surfaces: {} };
+}
+
 function ensureMetrics(pluginName: string): RawPluginMetrics {
     let metrics = metricsRegistry.get(pluginName);
     if (!metrics) {
@@ -130,14 +164,15 @@ function ensureMetrics(pluginName: string): RawPluginMetrics {
             lastHeapBytes: 0,
             lastHeapDeltaMB: 0,
             warnedSlowCalls: 0,
-            surfaces: {}
+            surfaces: {},
+            session: emptySession()
         };
         metricsRegistry.set(pluginName, metrics);
     }
     return metrics;
 }
 
-function resetPerformanceWindow(metrics: RawPluginMetrics, now: number) {
+function resetPerformanceWindow(metrics: RawPluginMetrics, now: number, clearSession = false) {
     metrics.windowStartedAt = now;
     metrics.totalCpuTimeMs = 0;
     metrics.callCount = 0;
@@ -149,12 +184,35 @@ function resetPerformanceWindow(metrics: RawPluginMetrics, now: number) {
     metrics.lastHeapDeltaMB = 0;
     metrics.warnedSlowCalls = 0;
     metrics.surfaces = {};
+    if (clearSession)
+        metrics.session = emptySession();
 }
 
 function rollPerformanceWindow(metrics: RawPluginMetrics, now: number) {
     if (now - metrics.windowStartedAt >= PROFILE_WINDOW_MS) {
         resetPerformanceWindow(metrics, now);
     }
+}
+
+/** Folds one finished call into the plugin's session totals, independent of the window. */
+function addSessionCall(metrics: RawPluginMetrics, category: string, duration: number, isSlow: boolean) {
+    const s = metrics.session;
+    s.cpuTimeMs += duration;
+    s.callCount++;
+    if (duration > s.maxCallMs) s.maxCallMs = duration;
+    if (isSlow) s.slowSpikes++;
+
+    const surf = s.surfaces[category] ??= { calls: 0, totalMs: 0, maxMs: 0, slowCalls: 0, asyncMs: 0 };
+    surf.calls++;
+    surf.totalMs += duration;
+    if (duration > surf.maxMs) surf.maxMs = duration;
+    if (isSlow) surf.slowCalls++;
+}
+
+function addSessionAsync(metrics: RawPluginMetrics, category: string, duration: number) {
+    metrics.session.asyncTimeMs += duration;
+    const surf = metrics.session.surfaces[category] ??= { calls: 0, totalMs: 0, maxMs: 0, slowCalls: 0, asyncMs: 0 };
+    surf.asyncMs += duration;
 }
 
 function ensureSurface(metrics: RawPluginMetrics, surface: string): SurfaceStats {
@@ -591,6 +649,7 @@ export const PluginProfiler = {
                     const duration = performance.now() - asyncStart;
                     rollPerformanceWindow(metrics, asyncStart);
                     metrics.asyncTimeMs += duration;
+                    addSessionAsync(metrics, category, duration);
                     const surf = ensureSurface(metrics, category);
                     surf.asyncMs += duration;
                     notifySubscribers();
@@ -632,6 +691,8 @@ export const PluginProfiler = {
                 surfaceStat.slowCalls++;
             }
 
+            addSessionCall(metrics, category, duration, isSlow);
+
             const afterHeap = trackHeap ? (performance as any)?.memory?.usedJSHeapSize : undefined;
             if (typeof beforeHeap === "number" && typeof afterHeap === "number") {
                 const delta = afterHeap - beforeHeap;
@@ -658,6 +719,7 @@ export const PluginProfiler = {
         } finally {
             const duration = performance.now() - start;
             metrics.asyncTimeMs += duration;
+            addSessionAsync(metrics, category, duration);
             const surf = ensureSurface(metrics, category);
             surf.asyncMs += duration;
             notifySubscribers();
@@ -703,22 +765,30 @@ export const PluginProfiler = {
     },
 
     /**
-     * Get compiled diagnostic profile for a specific plugin
+     * Get compiled diagnostic profile for a specific plugin.
+     *
+     * `scope` selects which counters describe the plugin. "window" is the rolling
+     * PROFILE_WINDOW_MS view, which answers "what is slow right now". "session" reads the
+     * lifetime totals instead, which is the only way to see something that was expensive
+     * during boot and has since gone quiet. Live resource counts are unaffected either way.
      */
-    getProfile(pluginName: string): PluginProfileData {
+    getProfile(pluginName: string, scope: ProfileScope = "window"): PluginProfileData {
         const metrics = metricsRegistry.get(pluginName);
         const now = performance.now();
         if (metrics) rollPerformanceWindow(metrics, now);
+
+        const session = metrics?.session;
+        const useSession = scope === "session";
 
         const heapBytes = metrics?.lastHeapBytes ?? 0;
         const heapMB = Math.round((heapBytes / (1024 * 1024)) * 100) / 100;
         const extraRAMMB = Math.round(((metrics?.allocatedHeapBytes ?? 0) / (1024 * 1024)) * 100) / 100;
 
-        const cpuMs = Math.round((metrics?.totalCpuTimeMs ?? 0) * 10) / 10;
-        const callCount = metrics?.callCount ?? 0;
-        const maxCallMs = Math.round((metrics?.maxCallMs ?? 0) * 10) / 10;
-        const slowSpikes = metrics?.slowSpikes ?? 0;
-        const asyncTimeMs = Math.round((metrics?.asyncTimeMs ?? 0) * 10) / 10;
+        const cpuMs = Math.round((useSession ? session?.cpuTimeMs : metrics?.totalCpuTimeMs) ?? 0) * 10 / 10;
+        const callCount = (useSession ? session?.callCount : metrics?.callCount) ?? 0;
+        const maxCallMs = Math.round((useSession ? session?.maxCallMs : metrics?.maxCallMs) ?? 0) * 10 / 10;
+        const slowSpikes = (useSession ? session?.slowSpikes : metrics?.slowSpikes) ?? 0;
+        const asyncTimeMs = Math.round((useSession ? session?.asyncTimeMs : metrics?.asyncTimeMs) ?? 0) * 10 / 10;
         const activeIntervals = metrics?.activeIntervals.size ?? 0;
         const activeListeners = metrics?.activeListeners.size ?? 0;
         const hookOwnership = RuntimeInterposition.getActiveHooks(pluginName);
@@ -731,7 +801,7 @@ export const PluginProfiler = {
             cpuMs, slowSpikes, maxCallMs, callCount, activeResources
         );
 
-        const surfaces = metrics?.surfaces ?? {};
+        const surfaces = (useSession ? session?.surfaces : metrics?.surfaces) ?? {};
         const [hotSurface] = Object.entries(surfaces)
             .sort(([, a], [, b]) => b.totalMs - a.totalMs)[0] ?? [];
 
@@ -761,17 +831,23 @@ export const PluginProfiler = {
             advisory,
             surfaces,
             hotSurface: hotSurface ?? "No samples",
-            snippets: sourceSnippets.get(pluginName) ?? []
+            snippets: sourceSnippets.get(pluginName) ?? [],
+            scope,
+            sessionTotalCpuTimeMs: Math.round((session?.cpuTimeMs ?? 0) * 10) / 10,
+            sessionCallCount: session?.callCount ?? 0,
+            sessionMaxCallMs: Math.round((session?.maxCallMs ?? 0) * 10) / 10,
+            sessionSlowSpikes: session?.slowSpikes ?? 0,
+            sessionAgeSeconds: Math.round((Date.now() - sessionStartedAt) / 1000)
         };
     },
 
     /**
      * Get compiled diagnostic profiles for all monitored plugins
      */
-    getAllProfiles(): PluginProfileData[] {
+    getAllProfiles(scope: ProfileScope = "window"): PluginProfileData[] {
         const profiles: PluginProfileData[] = [];
         for (const pluginName of metricsRegistry.keys()) {
-            profiles.push(this.getProfile(pluginName));
+            profiles.push(this.getProfile(pluginName, scope));
         }
         return profiles;
     },
@@ -782,7 +858,7 @@ export const PluginProfiler = {
     resetMetrics() {
         const now = performance.now();
         for (const metrics of metricsRegistry.values()) {
-            resetPerformanceWindow(metrics, now);
+            resetPerformanceWindow(metrics, now, true);
         }
         notifySubscribers(true);
     },
@@ -793,7 +869,7 @@ export const PluginProfiler = {
     resetPluginMetrics(pluginName: string) {
         const metrics = metricsRegistry.get(pluginName);
         if (!metrics) return;
-        resetPerformanceWindow(metrics, performance.now());
+        resetPerformanceWindow(metrics, performance.now(), true);
         notifySubscribers(true);
     },
 

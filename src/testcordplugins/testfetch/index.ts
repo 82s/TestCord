@@ -27,26 +27,22 @@ const STALE_AFTER = 12096e5;
 
 const ORANGE = "\x1b[38;5;208m";
 const BOLD_ORANGE = "\x1b[1;38;5;208m";
-const DARK_RED = "\x1b[38;5;88m";
 const DIM_ORANGE = "\x1b[2;38;5;208m";
 const RESET = "\x1b[0m";
 
 const LOGO = [
-    " _____ ___   _____ ____",
-    "|_   _/ _| |_   _|  _ \\",
-    "  | || (_|   | | | |_) |",
-    "  | ||  _|   | | |  _ <",
-    "  | || | |   | | | | \\ \\",
-    "  |_||_| |_| |_| |_|  \\_\\"
+    "           ,",
+    "         __)\\",
+    "  (\\_.-'    a`-.",
+    "  (/~~````(/~^^` `"
 ];
-const C_START = [10, 10, 10, 10, 10, 12];
 
 const COLOR_BAR = [40, 41, 42, 43, 44, 45, 46, 47].map(c => `\x1b[2;${c}m███`).join("") + RESET;
 
 const ShowCurrentGame = getUserSettingLazy<boolean>("status", "showCurrentGame");
 
 function capitalize(text: string) {
-    return text.length ? text[0].toUpperCase() + text.slice(1) : text;
+    return text?.length ? text[0].toUpperCase() + text.slice(1) : (text ?? "");
 }
 
 function bytes(value: number) {
@@ -61,14 +57,17 @@ function bytes(value: number) {
 }
 
 function clientVersion() {
-    if (IS_DISCORD_DESKTOP) return `Desktop v${DiscordNative.app.getVersion()}`;
-    if (IS_VESKTOP) return `Vesktop v${VesktopNative.app.getVersion()}`;
+    // The native bridges are absent on clients whose build flag and injected globals
+    // disagree, so each read is guarded rather than trusted.
+    if (IS_DISCORD_DESKTOP) return `Desktop v${tryOrElse(() => DiscordNative.app.getVersion(), "unknown")}`;
+    if (IS_VESKTOP) return `Vesktop v${tryOrElse(() => VesktopNative.app.getVersion(), "unknown")}`;
+    if (IS_EQUIBOP) return `Equibop v${tryOrElse(() => VesktopNative.app.getVersion(), "unknown")}`;
     return IS_USERSCRIPT ? "UserScript" : "Web";
 }
 
 function operatingSystem() {
     const os = navigator.userAgent.match(/(?:Windows|Mac OS X|Linux|Android|iPhone OS)[^;)]*/)?.[0];
-    const arch = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform;
+    const arch = (navigator as Navigator & { userAgentData?: { platform?: string; }; }).userAgentData?.platform;
     return [os ?? navigator.platform, arch].filter(Boolean).join(" / ");
 }
 
@@ -76,8 +75,8 @@ function guildRoles() {
     const me = UserStore.getCurrentUser();
     const member = me && GuildMemberStore.getMember(VENCORD_GUILD_ID, me.id);
     return {
-        donor: !!member?.roles.includes(DONOR_ROLE_ID),
-        contributor: !!member?.roles.includes(CONTRIBUTOR_ROLE_ID)
+        donor: !!member?.roles?.includes(DONOR_ROLE_ID),
+        contributor: !!member?.roles?.includes(CONTRIBUTOR_ROLE_ID)
     };
 }
 
@@ -108,11 +107,16 @@ async function collect() {
     const sys = await tryOrElse(() => Native?.getSystemInfo?.(), null);
     const { donor, contributor } = guildRoles();
 
+    // GLOBAL_ENV is typed `any` and is absent on some clients, so tsc cannot catch a
+    // missing field here. Every read goes through this object with a fallback, because a
+    // single throw in collect() loses the entire report rather than one line.
+    const env = window.GLOBAL_ENV ?? {};
+
     return {
         user: me?.username ?? "unknown",
         version: `${VERSION} ~ ${gitHash} - ${Intl.DateTimeFormat(navigator.language, { dateStyle: "medium" }).format(BUILD_TIMESTAMP)}${IS_STANDALONE ? "" : " ~ dev"}`,
-        client: `${capitalize(window.GLOBAL_ENV.RELEASE_CHANNEL)} ~ ${clientVersion()}`,
-        build: `${window.GLOBAL_ENV.BUILD_NUMBER} ~ ${window.GLOBAL_ENV.VERSION_HASH.slice(0, 7)}`,
+        client: `${capitalize(env.RELEASE_CHANNEL ?? "unknown")} ~ ${clientVersion()}`,
+        build: `${env.BUILD_NUMBER ?? "unknown"} ~ ${env.VERSION_HASH?.slice(0, 7) ?? "unknown"}`,
         issues: knownIssues(),
         os: operatingSystem(),
         cpu: sys ? `${sys.cores} cores (${sys.arch})` : "",
@@ -121,7 +125,7 @@ async function collect() {
         theme: capitalize(ThemeStore.theme),
         locale: LocaleStore.locale,
         plugins: pluginCounts(),
-        uptime: `${Math.max(0, ~~((Date.now() - window.GLOBAL_ENV.HTML_TIMESTAMP) / 1000))}s`,
+        uptime: `${Math.max(0, ~~((Date.now() - (env.HTML_TIMESTAMP ?? Date.now())) / 1000))}s`,
         donor: donor ? "yes" : "no",
         contributor: contributor ? "yes" : "no"
     };
@@ -154,7 +158,7 @@ function render(data: Report) {
 
     for (let i = 0; i < height; i++) {
         const art = i < LOGO.length
-            ? `${ORANGE}${LOGO[i].slice(0, C_START[i])}${RESET}${DARK_RED}${LOGO[i].slice(C_START[i])}${RESET}${" ".repeat(indent - LOGO[i].length)}`
+            ? `${ORANGE}${LOGO[i]}${RESET}${" ".repeat(indent - LOGO[i].length)}`
             : " ".repeat(indent);
 
         const row = rows[i];

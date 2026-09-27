@@ -1,9 +1,26 @@
-/* Ensure message toolbar doesn't clip under the message above.
+/* Keep the hover toolbar above neighbouring messages.
    The class names are filled in at runtime. Matching [class*="message_"] instead put this
    rule in the browser's universal selector bucket, so it was retested against every element
-   on every hover change and every message list mutation. */
+   on every hover change and every message list mutation.
+
+   The toolbar is absolutely positioned inside the message and deliberately overflows it, so
+   it has to clear the rows above and below it. Message rows are `position: relative` with
+   `z-index: auto`, and an `auto` z-index on a positioned element still paints in DOM order,
+   so a later row paints over an earlier one no matter what the earlier one is hovered with.
+   Raising the row alone was therefore not enough: it needed the sibling rows to be
+   unpositioned at the same time, which nothing guaranteed.
+
+   Raising the toolbar itself is what actually fixes it, because it is the thing that
+   overflows. The value only has to beat the message layer, and 2 is enough for that while
+   staying far below Discord's own overlays (the jump-to-present pill sits at 3, popovers and
+   modals in the thousands), so the toolbar can never end up above a real overlay. */
 [--messageListItem]:hover,
 [--message]:hover {
-    z-index: 1;
     position: relative;
+    z-index: 1;
+}
+
+[--messageListItem]:hover .vc-message-popover,
+[--message]:hover .vc-message-popover {
+    z-index: 2;
 }

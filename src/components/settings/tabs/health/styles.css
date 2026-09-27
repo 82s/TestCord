@@ -179,6 +179,38 @@
     animation: vc-health-fade-in 0.25s ease-out;
 }
 
+/* ─── Segmented Scope Toggle (Realtime / Whole session) ─────────── */
+
+.vc-health-scope-toggle {
+    display: flex;
+    align-items: center;
+    border: 1px solid var(--background-modifier-accent, rgb(255 255 255 / 10%));
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.vc-health-scope-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted, #949ba4);
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 0.35rem 0.7rem;
+    white-space: nowrap;
+    transition: color 0.15s ease, background 0.15s ease;
+}
+
+.vc-health-scope-btn:hover {
+    color: var(--text-normal, #f2f3f5);
+    background: var(--background-modifier-hover, rgb(255 255 255 / 4%));
+}
+
+.vc-health-scope-btn-active {
+    color: var(--interactive-active, #fff);
+    background: var(--background-modifier-selected, rgb(255 255 255 / 6%));
+}
+
 /* ─── Stats Grid (Diagnostics Tab) ───────────────────────────── */
 
 .vc-health-stats-grid {

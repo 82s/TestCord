@@ -967,14 +967,10 @@ export default definePlugin({
         FluxDispatcher.subscribe("VOICE_STATE_UPDATES", voiceStateCallback);
         document.addEventListener("keydown", handleKeyDown);
 
-        Toasts.show({
-            message: "Multi-Server Auto-Ban loaded! Press Alt+B to configure settings.",
-            id: "multi-auto-ban-loaded",
-            type: Toasts.Type.SUCCESS,
-            options: {
-                position: Toasts.Position.BOTTOM
-            }
-        });
+        // This toast was the second-slowest thing in the boot pass. It forces a React mount
+        // of the toast layer while the client is still painting its first frames, and it
+        // fires on every single start, so the user sees it every time they launch. The
+        // keybind hint is already in the plugin's settings, so nothing is lost.
     },
     stop() {
         pluginActive = false;

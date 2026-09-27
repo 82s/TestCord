@@ -10,7 +10,7 @@ import * as DataStore from "@api/DataStore";
 import { type NetworkDomainSummary, NetworkMonitor } from "@api/NetworkMonitor";
 import { type PatchFailure, PluginHealth, type PluginHealthEntry, type RuntimeError, type SessionRecord, type StabilityScore } from "@api/PluginHealth";
 import { pluginStartTimings } from "@api/PluginManager";
-import { PluginProfileData, PluginProfiler, PROFILE_WINDOW_MS } from "@api/PluginProfiler";
+import { PluginProfileData, PluginProfiler, PROFILE_WINDOW_MS, ProfileScope } from "@api/PluginProfiler";
 import { Button } from "@components/Button";
 import { Card } from "@components/Card";
 import { CodeBlock } from "@components/CodeBlock";
@@ -30,7 +30,7 @@ import { getBuildNumber, getFactoryPatchedSource, SYM_ORIGINAL_FACTORY } from "@
 
 import Plugins from "~plugins";
 
-type DiagnosticTabKey = "overview" | "diagnostics" | "impact" | "monitor" | "finder" | "guide";
+type DiagnosticTabKey = "overview" | "diagnostics" | "impact" | "monitor" | "startup" | "finder" | "guide";
 
 const PROFILE_WINDOW_SECONDS = PROFILE_WINDOW_MS / 1000;
 
@@ -1211,8 +1211,13 @@ function HealthTab() {
 
     // Diagnostic & profiling states
     const [diagSearchQuery, setDiagSearchQuery] = useState("");
+    const [diagScope, setDiagScope] = useState<ProfileScope>("window");
     const [sortColumn, setSortColumn] = useState<keyof PluginProfileData>("impactScore");
     const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+
+    // Startup timings tab
+    const [startupSearchQuery, setStartupSearchQuery] = useState("");
+    const [startupSort, setStartupSort] = useState<"order" | "duration">("order");
 
     // Monitor tab master-list controls
     const [monitorSearchQuery, setMonitorSearchQuery] = useState("");
@@ -1306,6 +1311,32 @@ function HealthTab() {
             ].join(" | "))
         ];
         void copyWithToast(lines.join("\n"), "Diagnostics report copied to clipboard!");
+    };
+
+    const copyStartupReport = () => {
+        const worst = startTimings.slowest[0];
+        const lines = [
+            "Startup Timings Report",
+            `Plugins measured: ${startTimings.measured}`,
+            `Total start time: ${startTimings.total.toFixed(1)} ms`,
+            `Mean per plugin: ${startTimings.mean.toFixed(2)} ms`,
+            `Failed to start: ${startTimings.failed}`,
+            "",
+            worst
+                ? `Slowest: ${worst.name} at ${worst.duration.toFixed(1)} ms (${(worst.duration / (startTimings.mean || 1)).toFixed(1)}x the mean)`
+                : "Slowest: no data",
+            "",
+            `${startupSort === "duration" ? "Sorted by duration" : "In start order"}:`,
+            "# | Plugin | Duration (ms) | Share of total | Result",
+            ...startupRows.map(e => [
+                e.order + 1,
+                e.name,
+                e.duration.toFixed(2),
+                `${((e.duration / (startTimings.total || 1)) * 100).toFixed(1)}%`,
+                e.success ? "ok" : "FAILED"
+            ].join(" | "))
+        ];
+        void copyWithToast(lines.join("\n"), "Startup timings report copied to clipboard!");
     };
 
     const copyImpactReport = () => {
@@ -1442,13 +1473,22 @@ function HealthTab() {
 
     const profiles = useMemo(() => PluginProfiler.getAllProfiles(), [tick]);
 
+    // Client Diagnostics can report either the rolling window or the whole session. The
+    // window is the live "what is slow right now" view; the session view is the only one
+    // that still shows a plugin which burned time during boot and has since gone quiet,
+    // because the window counters are wiped every PROFILE_WINDOW_MS.
+    const diagProfiles = useMemo(
+        () => diagScope === "session" ? PluginProfiler.getAllProfiles("session") : profiles,
+        [profiles, diagScope]
+    );
+
     // Diagnostics/Monitor only render on their own sub-tab, but their memos ran on every
     // profiler tick regardless. Each one filters and sorts ~400 profile rows, so the
     // Overview tab was paying for two tables it never showed, twice a second.
     const diagRows = useMemo(() => {
         if (activeTab !== "diagnostics") return [];
         const query = diagSearchQuery.toLowerCase();
-        return profiles
+        return diagProfiles
             .filter(p => p.pluginName.toLowerCase().includes(query))
             .sort((a, b) => {
                 const valA = a[sortColumn] as any;
@@ -1457,7 +1497,7 @@ function HealthTab() {
                 if (valA > valB) return sortDirection === "asc" ? 1 : -1;
                 return 0;
             });
-    }, [profiles, diagSearchQuery, sortColumn, sortDirection, activeTab]);
+    }, [diagProfiles, diagSearchQuery, sortColumn, sortDirection, activeTab]);
 
     const monitorRows = useMemo(() => {
         if (activeTab !== "monitor") return [];
@@ -1506,15 +1546,29 @@ function HealthTab() {
         return { score, rating, unstable, flaky, quarantined, crashesDay, unstablePlugins, flakyPlugins };
     }, [tick, enabledSet, ignoreSourceHealth, ignoreSourceHistory]);
 
-    // Startup timeline from PluginManager's per-plugin start measurements.
+    // Startup timeline from PluginManager's per-plugin start measurements. The map is
+    // insertion-ordered and entries are written the moment a plugin finishes starting, so
+    // that order is the real start sequence rather than an alphabetical guess.
     const startTimings = useMemo(() => {
-        const entries = Array.from(pluginStartTimings.entries(), ([name, t]) => ({ name, ...t }));
+        const entries = Array.from(pluginStartTimings.entries(), ([name, t], i) => ({ name, ...t, order: i }));
         const total = entries.reduce((acc, e) => acc + e.duration, 0);
         const slowest = [...entries].sort((a, b) => b.duration - a.duration).slice(0, 10);
         const failed = entries.filter(e => !e.success).length;
-        const max = slowest[0]?.duration ?? 0;
-        return { total, slowest, failed, measured: entries.length, max };
+        const max = entries.reduce((acc, e) => Math.max(acc, e.duration), 0);
+        // Mean over the measured set, used to flag what is genuinely an outlier rather
+        // than just the top of a long tail.
+        const mean = entries.length ? total / entries.length : 0;
+        return { entries, total, slowest, failed, measured: entries.length, max, mean };
     }, [tick]);
+
+    const startupRows = useMemo(() => {
+        if (activeTab !== "startup") return [];
+        const query = startupSearchQuery.toLowerCase();
+        const filtered = startTimings.entries.filter(e => e.name.toLowerCase().includes(query));
+        return startupSort === "duration"
+            ? [...filtered].sort((a, b) => b.duration - a.duration)
+            : filtered;
+    }, [startTimings, startupSearchQuery, startupSort, activeTab]);
 
     // "What changed since the last healthy session?" — diffs the enabled
     // plugin set and newly-broken plugins against the most recent session
@@ -1687,6 +1741,12 @@ function HealthTab() {
                     onClick={() => setActiveTab("monitor")}
                 >
                     Plugin monitor
+                </button>
+                <button
+                    className={`vc-health-nav-item ${activeTab === "startup" ? "vc-health-nav-item-active" : ""}`}
+                    onClick={() => setActiveTab("startup")}
+                >
+                    Startup Timings
                 </button>
                 <button
                     className={`vc-health-nav-item ${activeTab === "finder" ? "vc-health-nav-item-active" : ""}`}
@@ -2017,7 +2077,9 @@ function HealthTab() {
                         </div>
                         <div className="vc-health-stat-card">
                             <div className="vc-health-stat-value">{totalCpuTimeMs.toFixed(1)} ms</div>
-                            <div className="vc-health-stat-label">Callback time (max {PROFILE_WINDOW_SECONDS}s)</div>
+                            <div className="vc-health-stat-label">
+                                Callback time ({diagScope === "session" ? "whole session" : `max ${PROFILE_WINDOW_SECONDS}s`})
+                            </div>
                         </div>
                         <div className="vc-health-stat-card">
                             <div className="vc-health-stat-value">{totalActiveResources}</div>
@@ -2030,7 +2092,9 @@ function HealthTab() {
                     </div>
 
                     <Paragraph color="text-subtle" className={Margins.bottom16}>
-                        CPU, call, spike, and heap-allocation counters cover the current {PROFILE_WINDOW_SECONDS}-second window. Resources are live counts and are not reset with the window.
+                        {diagScope === "session"
+                            ? "Counters cover the entire session, including work done during startup, so a plugin that was only expensive while booting still shows up here."
+                            : `CPU, call, spike, and heap-allocation counters cover the current ${PROFILE_WINDOW_SECONDS}-second window. Switch to Whole session to see anything that has already rolled off. Resources are live counts and are not reset with the window.`}
                     </Paragraph>
 
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
@@ -2041,7 +2105,23 @@ function HealthTab() {
                                 onChange={(val: string) => setDiagSearchQuery(val)}
                             />
                         </div>
-                        <div style={{ display: "flex", gap: "0.5rem" }}>
+                        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                            <div className="vc-health-scope-toggle" role="group" aria-label="Reporting range">
+                                <button
+                                    className={`vc-health-scope-btn ${diagScope === "window" ? "vc-health-scope-btn-active" : ""}`}
+                                    onClick={() => setDiagScope("window")}
+                                    title={`Counters from the last ${PROFILE_WINDOW_SECONDS} seconds only. Anything slower than that has already rolled off.`}
+                                >
+                                    Realtime
+                                </button>
+                                <button
+                                    className={`vc-health-scope-btn ${diagScope === "session" ? "vc-health-scope-btn-active" : ""}`}
+                                    onClick={() => setDiagScope("session")}
+                                    title="Totals for the whole session, including work done during startup."
+                                >
+                                    Whole session
+                                </button>
+                            </div>
                             <Button
                                 size="small"
                                 variant="secondary"
@@ -2471,6 +2551,175 @@ function HealthTab() {
 
                             </div>
                         )}
+                    </div>
+                </div>
+            )}
+
+            {/* TAB: STARTUP TIMINGS */}
+            {activeTab === "startup" && (
+                <div className="vc-health-tab-content">
+                    <Paragraph color="text-subtle" className={Margins.bottom20}>
+                        Wall-clock time each plugin's <code>start()</code> took, in the order they were started.
+                        Patch application and lazy webpack lookups are not included, so this only accounts for
+                        part of your boot time.
+                    </Paragraph>
+
+                    <div className="vc-health-stats-grid">
+                        <div className="vc-health-stat-card">
+                            <div className="vc-health-stat-value">{startTimings.measured}</div>
+                            <div className="vc-health-stat-label">Plugins started</div>
+                        </div>
+                        <div className="vc-health-stat-card">
+                            <div className="vc-health-stat-value">{startTimings.total.toFixed(0)} ms</div>
+                            <div className="vc-health-stat-label">Total measured</div>
+                        </div>
+                        <div className="vc-health-stat-card">
+                            <div className="vc-health-stat-value">{startTimings.mean.toFixed(2)} ms</div>
+                            <div className="vc-health-stat-label">Mean per plugin</div>
+                        </div>
+                        <div className="vc-health-stat-card">
+                            <div className="vc-health-stat-value">
+                                {startTimings.slowest[0]
+                                    ? `${startTimings.slowest[0].duration.toFixed(1)} ms`
+                                    : "—"}
+                            </div>
+                            <div className="vc-health-stat-label">
+                                Slowest{startTimings.slowest[0] ? ` (${startTimings.slowest[0].name})` : ""}
+                            </div>
+                        </div>
+                        <div className="vc-health-stat-card">
+                            <div className="vc-health-stat-value">{startTimings.failed}</div>
+                            <div className="vc-health-stat-label">Failed to start</div>
+                        </div>
+                    </div>
+
+                    {startTimings.slowest[0] && startTimings.max > 0 && (
+                        <div className={Margins.bottom20} style={{ marginTop: "1rem" }}>
+                            <Paragraph color="text-subtle" className={Margins.bottom8}>
+                                Most expensive
+                            </Paragraph>
+                            {startTimings.slowest.slice(0, 5).map(e => (
+                                <div key={e.name} style={{ marginBottom: "0.35rem" }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.8rem" }}>
+                                        <span>{e.name}</span>
+                                        <span>
+                                            {e.duration.toFixed(1)} ms
+                                            {startTimings.mean > 0 && (
+                                                <span style={{ color: "var(--text-muted)" }}>
+                                                    {" "}({(e.duration / startTimings.mean).toFixed(1)}x mean)
+                                                </span>
+                                            )}
+                                        </span>
+                                    </div>
+                                    <div style={{ height: "6px", background: "var(--background-modifier-accent)", borderRadius: "3px", overflow: "hidden" }}>
+                                        <div style={{
+                                            width: `${Math.max(2, (e.duration / startTimings.max) * 100)}%`,
+                                            height: "100%",
+                                            background: e.duration > startTimings.mean * 5
+                                                ? "var(--text-warning)"
+                                                : "var(--brand-experiment)"
+                                        }} />
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {startTimings.failed > 0 && (
+                        <Paragraph color="text-danger" className={Margins.bottom16}>
+                            {startTimings.failed} plugin{startTimings.failed === 1 ? "" : "s"} failed to start this session.
+                        </Paragraph>
+                    )}
+
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
+                        <div style={{ flex: 1 }}>
+                            <TextInput
+                                placeholder="Filter plugins by name..."
+                                value={startupSearchQuery}
+                                onChange={(val: string) => setStartupSearchQuery(val)}
+                            />
+                        </div>
+                        <div style={{ display: "flex", gap: "0.5rem" }}>
+                            <div className="vc-health-scope-toggle" role="group" aria-label="Sort order">
+                                <button
+                                    className={`vc-health-scope-btn ${startupSort === "order" ? "vc-health-scope-btn-active" : ""}`}
+                                    onClick={() => setStartupSort("order")}
+                                >
+                                    Start order
+                                </button>
+                                <button
+                                    className={`vc-health-scope-btn ${startupSort === "duration" ? "vc-health-scope-btn-active" : ""}`}
+                                    onClick={() => setStartupSort("duration")}
+                                >
+                                    Slowest first
+                                </button>
+                            </div>
+                            <Button
+                                size="small"
+                                variant="secondary"
+                                onClick={copyStartupReport}
+                                disabled={startupRows.length === 0}
+                            >
+                                Copy report
+                            </Button>
+                        </div>
+                    </div>
+
+                    <div className="vc-health-table-wrapper">
+                        <table className="vc-health-table">
+                            <colgroup>
+                                <col style={{ width: "6%" }} />
+                                <col style={{ width: "34%" }} />
+                                <col style={{ width: "14%" }} />
+                                <col style={{ width: "30%" }} />
+                                <col style={{ width: "16%" }} />
+                            </colgroup>
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Plugin</th>
+                                    <th>Duration</th>
+                                    <th>Share of total start time</th>
+                                    <th>Result</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {startupRows.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={5} style={{ textAlign: "center", padding: "1.5rem", color: "var(--text-muted)" }}>
+                                            {startTimings.measured === 0
+                                                ? "No startup measurements yet. They are recorded as plugins start, so reload to populate this."
+                                                : "No plugins match that filter."}
+                                        </td>
+                                    </tr>
+                                ) : startupRows.map(e => (
+                                    <tr key={e.name}>
+                                        <td style={{ color: "var(--text-muted)" }}>{e.order + 1}</td>
+                                        <td>{e.name}</td>
+                                        <td>{e.duration.toFixed(2)} ms</td>
+                                        <td>
+                                            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                                                <div style={{ flex: 1, height: "6px", background: "var(--background-modifier-accent)", borderRadius: "3px", overflow: "hidden" }}>
+                                                    <div style={{
+                                                        width: `${Math.max(1, (e.duration / (startTimings.max || 1)) * 100)}%`,
+                                                        height: "100%",
+                                                        background: e.duration > startTimings.mean * 5
+                                                            ? "var(--text-warning)"
+                                                            : "var(--brand-experiment)"
+                                                    }} />
+                                                </div>
+                                                <span style={{ minWidth: "3.2rem", textAlign: "right", color: "var(--text-muted)" }}>
+                                                    {((e.duration / (startTimings.total || 1)) * 100).toFixed(1)}%
+                                                </span>
+                                            </div>
+                                        </td>
+                                        <td style={{ color: e.success ? "var(--text-positive)" : "var(--text-danger)" }}>
+                                            {e.success ? "ok" : "failed"}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             )}
