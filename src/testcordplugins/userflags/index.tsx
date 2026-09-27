@@ -11,6 +11,28 @@ import definePlugin from "@utils/types";
 import { Parser, React, Text } from "@webpack/common";
 
 const DATA_KEY = "UserFlags_data";
+const LEGACY_KEY = "USERFLAGS";
+
+/** the old build wrote the Map itself, which came back from idb as either a Map or a string */
+async function load(): Promise<Map<string, Flag>> {
+    const legacy = await DataStore.get(LEGACY_KEY);
+    if (legacy) {
+        const restored = new Map<string, Flag>(
+            (typeof legacy === "string" ? JSON.parse(legacy) : Array.from(legacy as Map<string, Flag>)) as [string, Flag][]
+        );
+
+        await DataStore.set(DATA_KEY, [...restored]);
+        await DataStore.del(LEGACY_KEY);
+        return restored;
+    }
+
+    const entries = await DataStore.get(DATA_KEY);
+    return new Map(
+        (Array.isArray(entries) ? entries : []).filter(
+            (entry): entry is [string, Flag] => Array.isArray(entry) && typeof entry[0] === "string"
+        )
+    );
+}
 
 const FlagType = {
     danger: { label: "Danger", color: "#ff7473", emoji: "\u{1F6D1}" },
@@ -81,13 +103,7 @@ export default definePlugin({
     authors: [TestcordDevs.x2b],
 
     async start() {
-        const stored = await DataStore.get(DATA_KEY);
-        const entries = Array.isArray(stored) ? stored : [];
-
-        flags = new Map(
-            entries.filter((entry): entry is [string, Flag] => Array.isArray(entry) && typeof entry[0] === "string")
-        );
-
+        flags = await load();
         this.addMessageAccessory(4, props => <FlagBadge userId={props.message.author.id} />);
     },
 

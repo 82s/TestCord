@@ -28,12 +28,12 @@ const settings = definePluginSettings({
         type: OptionType.BOOLEAN,
         default: true
     }
-}).withPrivateSettings<{ lastSeen: string }>();
+}).withPrivateSettings<{ lSeenUserID: string }>();
 
 function substituteAlias(content: string) {
-    const { alias, lastSeen } = settings.plain;
-    if (!alias || !lastSeen) return content;
-    return content.replaceAll(`@${alias}`, `<@${lastSeen}>`);
+    const { alias, lSeenUserID } = settings.plain;
+    if (!alias || !lSeenUserID) return content;
+    return content.replaceAll(`@${alias}`, `<@${lSeenUserID}>`);
 }
 
 export default definePlugin({
@@ -57,10 +57,10 @@ export default definePlugin({
             if (authorId === UserStore.getCurrentUser()?.id) return;
 
             const watched = settings.plain.ids.split(",").some(id => id.trim() === authorId);
-            if (!watched || settings.plain.lastSeen === authorId) return;
+            if (!watched || settings.plain.lSeenUserID === authorId) return;
 
-            const previous = settings.store.lastSeen;
-            settings.store.lastSeen = authorId;
+            const previous = settings.plain.lSeenUserID;
+            settings.store.lSeenUserID = authorId;
 
             if (settings.plain.notify) {
                 showToast(
@@ -75,15 +75,15 @@ export default definePlugin({
 
     commands: [
         {
-            name: "antinamechange",
-            description: "Open the profile of the account currently in use",
+            name: "profile",
+            description: "Open the profile of your friend who keeps changing accounts",
             execute() {
-                const { lastSeen } = settings.plain;
-                if (!lastSeen) {
+                const { lSeenUserID } = settings.plain;
+                if (!lSeenUserID) {
                     showToast("No tracked account has been seen yet", Toasts.Type.FAILURE);
                     return;
                 }
-                openUserProfile(lastSeen);
+                openUserProfile(lSeenUserID);
             }
         }
     ]

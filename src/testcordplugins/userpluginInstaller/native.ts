@@ -49,6 +49,13 @@ function gitPath() {
     return NativeSettings.store.plugins?.UserpluginInstaller?.gitPath || "git";
 }
 
+export async function setGitPath(_: unknown, path: string) {
+    if (!NativeSettings.store.plugins.UserpluginInstaller) {
+        NativeSettings.store.plugins.UserpluginInstaller = { gitPath: undefined };
+    }
+    NativeSettings.store.plugins.UserpluginInstaller.gitPath = path.trim() || undefined;
+}
+
 /** argv arrays only, never a shell string, so a configured path cannot smuggle in commands */
 function run(command: string, args: string[], cwd: string) {
     return new Promise<{ code: number; out: string; err: string }>((resolve, reject) => {
@@ -133,7 +140,7 @@ export async function clonePlugin(_: unknown, link: string): Promise<PluginMeta>
     const target = pluginDir(parsed.repo);
     if (existsSync(target)) throw new Error(`${parsed.repo} is already installed`);
 
-    const { code, err } = await git(["clone", "--depth", "1", parsed.link], userpluginsDir());
+    const { code, err } = await git(["clone", parsed.link], userpluginsDir());
     if (code !== 0) {
         await rm(target, { recursive: true, force: true });
         throw new Error(err.trim() || `git clone exited with ${code}`);

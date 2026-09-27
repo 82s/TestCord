@@ -16,6 +16,7 @@ import definePlugin, { OptionType } from "@utils/types";
 import { MessageStore, Parser, showToast, Toasts, UserStore } from "@webpack/common";
 
 const DATA_KEY = "ReactionTracker_data";
+const LEGACY_KEY = "huskchart";
 const DEFAULT_LABEL = "reaction";
 
 interface Counts {
@@ -25,6 +26,20 @@ interface Counts {
 
 function emptyCounts(): Counts {
     return { users: {}, channels: {} };
+}
+
+/** the old build kept a 5000 entry event log under `huskchart`, this folds its totals in */
+async function migrateLegacy() {
+    const legacy = await DataStore.get(LEGACY_KEY);
+    if (!legacy || typeof legacy !== "object") return null;
+
+    const { userCounts, channelCounts } = legacy as { userCounts?: Record<string, number>; channelCounts?: Record<string, number> };
+    if (!userCounts && !channelCounts) return null;
+
+    const migrated = { users: { ...userCounts }, channels: { ...channelCounts } };
+    await DataStore.set(DATA_KEY, migrated);
+    await DataStore.del(LEGACY_KEY);
+    return migrated;
 }
 
 function normalize(value: unknown): Counts {
@@ -86,7 +101,10 @@ function Leaderboard({ title, counts, mention }: { title: string; counts: Record
 }
 
 function Stats() {
-    const [counts] = useAwaiter(async () => normalize(await DataStore.get(DATA_KEY)), { fallbackValue: emptyCounts() });
+    const [counts] = useAwaiter(
+        async () => (await migrateLegacy()) ?? normalize(await DataStore.get(DATA_KEY)),
+        { fallbackValue: emptyCounts() }
+    );
 
     if (Object.keys(counts.users).length === 0) {
         return <p className="vc-reactiontracker-empty">Nothing tracked yet.</p>;

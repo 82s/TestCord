@@ -16,6 +16,8 @@ const API_VERSION = "1.16.1";
 export const APPLICATION_ID = "1396969056136986775";
 
 const PASSWORD_KEY = "NavidromeRPC_password";
+/** the previous build kept this in localStorage under this exact key */
+const LEGACY_PASSWORD_KEY = "vc-navidrome-rpc-password";
 
 export interface NowPlaying {
     id: string;
@@ -29,7 +31,16 @@ export interface NowPlaying {
 }
 
 export async function getPassword() {
-    return (await DataStore.get(PASSWORD_KEY)) ?? "";
+    const stored = await DataStore.get(PASSWORD_KEY);
+    if (stored) return stored;
+
+    const legacy = window.localStorage.getItem(LEGACY_PASSWORD_KEY);
+    if (legacy) {
+        await DataStore.set(PASSWORD_KEY, legacy);
+        window.localStorage.removeItem(LEGACY_PASSWORD_KEY);
+    }
+
+    return legacy ?? "";
 }
 
 export function setPassword(password: string) {

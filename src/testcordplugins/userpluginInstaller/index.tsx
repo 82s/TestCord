@@ -11,68 +11,63 @@ import { definePluginSettings } from "@api/Settings";
 import { Button } from "@components/Button";
 import { ErrorCard } from "@components/ErrorCard";
 import { Flex } from "@components/Flex";
+import { PluginsIcon } from "@components/Icons";
 import { Paragraph } from "@components/Paragraph";
+import SettingsPlugin from "@plugins/_core/settings";
 import { TestcordDevs } from "@utils/constants";
 import { ModalContent, ModalFooter, ModalHeader, ModalRoot, ModalSize, openModal } from "@utils/modal";
 import { useAwaiter, useForceUpdater } from "@utils/react";
-import definePlugin, { OptionType, PluginNative } from "@utils/types";
+import definePlugin, { OptionType, PluginNative, StartAt } from "@utils/types";
 import { showToast, Toasts, useState } from "@webpack/common";
 
 import { type Commit, isRepoLink, type PluginMeta } from "./repo";
 
 const Native = VencordNative.pluginHelpers.UserpluginInstaller as PluginNative<typeof import("./native")>;
 
+const WHITELISTED_SHARE_CHANNELS = ["1256395889354997771", "1032200195582197831", "1301947896601509900", "1322935137591365683"];
+
 const settings = definePluginSettings({
-    channels: {
+    allowlistedChannels: {
         description: "Only offer the install button in these channels (comma separated, empty for all)",
         type: OptionType.STRING,
-        default: ""
+        default: WHITELISTED_SHARE_CHANNELS.join(",")
     },
-    notifyOnUpdate: {
+    notifyIfUpdate: {
         description: "Tell me when an installed plugin has updates waiting",
         type: OptionType.BOOLEAN,
         default: true
     },
-    ignoreUpdates: {
+    neverNotifyForPlugins: {
         description: "Never notify about updates for these plugins (comma separated)",
         type: OptionType.STRING,
         default: ""
     },
-    git: {
-        type: OptionType.COMPONENT,
-        description: "Git has to be installed and reachable for any of this to work",
-        component: () => (
-            <Flex gap="4px">
-                <Button
-                    variant="secondary"
-                    size="small"
-                    onClick={async () => {
-                        try {
-                            showToast(`Found ${await Native.checkGit()}`, Toasts.Type.SUCCESS);
-                        } catch (error) {
-                            showToast((error as Error).message, Toasts.Type.FAILURE);
-                        }
-                    }}
-                >
-                    Check git
-                </Button>
-                <Button
-                    variant="secondary"
-                    size="small"
-                    onClick={async () => {
-                        await Native.ensurePluginsDirectory();
-                        showToast("The userplugins folder is ready", Toasts.Type.SUCCESS);
-                    }}
-                >
-                    Create the folder
-                </Button>
-            </Flex>
-        )
+    gitPath: {
+        type: OptionType.STRING,
+        description: "Path to git, if it is not on your PATH. Leave empty to use whatever git resolves to.",
+        default: "",
+        // git runs in the main process, so mirror it into the store that side reads
+        async onChange(value) {
+            await Native.setGitPath(value);
+        }
     },
-    installed: {
+    checkGit: {
         type: OptionType.COMPONENT,
-        description: "Plugins you have installed",
-        component: InstalledPlugins
+        description: "",
+        component: () => (
+            <Button
+                variant="secondary"
+                onClick={async () => {
+                    try {
+                        showToast(`Found ${await Native.checkGit()}`, Toasts.Type.SUCCESS);
+                    } catch (error) {
+                        showToast((error as Error).message, Toasts.Type.FAILURE);
+                    }
+                }}
+            >
+                Check git
+            </Button>
+        )
     }
 });
 
@@ -213,9 +208,28 @@ export default definePlugin({
     tags: ["Utility", "Developers"],
     authors: [TestcordDevs.x2b],
     settings,
+    startAt: StartAt.WebpackReady,
 
-    async start() {
-        const ignored = listed(settings.plain.ignoreUpdates).map(entry => entry.toLowerCase());
+    start() {
+        if (!SettingsPlugin.customEntries.some(entry => entry.key === "vencord_userplugins")) {
+            SettingsPlugin.customEntries.push({
+                key: "vencord_userplugins",
+                title: "UserPlugins",
+                Component: InstalledPlugins,
+                Icon: PluginsIcon
+            });
+        }
+
+        void this.checkForUpdates();
+    },
+
+    stop() {
+        const index = SettingsPlugin.customEntries.findIndex(entry => entry.key === "vencord_userplugins");
+        if (index !== -1) SettingsPlugin.customEntries.splice(index, 1);
+    },
+
+    async checkForUpdates() {
+        const ignored = listed(settings.plain.neverNotifyForPlugins).map(entry => entry.toLowerCase());
         const plugins = await Native.getUserplugins();
 
         const stale: string[] = [];
@@ -224,7 +238,7 @@ export default definePlugin({
             if (await Native.hasUpdates(plugin.directory)) stale.push(plugin.name);
         }
 
-        if (stale.length === 0 || !settings.plain.notifyOnUpdate) return;
+        if (stale.length === 0 || !settings.plain.notifyIfUpdate) return;
 
         showNotification({
             title: "Userplugin updates available",
@@ -233,8 +247,8 @@ export default definePlugin({
     },
 
     renderMessageAccessory: props => {
-        const { channels } = settings.plain;
-        if (channels && !listed(channels).includes(props.message.channel_id)) return null;
+        const { allowlistedChannels } = settings.plain;
+        if (allowlistedChannels && !listed(allowlistedChannels).includes(props.message.channel_id)) return null;
 
         const links = (props.message.content ?? "").match(/https:\/\/\S+/g) ?? [];
         const repos = links.filter(isRepoLink);

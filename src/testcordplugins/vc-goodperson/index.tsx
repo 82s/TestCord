@@ -4,38 +4,35 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import "./style.css";
-
 import { definePluginSettings } from "@api/Settings";
-import ErrorBoundary from "@components/ErrorBoundary";
 import { TestcordDevs } from "@utils/constants";
 import { escapeRegExp } from "@utils/text";
 import definePlugin, { OptionType } from "@utils/types";
-import { UserStore } from "@webpack/common";
+import { FluxDispatcher } from "@webpack/common";
 
 const CATEGORIES = {
-    slurs: {
+    blockSlurs: {
         label: "Slurs",
         nouns: ["retard", "retarded", "faggot", "fag", "tranny", "spic", "wetback", "chink", "kike", "coon", "gook", "paki"],
         verbs: [],
         patterns: ["\\bn[i1!]{1,2}g[a@3e]{2,}\\w*"]
     },
-    sexual: {
+    blockSexual: {
         label: "Sexual terms",
         nouns: ["cum", "cunt", "dick", "pussy", "slut", "whore", "boobs", "boobies", "tits", "blowjob", "porn", "boner"],
         verbs: ["fuck", "fucks", "fucking", "cumming"]
     },
-    insults: {
+    blockInsults: {
         label: "General insults",
         nouns: ["idiot", "moron", "imbecile", "dumbass", "loser", "pathetic", "worthless", "garbage", "trash"],
         verbs: ["kill", "murder", "destroy", "ruin", "obliterate"]
     },
-    brainrot: {
+    blockBrainrot: {
         label: "Brainrot",
         nouns: ["skibidi", "gyatt", "rizzler", "rizz", "mewing", "mew", "ohio", "boykisser", "nettspend", "hawk tuah"],
         verbs: []
     },
-    annoyances: {
+    blockOthers: {
         label: "Personal annoyances",
         nouns: ["kotlin", "avast", "iphone", "apple music"],
         verbs: []
@@ -57,41 +54,38 @@ const VERBS = [
     "free", "feed", "water", "high five", "respect", "admire", "thank", "comfort", "welcome"
 ] as const;
 
+const NOTE = "\n-# **GoodPerson made this message good. Reload your client to clear changes**";
+
 const settings = definePluginSettings({
-    filterOutgoing: {
-        description: "Clean up the messages I send",
+    incoming: {
+        description: "Filter incoming messages",
         type: OptionType.BOOLEAN,
         default: true
     },
-    markIncoming: {
-        description: "Point out messages from other people that needed cleaning",
+    blockSlurs: {
+        description: "Block targeted slurs",
         type: OptionType.BOOLEAN,
         default: true
     },
-    slurs: {
-        description: CATEGORIES.slurs.label,
+    blockSexual: {
+        description: "Block sexual words",
         type: OptionType.BOOLEAN,
         default: true
     },
-    sexual: {
-        description: CATEGORIES.sexual.label,
+    blockInsults: {
+        description: "Block more general insults",
         type: OptionType.BOOLEAN,
         default: true
     },
-    insults: {
-        description: CATEGORIES.insults.label,
+    blockBrainrot: {
+        description: "Block things commonly said by Gen Alpha children",
         type: OptionType.BOOLEAN,
         default: true
     },
-    brainrot: {
-        description: CATEGORIES.brainrot.label,
+    blockOthers: {
+        description: "Block other personally disliked words",
         type: OptionType.BOOLEAN,
-        default: false
-    },
-    annoyances: {
-        description: CATEGORIES.annoyances.label,
-        type: OptionType.BOOLEAN,
-        default: false
+        default: true
     }
 });
 
@@ -111,47 +105,29 @@ interface Rule {
     pool: readonly string[];
 }
 
-interface Compiled {
-    key: string;
-    /** one stateless probe per category, for deciding whether a message needs cleaning at all */
-    probes: { key: CategoryKey; regex: RegExp }[];
-    rules: Rule[];
-}
-
 /**
  * Module scope on purpose. The settings store is persisted as JSON, and a RegExp does not
  * survive that: it comes back as a truthy `{}` that matches nothing, which silently disables
  * the whole plugin until a setting is toggled.
  */
-let compiled: Compiled = { key: "", probes: [], rules: [] };
+let compiled: { key: string; rules: Rule[] } = { key: "", rules: [] };
 
 function compile() {
     const active = enabled();
     const key = active.join(",");
     if (compiled.key === key) return;
 
-    const probes: Compiled["probes"] = [];
     const rules: Rule[] = [];
 
     for (const name of active) {
         const { nouns, verbs, patterns = [] } = category(name);
-
-        // the probe needs the same word boundaries as the replacement rules, otherwise it
-        // reports "cum" inside "circumference" as a hit and the note shows on untouched text
-        const parts = [
-            nouns.length ? `\\b(?:${alternation(nouns)})\\b` : "",
-            verbs.length ? `\\b(?:${alternation(verbs)})\\b` : "",
-            ...patterns
-        ].filter(Boolean);
-
-        probes.push({ key: name, regex: new RegExp(parts.join("|"), "i") });
 
         if (nouns.length) rules.push({ regex: words(nouns), pool: NOUNS });
         if (verbs.length) rules.push({ regex: words(verbs), pool: VERBS });
         if (patterns.length) rules.push({ regex: new RegExp(`(${patterns.join("|")})`, "gi"), pool: NOUNS });
     }
 
-    compiled = { key, probes, rules };
+    compiled = { key, rules };
 }
 
 const pick = (pool: readonly string[]) => pool[Math.floor(Math.random() * pool.length)];
@@ -182,50 +158,44 @@ function cleanSegment(text: string) {
     return out;
 }
 
-function clean(content: string) {
+export function clean(content: string) {
     compile();
     if (compiled.rules.length === 0) return content;
 
     return split(content).map(part => (part.code ? part.text : cleanSegment(part.text))).join("");
 }
 
-function needsCleaning(content: string) {
-    compile();
-    return split(content).some(part => !part.code && compiled.probes.some(({ regex }) => regex.test(part.text)));
-}
-
-function matchedCategories(content: string) {
-    compile();
-    return compiled.probes.filter(({ regex }) => regex.test(content)).map(({ key }) => category(key).label.toLowerCase());
-}
-
-const Note = ErrorBoundary.wrap(function GoodPersonNote({ content }: { content: string }) {
-    const hits = matchedCategories(content);
-    if (hits.length === 0) return null;
-
-    return (
-        <span className="vc-goodperson-note">
-            {`GoodPerson softened this: ${hits.join(", ")}`}
-        </span>
-    );
-}, { noop: true });
-
 export default definePlugin({
     name: "GoodPerson",
-    description: "Softens the language in what you send, and points it out when others do the same",
+    description: "Makes you (or others) a good person",
     tags: ["Utility", "Fun"],
     authors: [TestcordDevs.x2b],
     settings,
 
     onBeforeMessageSend(_channelId, message) {
-        if (settings.plain.filterOutgoing) message.content = clean(message.content);
+        message.content = clean(message.content);
     },
 
-    renderMessageDecoration: ({ message }) => {
-        if (!settings.plain.markIncoming) return null;
-        if (message.author.id === UserStore.getCurrentUser()?.id) return null;
-        if (!needsCleaning(message.content)) return null;
+    flux: {
+        MESSAGE_CREATE({ guildId, message }) {
+            if (!settings.plain.incoming) return;
 
-        return <Note content={message.content} />;
+            const cleaned = clean(message.content);
+            if (cleaned === message.content) return;
+
+            message.content = cleaned + NOTE;
+            FluxDispatcher.dispatch({ type: "MESSAGE_UPDATE", message, guildId });
+        },
+
+        MESSAGE_UPDATE({ guildId, message }) {
+            if (!settings.plain.incoming) return;
+            if (message.content.includes(NOTE)) return;
+
+            const cleaned = clean(message.content);
+            if (cleaned === message.content) return;
+
+            message.content = cleaned + NOTE;
+            FluxDispatcher.dispatch({ type: "MESSAGE_UPDATE", message, guildId });
+        }
     }
 });

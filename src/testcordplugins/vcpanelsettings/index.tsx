@@ -14,15 +14,10 @@ import definePlugin, { OptionType } from "@utils/types";
 import { FluxDispatcher, MediaEngineStore, Select, Slider, Text, useState, useStateFromStores } from "@webpack/common";
 
 const settings = definePluginSettings({
-    expandedByDefault: {
+    uncollapseSettingsByDefault: {
         description: "Show the controls expanded instead of behind a toggle",
         type: OptionType.BOOLEAN,
         default: false
-    },
-    headers: {
-        description: "Label each control instead of prefixing it with an icon",
-        type: OptionType.BOOLEAN,
-        default: true
     },
     outputVolume: {
         description: "Show an output volume slider",
@@ -48,6 +43,31 @@ const settings = definePluginSettings({
         description: "Show a camera picker",
         type: OptionType.BOOLEAN,
         default: false
+    },
+    showOutputVolumeHeader: {
+        description: "Show a header above the output volume slider",
+        type: OptionType.BOOLEAN,
+        default: true
+    },
+    showInputVolumeHeader: {
+        description: "Show a header above the input volume slider",
+        type: OptionType.BOOLEAN,
+        default: true
+    },
+    showOutputDeviceHeader: {
+        description: "Show a header above the output device picker",
+        type: OptionType.BOOLEAN,
+        default: false
+    },
+    showInputDeviceHeader: {
+        description: "Show a header above the input device picker",
+        type: OptionType.BOOLEAN,
+        default: false
+    },
+    showVideoDeviceHeader: {
+        description: "Show a header above the camera picker",
+        type: OptionType.BOOLEAN,
+        default: false
     }
 });
 
@@ -55,18 +75,23 @@ function VolumeSlider({
     title,
     get,
     action,
-    max
+    max,
+    showHeader,
+    fallback
 }: {
     title: string;
     get: () => number;
     action: string;
     max: number;
+    showHeader: boolean;
+    fallback: string;
 }) {
     const value = useStateFromStores([MediaEngineStore], get);
 
     return (
         <>
-            {settings.plain.headers && <Text variant="heading-sm/medium">{title}</Text>}
+            {showHeader && <Text variant="heading-sm/medium">{title}</Text>}
+            {!showHeader && <Text variant="text-sm/medium">{fallback}</Text>}
             <Slider
                 minValue={0}
                 maxValue={max}
@@ -83,24 +108,26 @@ function DeviceSelect({
     icon,
     devices,
     selected,
-    action
+    action,
+    showHeader
 }: {
     title: string;
     icon: string;
     devices: Record<string, { id: string; name: string }>;
     selected: string | undefined;
     action: string;
+    showHeader: boolean;
 }) {
     const options = Object.values(devices).map(device => ({
         value: device.id,
-        label: settings.plain.headers ? device.name : `${icon} ${device.name}`
+        label: showHeader ? device.name : `${icon} ${device.name}`
     }));
 
     if (options.length === 0) return null;
 
     return (
         <>
-            {settings.plain.headers && <Text variant="heading-sm/medium">{title}</Text>}
+            {showHeader && <Text variant="heading-sm/medium">{title}</Text>}
             <Select
                 options={options}
                 serialize={identity}
@@ -112,8 +139,8 @@ function DeviceSelect({
 }
 
 function Controls() {
-    const { expandedByDefault, headers } = settings.plain;
-    const [expanded, setExpanded] = useState(expandedByDefault);
+    const { uncollapseSettingsByDefault } = settings.plain;
+    const [expanded, setExpanded] = useState(uncollapseSettingsByDefault);
 
     const outputDevice = useStateFromStores([MediaEngineStore], () => MediaEngineStore.getOutputDeviceId());
     const inputDevice = useStateFromStores([MediaEngineStore], () => MediaEngineStore.getInputDeviceId());
@@ -133,6 +160,8 @@ function Controls() {
                             get={MediaEngineStore.getOutputVolume}
                             action="AUDIO_SET_OUTPUT_VOLUME"
                             max={200}
+                            showHeader={settings.plain.showOutputVolumeHeader}
+                            fallback="🔊"
                         />
                     )}
                     {settings.plain.inputVolume && (
@@ -141,6 +170,8 @@ function Controls() {
                             get={MediaEngineStore.getInputVolume}
                             action="AUDIO_SET_INPUT_VOLUME"
                             max={100}
+                            showHeader={settings.plain.showInputVolumeHeader}
+                            fallback="🎤"
                         />
                     )}
                     {settings.plain.outputDevice && (
@@ -150,6 +181,7 @@ function Controls() {
                             devices={MediaEngineStore.getOutputDevices()}
                             selected={outputDevice}
                             action="AUDIO_SET_OUTPUT_DEVICE"
+                            showHeader={settings.plain.showOutputDeviceHeader}
                         />
                     )}
                     {settings.plain.inputDevice && (
@@ -159,6 +191,7 @@ function Controls() {
                             devices={MediaEngineStore.getInputDevices()}
                             selected={inputDevice}
                             action="AUDIO_SET_INPUT_DEVICE"
+                            showHeader={settings.plain.showInputDeviceHeader}
                         />
                     )}
                     {settings.plain.camera && (
@@ -168,6 +201,7 @@ function Controls() {
                             devices={MediaEngineStore.getVideoDevices()}
                             selected={videoDevice}
                             action="MEDIA_ENGINE_SET_VIDEO_DEVICE"
+                            showHeader={settings.plain.showVideoDeviceHeader}
                         />
                     )}
                 </div>

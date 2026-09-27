@@ -39,7 +39,7 @@ export const settings = definePluginSettings({
         type: OptionType.NUMBER,
         default: 1000
     },
-    showProgress: {
+    shouldCalculateTimestamps: {
         description: "Send start and end times so Discord can draw a progress bar",
         type: OptionType.BOOLEAN,
         default: false
@@ -69,7 +69,7 @@ function fill(template: string, track: NowPlaying) {
 }
 
 async function buildActivity(track: NowPlaying) {
-    const { name, showProgress, showArtwork } = settings.plain;
+    const { name, shouldCalculateTimestamps, showArtwork } = settings.plain;
 
     let largeImage: string | undefined;
     if (showArtwork && track.coverId) {
@@ -93,7 +93,7 @@ async function buildActivity(track: NowPlaying) {
         }
     };
 
-    if (showProgress) {
+    if (shouldCalculateTimestamps) {
         // the server only reports how many minutes ago a track started, so the start time is
         // pinned the first time we see a given track and held until the track actually changes
         if (settings.plain.trackId !== track.id) {
