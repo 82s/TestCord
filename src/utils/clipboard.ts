@@ -48,23 +48,38 @@ function copyViaSelection(text: string): Promise<void> {
 }
 
 export async function copyToClipboard(text: string): Promise<void> {
-    if (IS_DISCORD_DESKTOP && DiscordNative.clipboard?.copy) {
-        await DiscordNative.clipboard.copy(text);
+    // Captured once. Reading the property twice is not equivalent: on some clients
+    // `navigator.clipboard` is absent, and on others it is present for the guard and gone
+    // by the time the call is made, which is a TypeError on a bare `.writeText`.
+    const native = IS_DISCORD_DESKTOP ? DiscordNative.clipboard : undefined;
+    if (native?.copy) {
+        await native.copy(text);
         return;
     }
 
-    if (navigator.clipboard?.writeText) {
-        try {
-            await navigator.clipboard.writeText(text);
+    try {
+        const { clipboard } = navigator;
+        if (clipboard?.writeText) {
+            await clipboard.writeText(text);
             return;
-        } catch (e) {
-            logger.warn("navigator.clipboard.writeText was refused, falling back", e);
         }
+    } catch (e) {
+        logger.warn("navigator.clipboard was unusable, falling back", e);
     }
 
     return copyViaSelection(text);
 }
 
-export function readClipboard(): Promise<string> {
-    return IS_DISCORD_DESKTOP ? DiscordNative.clipboard.read() : navigator.clipboard.readText();
+export async function readClipboard(): Promise<string> {
+    const native = IS_DISCORD_DESKTOP ? DiscordNative.clipboard : undefined;
+    if (native?.read) return native.read();
+
+    try {
+        const { clipboard } = navigator;
+        if (clipboard?.readText) return await clipboard.readText();
+    } catch (e) {
+        logger.warn("navigator.clipboard was unusable for reading", e);
+    }
+
+    throw new Error("Reading the clipboard is not available on this client.");
 }
