@@ -6,6 +6,7 @@
 
 import { ApplicationCommandInputType, ApplicationCommandOptionType, findOption, sendBotMessage } from "@api/Commands";
 import { DataStore } from "@api/index";
+import { addMessageAccessory, removeMessageAccessory } from "@api/MessageAccessories";
 import { TestcordDevs } from "@utils/constants";
 import definePlugin from "@utils/types";
 import { Parser, React, Text } from "@webpack/common";
@@ -101,10 +102,11 @@ export default definePlugin({
     description: "Attach a label under a user's messages",
     tags: ["Utility", "Appearance"],
     authors: [TestcordDevs.x2b],
+    dependencies: ["MessageAccessoriesAPI"],
 
     async start() {
         flags = await load();
-        this.addMessageAccessory(4, props => <FlagBadge userId={props.message.author.id} />);
+        addMessageAccessory("UserFlags", props => <FlagBadge userId={props.message.author.id} />, 4);
     },
 
     stop() {
@@ -112,7 +114,7 @@ export default definePlugin({
             clearTimeout(flushTimer);
             flushTimer = undefined;
         }
-        this.removeMessageAccessory(4);
+        removeMessageAccessory("UserFlags");
     },
 
     commands: [

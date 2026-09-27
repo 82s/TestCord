@@ -3463,7 +3463,6 @@ export default definePlugin({
             Open Panel Layout Editor
         </Button>
     ),
-    required: true,
 
     patches: [
         {

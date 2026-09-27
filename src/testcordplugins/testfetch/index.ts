@@ -12,7 +12,6 @@ import { sendMessage } from "@utils/discord";
 import { tryOrElse } from "@utils/misc";
 import { makeCodeblock } from "@utils/text";
 import definePlugin, { PluginNative } from "@utils/types";
-import { findByCodeLazy } from "@webpack";
 import { GuildMemberStore, LocaleStore, ThemeStore, UserStore } from "@webpack/common";
 
 import { PluginMeta } from "~plugins";
@@ -44,7 +43,6 @@ const C_START = [10, 10, 10, 10, 10, 12];
 
 const COLOR_BAR = [40, 41, 42, 43, 44, 45, 46, 47].map(c => `\x1b[2;${c}m███`).join("") + RESET;
 
-const getVersions = findByCodeLazy("logsUploaded:new Date().toISOString(),");
 const ShowCurrentGame = getUserSettingLazy<boolean>("status", "showCurrentGame");
 
 function capitalize(text: string) {
@@ -107,7 +105,6 @@ function knownIssues() {
 
 async function collect() {
     const me = UserStore.getCurrentUser();
-    const versions = getVersions();
     const sys = await tryOrElse(() => Native?.getSystemInfo?.(), null);
     const { donor, contributor } = guildRoles();
 
@@ -115,7 +112,7 @@ async function collect() {
         user: me?.username ?? "unknown",
         version: `${VERSION} ~ ${gitHash} - ${Intl.DateTimeFormat(navigator.language, { dateStyle: "medium" }).format(BUILD_TIMESTAMP)}${IS_STANDALONE ? "" : " ~ dev"}`,
         client: `${capitalize(window.GLOBAL_ENV.RELEASE_CHANNEL)} ~ ${clientVersion()}`,
-        build: `${versions.buildNumber} ~ ${versions.versionHash?.slice(0, 7) ?? "unknown"}`,
+        build: `${window.GLOBAL_ENV.BUILD_NUMBER} ~ ${window.GLOBAL_ENV.VERSION_HASH.slice(0, 7)}`,
         issues: knownIssues(),
         os: operatingSystem(),
         cpu: sys ? `${sys.cores} cores (${sys.arch})` : "",

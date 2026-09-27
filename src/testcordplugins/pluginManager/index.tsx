@@ -176,15 +176,15 @@ export function PluginListModal({ modalProps }: { modalProps: ModalProps; }) {
     };
 
     const handleDisableAll = () => {
-        filteredPlugins.forEach(plugin => {
-            if (!plugin.required && !depMap[plugin.name]?.some(d => settings.plugins[d].enabled)) {
-                settings.plugins[plugin.name] = {
-                    ...settings.plugins[plugin.name],
-                    enabled: false
-                };
-                changes.handleChange(plugin.name);
-            }
-        });
+        for (const plugin of Object.values(Plugins)) {
+            if (!plugin?.name || plugin.required) continue;
+            if (!settings.plugins[plugin.name]?.enabled) continue;
+            settings.plugins[plugin.name] = {
+                ...settings.plugins[plugin.name],
+                enabled: false
+            };
+            changes.add(plugin.name);
+        }
     };
 
     return <ModalRoot {...modalProps} size={ModalSize.MEDIUM} >
