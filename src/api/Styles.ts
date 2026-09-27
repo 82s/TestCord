@@ -19,6 +19,7 @@
 import { generateTextCss } from "@components/BaseText";
 import { generateMarginCss } from "@components/margins";
 import { classNameFactory as _classNameFactory, classNameToSelector } from "@utils/css";
+import { removeFromArray } from "@utils/misc";
 
 // Backwards compat for Vesktop
 /** @deprecated Import this from `@utils/css` instead */
@@ -53,9 +54,37 @@ export const styleMap = window.VencordStyles ??= new Map();
 const managedStyleNode = document.createElement("style");
 let managedEnableCounter = 0;
 
-function composeManagedStyles() {
-    const enabled = [...styleMap.values()].filter(s => s.enabled).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-    managedStyleNode.textContent = enabled.map(s => s.compiled).join("\n");
+/**
+ * Enabled styles in cascade order, maintained on enable/disable instead of being rebuilt by
+ * filtering and sorting the whole map. `style.order` is a unique counter, so this is just
+ * that counter ascending.
+ */
+const enabledStyles: Style[] = [];
+
+/** Last string written to the node, so an unchanged compose costs no DOM write at all. */
+let composedCss = "";
+
+/**
+ * Assigning `textContent` reparses the entire concatenated sheet, so a run of toggles that
+ * all land before the next paint only needs to pay for one parse rather than one each.
+ * A microtask rather than `requestAnimationFrame`, because rAF does not fire in a
+ * backgrounded tab and the styles would then never be applied.
+ */
+let composeScheduled = false;
+
+function scheduleCompose() {
+    if (composeScheduled) return;
+    composeScheduled = true;
+
+    queueMicrotask(() => {
+        composeScheduled = false;
+
+        const css = enabledStyles.map(s => s.compiled).join("\n");
+        if (css === composedCss) return;
+
+        composedCss = css;
+        managedStyleNode.textContent = css;
+    });
 }
 
 export const vencordRootNode = document.createElement("vencord-root");
@@ -142,6 +171,13 @@ export function enableStyle(name: string) {
     style.enabled = true;
     if (style.order === undefined)
         style.order = managedEnableCounter++;
+
+    // Ascending `order` is the cascade, and the counter is unique, so the insert position
+    // is found by comparison rather than by re-sorting the list.
+    const index = enabledStyles.findIndex(s => (s.order ?? 0) > (style.order ?? 0));
+    if (index === -1) enabledStyles.push(style);
+    else enabledStyles.splice(index, 0, style);
+
     compileStyle(style);
 
     if (!managedStyleNode.isConnected)
@@ -161,7 +197,8 @@ export function disableStyle(name: string) {
 
     style.enabled = false;
     style.order = undefined;
-    composeManagedStyles();
+    removeFromArray(enabledStyles, s => s === style);
+    scheduleCompose();
     return true;
 }
 
@@ -183,7 +220,8 @@ export function removeStyle(name: string) {
     const style = styleMap.get(name);
     if (!style) return false;
     styleMap.delete(name);
-    composeManagedStyles();
+    removeFromArray(enabledStyles, s => s === style);
+    scheduleCompose();
     return true;
 }
 
@@ -231,5 +269,5 @@ export const compileStyle = (style: Style) => {
             return className ? classNameToSelector(className) : match;
         });
 
-    composeManagedStyles();
+    scheduleCompose();
 };

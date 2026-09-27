@@ -171,16 +171,45 @@ export async function getLogPage(status: LogViewStatus, newest: boolean, limit: 
     };
 }
 
-export async function getChannelLogsAfter(channelId: string, timestamp: string) {
-    let normalizedTs: string;
-    try {
-        normalizedTs = new Date(String(timestamp)).toISOString();
-    } catch {
-        normalizedTs = String(timestamp);
+/**
+ * Normalise a bound into the ISO form the `by_timestamp_and_message_id` index stores.
+ *
+ * The index key is `message.timestamp`, which is an ISO string, and ISO strings sort
+ * lexicographically in chronological order - that is the whole basis for bounding a range on
+ * it. So an unparseable bound must be rejected rather than passed through: it would either
+ * throw inside `IDBKeyRange.bound` or, worse, silently produce a range covering nothing.
+ *
+ * `String(ms)` cannot be used to parse a number here. `new Date(String(1756339200000))` is
+ * Invalid Date, and `new Date(String(0))` parses as the year 2000, so a millisecond bound
+ * would either throw or quietly shift the window by three decades. Numbers are therefore
+ * constructed directly, and anything non-finite is rejected.
+ */
+function toIndexBound(value: string | number): string | undefined {
+    if (typeof value === "number") {
+        return Number.isFinite(value) ? new Date(value).toISOString() : undefined;
     }
+    const parsed = Date.parse(value);
+    // A non-ISO but still chronologically sortable string is kept as-is, matching how
+    // these bounds behaved before.
+    return Number.isFinite(parsed) ? new Date(parsed).toISOString() : value || undefined;
+}
+
+export async function getChannelLogsAfter(channelId: string, timestamp: string | number, untilTimestamp?: string | number) {
+    const lower = toIndexBound(timestamp);
+    // "\uffff" sorts after every ISO string, so omitting the upper bound keeps the original
+    // open-ended "everything from `timestamp` onwards" behaviour.
+    const upper = untilTimestamp === undefined ? "\uffff" : toIndexBound(untilTimestamp) ?? "\uffff";
+    if (lower === undefined) return [];
+
     const database = await getDatabase();
     const index = database.transaction("messages").store.index("by_timestamp_and_message_id");
-    const range = IDBKeyRange.bound([channelId, normalizedTs], [channelId, "\uffff"]);
+    // `by_timestamp_and_message_id` is keyed on ["channel_id", "message.timestamp"], so the
+    // record's own message timestamp *is* the second index key. Bounding the top of the
+    // range therefore restricts the cursor to a time window instead of the channel's whole
+    // logged history, which is what reconciliation wants: it only ever acts on the window it
+    // was handed, so walking every record since epoch to re-check that window in JS was pure
+    // overhead, and it grew with every message ever logged in the channel.
+    const range = IDBKeyRange.bound([channelId, lower], [channelId, upper]);
     const records: LogRecord[] = [];
     let cursor = await index.openCursor(range);
 

@@ -951,9 +951,20 @@ export async function reconcileDeletedInWindow(
 ): Promise<string[]> {
     if (!active || !settings.store.saveDeletes) return [];
 
+    // A window we could not parse is worse than no reconciliation. Both comparisons below
+    // are false against NaN, so the `continue` that is supposed to discard out-of-window
+    // records would never fire and every logged record missing from the page would be
+    // marked deleted. The call site null-checks the oldest timestamp but never checks that
+    // it parses, so this is reachable.
+    if (!Number.isFinite(oldestMs) || !Number.isFinite(newestMs)) return [];
+
     let records: LogRecord[];
     try {
-        records = await getChannelLogsAfter(channelId, new Date(0).toISOString());
+        // Bounded to the fetched window, not the channel's entire logged history. The
+        // records this function can act on are exactly the ones inside the window, so
+        // reading past it was wasted IndexedDB work proportional to the channel's whole
+        // log - paid on every single history fetch, and growing forever.
+        records = await getChannelLogsAfter(channelId, oldestMs, newestMs);
     } catch {
         return [];
     }
