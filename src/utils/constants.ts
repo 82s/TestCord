@@ -1624,6 +1624,10 @@ export const TestcordDevs = /* #__PURE__*/ Object.freeze({
     reid: {
         name: "reid",
         id: 1069127117247361085n
+    },
+    irritably: {
+        name: "irritably",
+        id: 928787166916640838n
     }
 } satisfies Record<string, Dev>);
 

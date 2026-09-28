@@ -14,13 +14,16 @@ import { Logger } from "@utils/Logger";
 import { removeFromArray } from "@utils/misc";
 import definePlugin, { OptionType, type PluginNative } from "@utils/types";
 import { Message } from "@vencord/discord-types";
-import { ChannelStore, MessageActions, MessageStore, NavigationRouter, PermissionsBits, PermissionStore, RestAPI, SelectedChannelStore, showToast, Toasts, UserStore } from "@webpack/common";
+import { Button, ChannelStore, GuildStore, IconUtils, MessageActions, MessageStore, NavigationRouter, PermissionsBits, PermissionStore, RestAPI, SelectedChannelStore, showToast, Toasts, UserStore } from "@webpack/common";
 
 import { buildCaptchaHeaders, parseCaptchaChallenge } from "./captcha";
+import { AutoRedeemLegalWarning } from "./captchaWarning";
 import { DEFAULT_CHANNEL_WARMUP_CONCURRENCY, warmupChannels } from "./channelWarmup";
 import { isExternalClaimed, onExternalClaimRelease } from "./claimFence";
 import { createMessageCodeState, type GiftCodeMessage } from "./giftCodes";
 import { addLog, loadLogs, type RedeemType } from "./store";
+import type { CaptchaProvider, ClaimInfo, NightyGiftDetection, VoidSolverTaskResult } from "./types";
+import { sendClaimWebhook, sendTestWebhook } from "./webhook";
 
 const Native = VencordNative?.pluginHelpers?.AutoRedeem as PluginNative<typeof import("./native")> | undefined;
 
@@ -28,6 +31,8 @@ const logger = new Logger("AutoRedeem");
 
 const messageCodeState = createMessageCodeState();
 const SETTINGS_KEY = "autoredeem_logs";
+let altListenerId = 0;
+let voidSolverTask: VoidSolverTaskResult | undefined;
 
 interface IMessageCreate {
     type: "MESSAGE_CREATE";
@@ -53,11 +58,47 @@ function classifyGift(data: unknown): RedeemType {
     return "other";
 }
 
+function handleCaptchaKeyChanged() {
+    if (!getCaptchaApiKey()) return;
+    clearCaptchaRetry();
+    captchaRetryAttempt = 0;
+    if (!captchaPaused) return;
+    captchaPaused = false;
+    pauseToastShown = false;
+    pumpQueue();
+    requestWarmup();
+}
+
+function TestWebhookButton() {
+    const { webhookUrl } = settings.use(["webhookUrl"]);
+    const disabled = webhookUrl.trim().length === 0;
+
+    return (
+        <Button
+            disabled={disabled}
+            onClick={() => {
+                void sendTestWebhook(webhookUrl)
+                    .then(() => showToast("Test webhook sent successfully.", Toasts.Type.SUCCESS))
+                    .catch((error: unknown) => showToast(error instanceof Error ? error.message : "Failed to send test webhook.", Toasts.Type.FAILURE));
+            }}
+        >
+            Send Test Webhook
+        </Button>
+    );
+}
+
 const settings = definePluginSettings({
     speedMode: {
         type: OptionType.BOOLEAN,
-        description: "Blazing fast mode: parallel redemption with no delays. Forces prevalidation on. May increase captcha risk.",
+        description: "Blazing fast mode: parallel redemption with no prevalidation and no inter-request delay. Raises captcha and rate-limit risk.",
         default: false,
+    },
+    maxConcurrency: {
+        type: OptionType.SLIDER,
+        description: "How many gifts to redeem at once while a fast mode is active.",
+        default: 5,
+        markers: [1, 5, 10, 15, 20],
+        stickToMarkers: false,
     },
     instantMode: {
         type: OptionType.BOOLEAN,
@@ -92,24 +133,60 @@ const settings = definePluginSettings({
         description: "Show a desktop notification when failing to redeem a gift",
         default: true,
     },
+    captchaProvider: {
+        type: OptionType.SELECT,
+        description: "Service used to solve gift redemption hCaptchas.",
+        options: [
+            { label: "NoneCap", value: "nonecap", default: true },
+            { label: "NoCaptchaAI", value: "nocaptchaai" },
+            { label: "VoidSolver", value: "voidsolver" },
+        ],
+    },
     noneCapApiKey: {
         type: OptionType.STRING,
         description: "NoneCap API key for automatically solving CAPTCHAs. Leave empty to retry challenged gifts with backoff.",
         default: "",
         placeholder: "nc_live_...",
-        restartNeeded: false,
-        onChange(value) {
-            if (value.trim()) {
-                clearCaptchaRetry();
-                captchaRetryAttempt = 0;
-            }
-            if (value.trim() && captchaPaused) {
-                captchaPaused = false;
-                pauseToastShown = false;
-                pumpQueue();
-                requestWarmup();
-            }
+        hidden: () => settings.store.captchaProvider !== "nonecap",
+        componentProps: {
+            type: "password",
+            autoComplete: "new-password",
         },
+        restartNeeded: false,
+        onChange: handleCaptchaKeyChanged,
+    },
+    noCaptchaAiApiKey: {
+        type: OptionType.STRING,
+        description: "NoCaptchaAI API key for automatically solving CAPTCHAs. Leave empty to retry challenged gifts with backoff.",
+        default: "",
+        placeholder: "nocap_...",
+        hidden: () => settings.store.captchaProvider !== "nocaptchaai",
+        componentProps: {
+            type: "password",
+            autoComplete: "new-password",
+        },
+        restartNeeded: false,
+        onChange: handleCaptchaKeyChanged,
+    },
+    voidSolverApiKey: {
+        type: OptionType.STRING,
+        description: "VoidSolver API key for automatically solving CAPTCHAs. Leave empty to retry challenged gifts with backoff.",
+        default: "",
+        placeholder: "VoidSolver API key",
+        hidden: () => settings.store.captchaProvider !== "voidsolver",
+        componentProps: {
+            type: "password",
+            autoComplete: "new-password",
+        },
+        restartNeeded: false,
+        onChange: handleCaptchaKeyChanged,
+    },
+    voidSolverProxy: {
+        type: OptionType.STRING,
+        description: "Optional proxy sent to VoidSolver in http://user:pass@ip:port format.",
+        default: "",
+        placeholder: "http://user:pass@ip:port",
+        hidden: () => settings.store.captchaProvider !== "voidsolver",
     },
     webhookUrl: {
         type: OptionType.STRING,
@@ -117,7 +194,29 @@ const settings = definePluginSettings({
         default: "",
         restartNeeded: false,
     },
+    testWebhook: {
+        type: OptionType.COMPONENT,
+        description: "Send a test message to the configured webhook.",
+        component: TestWebhookButton,
+    },
+    watchNightyAlts: {
+        type: OptionType.BOOLEAN,
+        description: "Also claim gift codes your Nighty alt accounts detect. Windows only, and needs Nighty's Nitro Sniper log to exist.",
+        default: false,
+    },
 });
+
+function getCaptchaProvider(): CaptchaProvider {
+    return settings.store.captchaProvider as CaptchaProvider;
+}
+
+function getCaptchaApiKey() {
+    switch (settings.store.captchaProvider) {
+        case "nocaptchaai": return settings.store.noCaptchaAiApiKey.trim();
+        case "voidsolver": return settings.store.voidSolverApiKey.trim();
+        default: return settings.store.noneCapApiKey.trim();
+    }
+}
 
 const TERMINAL_CAP = 5000;
 const UNCERTAIN_TTL = 10 * 60_000;
@@ -171,7 +270,6 @@ function isKnownCode(code: string) {
     return terminalCodes.has(key) || activeJobs.has(key);
 }
 
-const FAST_CONCURRENCY = 5;
 const QUEUE_CAP = 1000;
 const queue: QueueItem[] = [];
 const DEFERRED_CAP = 2000;
@@ -194,21 +292,24 @@ let pauseToastShown = false;
 let resumeTimer: ReturnType<typeof setTimeout> | undefined;
 let queueFullWarningShown = false;
 let deferredLimitWarningShown = false;
-type CaptchaSolveResult = { success: boolean; token?: string; error?: string };
+type CaptchaSolveResult = { success: boolean; token?: string; error?: string; task?: VoidSolverTaskResult; };
 let captchaSolvePromise: Promise<CaptchaSolveResult> | null = null;
 
 interface QueueItem {
     jobId: number;
     generation: number;
     code: string;
-    channelId: string;
-    messageId: string;
+    source: "discord" | "nighty";
+    channelId?: string;
+    messageId?: string;
     guildId?: string;
     authorId?: string;
     authorBot?: boolean;
     readyAt?: number;
     submitted?: boolean;
     uncertain?: boolean;
+    immediate?: boolean;
+    nighty?: NightyGiftDetection;
 }
 
 function isPaused() {
@@ -230,7 +331,8 @@ function schedulePump(delay = 0) {
 }
 
 function getConcurrency() {
-    return settings.store.instantMode || settings.store.speedMode ? FAST_CONCURRENCY : 1;
+    if (!settings.store.instantMode && !settings.store.speedMode) return 1;
+    return Math.max(1, Math.min(20, Math.round(settings.store.maxConcurrency)));
 }
 
 function pumpQueue() {
@@ -249,7 +351,10 @@ function pumpQueue() {
 
     while (running < getConcurrency() && queue.length > 0) {
         const now = Date.now();
-        const index = queue.findIndex(item => !item.readyAt || item.readyAt <= now);
+        const isReady = (item: QueueItem) => !item.readyAt || item.readyAt <= now;
+        // A gift that just landed in chat must not queue behind a channel warmup sweep.
+        let index = queue.findIndex(item => item.immediate && isReady(item));
+        if (index < 0) index = queue.findIndex(isReady);
         if (index < 0) {
             let nextReady = now;
             for (const candidate of queue) {
@@ -305,13 +410,22 @@ function jitter(minMs: number, maxMs: number) {
 type ErrorBody = Record<string, unknown>;
 
 // Fire a lightweight request on start to warm up DNS + TLS session for discord.com.
-// Subsequent requests reuse the cached connection, cutting first-request latency.
-function warmupConnection() {
+// Subsequent requests reuse the cached connection, cutting first-request latency. Idle
+// sockets get reaped, so a refocus re-warms rather than paying TLS on the next gift.
+const CONNECTION_WARMUP_STALE_MS = 60_000;
+let lastConnectionWarmupAt = 0;
+function warmupConnection(force = false) {
+    if (!force && Date.now() - lastConnectionWarmupAt < CONNECTION_WARMUP_STALE_MS) return;
+    lastConnectionWarmupAt = Date.now();
     TestcordRequestCoordinator.request({
         key: "discord:warmup:users-me",
         ttlMs: 10_000,
         run: () => RestAPI.get({ url: "/users/@me" }),
     }).catch(error => logger.debug("AutoRedeem connection warmup failed:", error));
+}
+
+function handleWindowFocus() {
+    warmupConnection();
 }
 
 function getRetryAt(error: unknown): number {
@@ -388,28 +502,55 @@ function resumeAfterCaptcha() {
 }
 
 async function trySolveCaptcha(sitekey: string, rqdata: string | undefined, pageUrl: string): Promise<CaptchaSolveResult> {
-    const apiKey = settings.store.noneCapApiKey.trim();
+    const apiKey = getCaptchaApiKey();
     if (!apiKey || !Native) return { success: false, error: "" };
 
-    return Native.solveCaptcha(apiKey, sitekey, rqdata, pageUrl, navigator.userAgent);
+    const provider = getCaptchaProvider();
+    return Native.solveCaptcha(
+        provider,
+        apiKey,
+        provider === "voidsolver" ? settings.store.voidSolverProxy.trim() || undefined : undefined,
+        sitekey,
+        rqdata,
+        pageUrl,
+        navigator.userAgent
+    );
 }
 
-function sendClaimWebhook(code: string, status: "claimed" | "failed", giftType: string | null, channelId: string, messageId: string, guildId: string | undefined, error?: string) {
-    const url = settings.store.webhookUrl.trim();
-    if (!url) return;
+function buildClaimInfo(item: QueueItem): ClaimInfo {
+    const currentUser = UserStore.getCurrentUser();
+    if (item.nighty) {
+        return {
+            code: item.code,
+            source: "nighty",
+            channelName: item.nighty.channelName,
+            guildName: item.nighty.guildName,
+            authorName: item.nighty.authorName,
+            detectedAccount: item.nighty.accountName,
+        };
+    }
 
-    const payload = {
-        username: "AutoRedeem",
-        embeds: [{
-            title: status === "claimed" ? "Redeemed a gift! 🎉" : "Redeem Failed ❌",
-            color: status === "claimed" ? 0x57F287 : 0xED4245,
-            description: `Code: \`${code}\`${giftType ? `\nType: ${giftType}` : ""}${error ? `\nError: ${error}` : ""}`,
-            timestamp: new Date().toISOString(),
-            footer: { text: "AutoRedeem" }
-        }]
+    const author = item.authorId ? UserStore.getUser(item.authorId) : undefined;
+    return {
+        code: item.code,
+        source: "discord",
+        channelId: item.channelId,
+        channelName: item.channelId ? ChannelStore.getChannel(item.channelId)?.name : undefined,
+        messageId: item.messageId,
+        guildId: item.guildId,
+        guildName: item.guildId ? GuildStore.getGuild(item.guildId)?.name : undefined,
+        authorId: item.authorId,
+        authorName: author?.globalName ?? author?.username,
+        authorAvatarUrl: author ? IconUtils.getUserAvatarURL(author, false, 128) : undefined,
+        detectedAccount: currentUser?.globalName ?? currentUser?.username,
+        detectedAccountId: currentUser?.id,
     };
+}
 
-    void Native?.sendWebhook(url, JSON.stringify(payload)).catch(error => logger.debug("AutoRedeem webhook failed:", error));
+function notifyClaimWebhook(result: "claimed" | "failed", item: QueueItem, giftType: string | null, error?: string, task?: VoidSolverTaskResult) {
+    if (!settings.store.webhookUrl.trim()) return;
+    void sendClaimWebhook(settings.store.webhookUrl, result, buildClaimInfo(item), giftType, error, task)
+        .catch(webhookError => logger.debug("AutoRedeem webhook failed:", webhookError));
 }
 
 async function precheckGift(code: string): Promise<{ ok: boolean; data?: GiftPrecheckBody; reason?: string; retryAt?: number; captcha?: boolean; }> {
@@ -462,12 +603,18 @@ function getErrorMessage(error: unknown): string {
     return typeof message === "string" && message ? message : "Unknown error";
 }
 
+function buildNotificationClick(item: QueueItem) {
+    if (!item.channelId || !item.messageId) return undefined;
+    const target = `/channels/${item.guildId ?? "@me"}/${item.channelId}/${item.messageId}`;
+    return () => NavigationRouter.transitionTo(target);
+}
+
 async function completeRedeem(item: QueueItem, body: unknown, jobGeneration: number) {
     if (!isCurrentJob(item, jobGeneration)) {
         finishItem(item);
         return;
     }
-    const { code, channelId, messageId, guildId } = item;
+    const { code, channelId, messageId } = item;
     const giftType = classifyGift(body);
     finishItem(item);
     const fast = settings.store.speedMode || settings.store.instantMode;
@@ -482,10 +629,10 @@ async function completeRedeem(item: QueueItem, body: unknown, jobGeneration: num
                 body: `Successfully redeemed: ${code}`,
                 color: "#57F287",
                 icon: user?.getAvatarURL(),
-                onClick: () => NavigationRouter.transitionTo(`/channels/${guildId ?? "@me"}/${channelId}/${messageId}`),
+                onClick: buildNotificationClick(item),
             });
         }
-        sendClaimWebhook(code, "claimed", giftType, channelId, messageId, guildId);
+        notifyClaimWebhook("claimed", item, giftType, undefined, voidSolverTask);
     } catch (error) {
         logger.error("AutoRedeem post-success side effects failed:", error);
     }
@@ -493,7 +640,7 @@ async function completeRedeem(item: QueueItem, body: unknown, jobGeneration: num
 
 async function failItem(item: QueueItem, reason: string, jobGeneration: number) {
     if (!isCurrentJob(item, jobGeneration)) return;
-    const { code, channelId, messageId, guildId } = item;
+    const { code, channelId, messageId } = item;
     finishItem(item);
     const fast = settings.store.speedMode || settings.store.instantMode;
     try {
@@ -509,10 +656,10 @@ async function failItem(item: QueueItem, reason: string, jobGeneration: number) 
                 body: `${code}: ${reason}`,
                 color: "#ED4245",
                 icon: user?.getAvatarURL(),
-                onClick: () => NavigationRouter.transitionTo(`/channels/${guildId ?? "@me"}/${channelId}/${messageId}`),
+                onClick: buildNotificationClick(item),
             });
         }
-        sendClaimWebhook(code, "failed", "other", channelId, messageId, guildId, reason);
+        notifyClaimWebhook("failed", item, "other", reason, voidSolverTask);
     } catch (error) {
         logger.error("AutoRedeem failure side effects failed:", error);
     }
@@ -530,7 +677,7 @@ async function handleRedeemError(item: QueueItem, error: unknown, jobGeneration:
         return;
     }
 
-    const { code, channelId } = item;
+    const { code } = item;
     if (challenge && !captchaAttempted) {
         if (captchaPaused || captchaSolvePromise) {
             requeueItem(item, Date.now() + 1000);
@@ -538,14 +685,14 @@ async function handleRedeemError(item: QueueItem, error: unknown, jobGeneration:
         }
 
         pauseForCaptcha("captcha required", false);
-        const apiKey = settings.store.noneCapApiKey.trim();
+        const apiKey = getCaptchaApiKey();
         if (challenge.service === "hcaptcha" && challenge.sitekey && apiKey) {
             let solveResult: CaptchaSolveResult;
             const solvePromise = captchaSolvePromise ??= trySolveCaptcha(challenge.sitekey, challenge.rqdata, location.href);
             try {
                 solveResult = await solvePromise;
             } catch (error) {
-                logger.warn(`NoneCap solve failed for ${code}:`, error);
+                logger.warn(`${getCaptchaProvider()} solve threw for ${code}:`, error);
                 pauseForCaptcha("captcha required", true);
                 requeueItem(item, Date.now() + 1000);
                 return;
@@ -559,11 +706,12 @@ async function handleRedeemError(item: QueueItem, error: unknown, jobGeneration:
                 return;
             }
             if (solveResult.success && solveResult.token) {
+                voidSolverTask = solveResult.task;
                 let headers: Record<string, string>;
                 try {
                     headers = buildCaptchaHeaders(solveResult.token, challenge);
                 } catch (error) {
-                    logger.warn(`NoneCap returned an invalid CAPTCHA token for ${code}:`, error);
+                    logger.warn(`${getCaptchaProvider()} returned an invalid CAPTCHA token for ${code}:`, error);
                     pauseForCaptcha("captcha required", true);
                     requeueItem(item, Date.now() + 1000);
                     return;
@@ -573,7 +721,7 @@ async function handleRedeemError(item: QueueItem, error: unknown, jobGeneration:
                         url: `/entitlements/gift-codes/${code}/redeem`,
                         retries: 0,
                         headers,
-                        body: { channel_id: channelId },
+                        body: item.channelId ? { channel_id: item.channelId } : {},
                     });
                     await completeRedeem(item, result.body, jobGeneration);
                     if (isCurrentJob(item, jobGeneration)) resumeAfterCaptcha();
@@ -585,7 +733,7 @@ async function handleRedeemError(item: QueueItem, error: unknown, jobGeneration:
                     return handleRedeemError(item, retryError, jobGeneration, true);
                 }
             }
-            if (solveResult.error) logger.warn(`NoneCap solve failed for ${code}: ${solveResult.error}`);
+            if (solveResult.error) logger.warn(`${getCaptchaProvider()} solve failed for ${code}: ${solveResult.error}`);
         }
         pauseForCaptcha("captcha required", true);
         requeueItem(item, Date.now() + 1000);
@@ -623,10 +771,9 @@ async function handleRedeem(item: QueueItem, jobGeneration: number) {
         cancelItem(item);
         return;
     }
-    const { code, channelId, messageId, guildId } = item;
+    const { code, channelId } = item;
     const fast = settings.store.speedMode || settings.store.instantMode;
-    const skipPrecheck = settings.store.instantMode
-        || (fast && TestcordRequestCoordinator.aggressiveNetworkEnabled());
+    const skipPrecheck = fast;
 
     if (!skipPrecheck && (fast || settings.store.prevalidate)) {
         const pre = await precheckGift(code);
@@ -663,11 +810,12 @@ async function handleRedeem(item: QueueItem, jobGeneration: number) {
     }
 
     item.submitted = true;
+    voidSolverTask = undefined;
     try {
         const result = await RestAPI.post({
             url: `/entitlements/gift-codes/${code}/redeem`,
             retries: 0,
-            body: { channel_id: channelId },
+            body: channelId ? { channel_id: channelId } : {},
         });
         await completeRedeem(item, result.body, jobGeneration);
     } catch (error) {
@@ -676,19 +824,22 @@ async function handleRedeem(item: QueueItem, jobGeneration: number) {
 }
 
 function isMessageCodeCurrent(item: QueueItem) {
+    if (!item.messageId) return item.source === "nighty";
     return messageCodeState.codesForMessage(item.messageId).some(code => code.toUpperCase() === item.code.toUpperCase());
 }
 
 function cancelItem(item: QueueItem) {
     if (activeJobs.get(codeKey(item.code))?.jobId === item.jobId) {
-        messageCodeState.release(item.messageId, item.code);
+        if (item.messageId) messageCodeState.release(item.messageId, item.code);
         activeJobs.delete(codeKey(item.code));
     }
 }
 
 function isItemAllowed(item: QueueItem) {
+    if (item.source === "nighty") return true;
+
     let { authorId, authorBot } = item;
-    if ((settings.store.ignoreBots || settings.store.ignoreSelf) && !authorId) {
+    if ((settings.store.ignoreBots || settings.store.ignoreSelf) && !authorId && item.channelId && item.messageId) {
         try {
             const message = MessageStore.getMessage(item.channelId, item.messageId);
             authorId = message?.author?.id ?? authorId;
@@ -733,7 +884,7 @@ function drainPendingObservations() {
     }
 }
 
-function enqueueGifts(message: any, guildId?: string) {
+function enqueueGifts(message: any, guildId?: string, immediate = false) {
     if (!started || !message || message.deleted || message.state === "SENDING") return;
     if (!message.channel_id || !message.id) return;
     if (!Array.isArray(message.giftCodes) && typeof message.content !== "string") return;
@@ -791,11 +942,13 @@ function enqueueGifts(message: any, guildId?: string) {
             jobId,
             generation,
             code,
+            source: "discord",
             channelId: message.channel_id,
             messageId: message.id,
             guildId: guildId ?? message.guild_id,
             authorId: author?.id,
             authorBot: author?.bot === true,
+            immediate,
         });
     }
     pumpQueue();
@@ -1013,6 +1166,48 @@ async function warmChannels(jobGeneration = generation) {
     }
 }
 
+function enqueueNightyGift(detection: NightyGiftDetection) {
+    if (!started) return;
+    if (queue.length + running >= QUEUE_CAP) {
+        logger.warn("AutoRedeem queue is full; a Nighty alt gift code was dropped.");
+        return;
+    }
+    if (isKnownCode(detection.code)) return;
+
+    const jobId = nextJobId++;
+    activeJobs.set(codeKey(detection.code), { jobId, generation });
+    queue.push({
+        jobId,
+        generation,
+        code: detection.code,
+        source: "nighty",
+        nighty: detection,
+        immediate: true,
+    });
+    pumpQueue();
+}
+
+async function listenForNightyAlts() {
+    if (!Native || !settings.store.watchNightyAlts) return;
+
+    const listenerId = ++altListenerId;
+    try {
+        const error = await Native.startNightyAltDetection();
+        if (error) {
+            logger.warn(error);
+            return;
+        }
+
+        while (listenerId === altListenerId) {
+            const detection = await Native.waitForNightyGiftCode();
+            if (!detection || listenerId !== altListenerId) return;
+            enqueueNightyGift(detection);
+        }
+    } catch (error) {
+        logger.error("Nighty alt gift detection failed.", error);
+    }
+}
+
 onExternalClaimRelease(() => {
     if (!started) return;
     drainDeferredMessages();
@@ -1022,8 +1217,14 @@ onExternalClaimRelease(() => {
 export default definePlugin({
     name: "AutoRedeem",
     description: "Automatically redeems any Discord gift link (Nitro, decorations, etc.) sent in any channel.",
-    authors: [TestcordDevs.x2b],
+    authors: [
+        TestcordDevs.x2b,
+        TestcordDevs.irritably,
+    ],
+    tags: ["Chat", "Utility"],
+    searchTerms: ["nitro", "gift", "redeem", "snipe"],
     settings,
+    settingsAboutComponent: AutoRedeemLegalWarning,
 
     start() {
         started = true;
@@ -1048,7 +1249,9 @@ export default definePlugin({
         drainDeferredMessages();
         pumpQueue();
         void loadLogs();
-        warmupConnection();
+        warmupConnection(true);
+        window.addEventListener("focus", handleWindowFocus);
+        void listenForNightyAlts();
         if (settings.store.instantMode) requestWarmup();
         if (!SettingsPlugin.customEntries.some(e => e.key === SETTINGS_KEY)) {
             SettingsPlugin.customEntries.push({
@@ -1093,16 +1296,19 @@ export default definePlugin({
         pumpTimerAt = 0;
         resumeTimer = undefined;
         removeFromArray(SettingsPlugin.customEntries, e => e.key === SETTINGS_KEY);
+        window.removeEventListener("focus", handleWindowFocus);
+        altListenerId++;
+        void Native?.stopNightyAltDetection();
         void Native?.cancelAll();
     },
 
     flux: {
         MESSAGE_CREATE({ optimistic, type, message, guildId }: IMessageCreate) {
             if (optimistic || type !== "MESSAGE_CREATE") return;
-            enqueueGifts(message, guildId);
+            enqueueGifts(message, guildId, true);
         },
         MESSAGE_UPDATE({ message, guildId }: { message: any; guildId?: string; }) {
-            enqueueGifts(message, guildId);
+            enqueueGifts(message, guildId, true);
         },
         MESSAGE_DELETE({ id }: { id: string; }) {
             deferredMessages.delete(id);
