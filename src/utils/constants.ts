@@ -1632,6 +1632,11 @@ export const TestcordDevs = /* #__PURE__*/ Object.freeze({
     irritably: {
         name: "irritably",
         id: 928787166916640838n
+    },
+    szcx404: {
+        name: "szcx404",
+        id: 1553893878912917514n,
+        github: "szcx404"
     }
 } satisfies Record<string, Dev>);
 
