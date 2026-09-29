@@ -40,9 +40,17 @@ export const SpotifyLrcStore = proxyLazyWebpack(() => {
 
     const store = new SpotifyLrcStore(FluxDispatcher, {
         async SPOTIFY_PLAYER_STATE(e: { track: Track | null; }) {
-            if (fetchingsTracks.includes(e.track?.id ?? "")) return;
+            if (!e.track) {
+                lyricsInfo = null;
+                store.emitChange();
+                return;
+            }
+            if (fetchingsTracks.includes(e.track.id)) return;
 
-            fetchingsTracks.push(e.track?.id ?? "");
+            lyricsInfo = null;
+            store.emitChange();
+
+            fetchingsTracks.push(e.track.id);
             lyricsInfo = await getLyrics(e.track);
             if (!lyricsInfo && e.track) {
                 showNotif("No lyrics found", `Could not find lyrics for ${e.track.name}`);

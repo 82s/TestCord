@@ -62,6 +62,16 @@ const getIndexes = (lyrics: SyncedLyric[], position: number, delay: number) => {
         }
     }
 
+    if (currentIndex !== null && currentIndex > 0) {
+        const prevLine = lyrics[currentIndex - 1];
+        const prevWords = prevLine.words;
+        const prevLastWordEnd = prevWords?.length ? prevWords[prevWords.length - 1].endTime : prevLine.time;
+
+        if (posInSec < prevLastWordEnd) {
+            currentIndex -= 1;
+        }
+    }
+
     const nextIdx = currentIndex !== null ? currentIndex + 1 : left;
     const nextLyricIdx = nextIdx < lyrics.length ? nextIdx : null;
 
@@ -118,6 +128,7 @@ export function useLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
     const activeWordKeyRef = React.useRef<string | null>(null);
     const [lyricRefs, setLyricRefs] = useState<React.RefObject<HTMLDivElement | null>[]>([]);
     const [, forceUpdate] = useState({});
+    const positionRef = React.useRef(0);
 
     const trackKey = track?.id || track?.name;
     const songCustomDelay = (trackKey && customSongDelays[trackKey]) || 0;
@@ -160,7 +171,8 @@ export function useLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
                 setCurrLrcIndex(prev => prev === currentIndex ? prev : currentIndex);
                 setNextLyric(prev => prev === nextLyricIndex ? prev : nextLyricIndex);
 
-                const posInSec = (pos + totalDelay) / 1000;
+                positionRef.current = pos + totalDelay;
+                const posInSec = positionRef.current / 1000;
                 const words = currentIndex != null ? currentLyrics[currentIndex].words : undefined;
                 const wordIdx = getActiveWordIndex(words, posInSec);
 
@@ -214,5 +226,5 @@ export function useLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
         }
     }, [currLrcIndex, nextLyric, scroll, lyricRefs]);
 
-    return { track, lyricsInfo, lyricRefs, currLrcIndex, nextLyric, activeWordIndex, sungWordIndex, activeWordSync, isPlaying };
+    return { track, lyricsInfo, lyricRefs, currLrcIndex, nextLyric, activeWordIndex, sungWordIndex, activeWordSync, isPlaying, positionRef };
 }

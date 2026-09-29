@@ -8,6 +8,7 @@ import { BaseText } from "@components/BaseText";
 import { TooltipContainer } from "@components/TooltipContainer";
 import { settings } from "@testcordplugins/PanelLayout/modules/musicControls/settings";
 import { SpotifyLrcStore } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/providers/store";
+import { useSpicyWordFrame } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/spicyAnimator/useSpicyWordFrame";
 import { SpotifyStore } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/SpotifyStore";
 import { ContextMenuApi, openModalLazy, React, useEffect, useState, useStateFromStores } from "@webpack/common";
 
@@ -18,15 +19,17 @@ import { cl, NoteSvg, useLyrics } from "./util";
 const prevCl = cl("prev");
 const nextCl = cl("next");
 const currentCl = cl("current");
-const wordCl = cl("word");
-const wordSungCl = cl("word-sung");
-const wordActiveCl = cl("word-active");
 
 function LyricsDisplay({ scroll = true, style }: { scroll?: boolean; style?: React.CSSProperties; }) {
     const { showMusicNoteOnNoLyrics } = settings.use(["showMusicNoteOnNoLyrics"]);
-    const { lyricsInfo, lyricRefs, currLrcIndex, activeWordIndex, sungWordIndex, activeWordSync, isPlaying } = useLyrics({ scroll });
+    const { lyricsInfo, lyricRefs, currLrcIndex, isPlaying, positionRef } = useLyrics({ scroll });
 
     const currentLyrics = lyricsInfo?.lyricsVersions[lyricsInfo.useLyric] || null;
+    const wordRefsRef = React.useRef<(HTMLSpanElement | null)[]>([]);
+
+    const activeLineWords = currLrcIndex != null ? currentLyrics?.[currLrcIndex]?.words : undefined;
+
+    useSpicyWordFrame(activeLineWords, wordRefsRef, () => positionRef.current, isPlaying);
 
     const makeClassName = (index: number): string => {
         if (currLrcIndex == null) return prevCl;
@@ -48,7 +51,6 @@ function LyricsDisplay({ scroll = true, style }: { scroll?: boolean; style?: Rea
                 {currentLyrics ? currentLyrics.map((line, i) => {
                     const isCurrentLine = currLrcIndex === i;
                     const hasWordTiming = isCurrentLine && !!line.words?.length;
-                    const activeIdx = activeWordIndex ?? -1;
 
                     return (
                         <div ref={lyricRefs[i]} key={i}>
@@ -57,25 +59,17 @@ function LyricsDisplay({ scroll = true, style }: { scroll?: boolean; style?: Rea
                                 className={makeClassName(i)}
                             >
                                 {hasWordTiming
-                                    ? line.words!.map((word, w) => {
-                                        const isActive = w === activeIdx;
-                                        const isSung = w <= sungWordIndex || w < activeIdx;
-                                        const wordClassName = isActive ? wordActiveCl : isSung ? wordSungCl : wordCl;
-                                        const wordStyle: React.CSSProperties | undefined = isActive && activeWordSync
-                                            ? {
-                                                "--vc-spotify-word-duration": `${activeWordSync.duration}ms`,
-                                                "--vc-spotify-word-delay": `-${activeWordSync.elapsed}ms`,
-                                                animationPlayState: isPlaying ? "running" : "paused"
-                                            } as React.CSSProperties
-                                            : undefined;
-
-                                        return (
-                                            <React.Fragment key={w}>
-                                                <span className={wordClassName} style={wordStyle}>{word.text}</span>
-                                                {word.IsPartOfWord ? "" : " "}
-                                            </React.Fragment>
-                                        );
-                                    })
+                                    ? line.words!.map((word, w) => (
+                                        <React.Fragment key={w}>
+                                            <span
+                                                ref={(el: HTMLSpanElement | null) => { wordRefsRef.current[w] = el; }}
+                                                className={word.IsPartOfWord ? "vc-spicy-word vc-spicy-part-of-word" : "vc-spicy-word"}
+                                            >
+                                                {word.text}
+                                            </span>
+                                            {word.IsPartOfWord ? "" : " "}
+                                        </React.Fragment>
+                                    ))
                                     : (line.text || NoteSvg())}
                             </BaseText>
                         </div>
