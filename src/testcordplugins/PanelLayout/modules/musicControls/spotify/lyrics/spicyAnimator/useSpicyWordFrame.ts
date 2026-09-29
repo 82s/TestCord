@@ -40,7 +40,11 @@ export function useSpicyWordFrame(
                 for (let j = 0; j < words.length; j++) {
                     const jEl = wordRefs.current?.[j];
                     if (!jEl) continue;
-                    resetWord(jEl, getWordState(posSec, words[j].startTime, words[j].endTime));
+                    resetWord(
+                        jEl,
+                        getWordState(posSec, words[j].startTime, words[j].endTime),
+                        getWordProgress(posSec, words[j].startTime, words[j].endTime)
+                    );
                 }
             }
 

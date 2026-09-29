@@ -146,6 +146,84 @@ function joinWordsText(words: LyricWord[]): string {
     return words.map(w => w.text).join("").trim();
 }
 
+function wrapBackgroundWords(words: LyricWord[]): LyricWord[] {
+    if (!words.length) return words;
+
+    const wrapped = words.map(w => ({ ...w }));
+    wrapped[0] = { ...wrapped[0], text: `(${wrapped[0].text}` };
+
+    const lastIndex = wrapped.length - 1;
+    const last = wrapped[lastIndex];
+    const hadTrailingSpace = last.text.endsWith(" ");
+    const base = hadTrailingSpace ? last.text.slice(0, -1) : last.text;
+    wrapped[lastIndex] = { ...last, text: `${base})${hadTrailingSpace ? " " : ""}` };
+
+    return wrapped;
+}
+
+function fromBackgroundLine(
+    bg: VocalGroup,
+    getText: (syllable: Syllable) => string | undefined = s => s.Text
+): SyncedLyric | null {
+    const words = buildWords(bg.Syllables ?? [], getText);
+    if (!words.length) return null;
+
+    const text = joinWordsText(words);
+    if (text === "" || text === "♪") return null;
+
+    return {
+        time: bg.StartTime ?? words[0].startTime,
+        text: `(${text})`,
+        words: wrapBackgroundWords(words)
+    };
+}
+
+function fromBackgroundLines(line: SyllableLine): SyncedLyric[] {
+    if (line.Type !== "Vocal" || !line.Background?.length) return [];
+    return line.Background
+        .map(bg => fromBackgroundLine(bg))
+        .filter((l): l is SyncedLyric => l !== null);
+}
+
+function fromBackgroundLinesRomanized(line: SyllableLine): SyncedLyric[] {
+    if (line.Type !== "Vocal" || !line.Background?.length) return [];
+    return line.Background
+        .map(bg => fromBackgroundLine(bg, s => s.TransliteratedText ?? s.Text))
+        .filter((l): l is SyncedLyric => l !== null);
+}
+
+const STALE_LINE_SEC = 8;
+const NOTE_LEAD_IN_SEC = 2;
+
+function getLineEndTime(line: SyncedLyric): number {
+    return line.words?.length ? line.words[line.words.length - 1].endTime : line.time;
+}
+
+function insertGapNotes(lines: SyncedLyric[]): SyncedLyric[] {
+    if (!lines.length) return lines;
+
+    const result: SyncedLyric[] = [];
+
+    if (lines[0].time > STALE_LINE_SEC) {
+        result.push({ time: 0, text: null });
+    }
+
+    for (let i = 0; i < lines.length; i++) {
+        result.push(lines[i]);
+
+        const next = lines[i + 1];
+        if (!next) continue;
+
+        const end = getLineEndTime(lines[i]);
+        const gap = next.time - end;
+        if (gap > STALE_LINE_SEC) {
+            result.push({ time: end + Math.min(NOTE_LEAD_IN_SEC, gap / 2), text: null });
+        }
+    }
+
+    return result;
+}
+
 function fromSyllableLine(line: SyllableLine): SyncedLyric | null {
     if (line.Type !== "Vocal" || !line.Lead) return null;
 
@@ -231,9 +309,12 @@ function buildSpicyRomanizedLyrics(body: Lyrics): SyncedLyric[] | null {
     let lines: SyncedLyric[];
 
     switch (body.Type) {
-        case "Syllable":
-            lines = body.Content.map(fromSyllableLineRomanized).filter((l): l is SyncedLyric => l !== null);
+        case "Syllable": {
+            const leadLines = body.Content.map(fromSyllableLineRomanized).filter((l): l is SyncedLyric => l !== null);
+            const backgroundLines = body.Content.flatMap(fromBackgroundLinesRomanized);
+            lines = [...leadLines, ...backgroundLines].sort((a, b) => a.time - b.time);
             break;
+        }
         case "Line":
             lines = body.Content.map(fromLineLineRomanized).filter((l): l is SyncedLyric => l !== null);
             break;
@@ -244,7 +325,7 @@ function buildSpicyRomanizedLyrics(body: Lyrics): SyncedLyric[] | null {
             return null;
     }
 
-    return lines.length >= 2 ? lines : null;
+    return lines.length >= 2 ? insertGapNotes(lines) : null;
 }
 
 export async function getLyricsSpicyLyrics(trackId: string, apiKey: string): Promise<LyricsData | null> {
@@ -324,9 +405,12 @@ export async function getLyricsSpicyLyrics(trackId: string, apiKey: string): Pro
         let lines: SyncedLyric[];
 
         switch (body.Type) {
-            case "Syllable":
-                lines = body.Content.map(fromSyllableLine).filter((l): l is SyncedLyric => l !== null);
+            case "Syllable": {
+                const leadLines = body.Content.map(fromSyllableLine).filter((l): l is SyncedLyric => l !== null);
+                const backgroundLines = body.Content.flatMap(fromBackgroundLines);
+                lines = [...leadLines, ...backgroundLines].sort((a, b) => a.time - b.time);
                 break;
+            }
             case "Line":
                 if (settings.store.showFailedToasts) {
                     showNotification({
@@ -370,7 +454,7 @@ export async function getLyricsSpicyLyrics(trackId: string, apiKey: string): Pro
         return {
             useLyric: Provider.SpicyLyrics,
             lyricsVersions: {
-                [Provider.SpicyLyrics]: lines,
+                [Provider.SpicyLyrics]: insertGapNotes(lines),
                 ...(spicyRomanizedLines ? { [Provider.SpicyRomanized]: spicyRomanizedLines } : {})
             }
         };
