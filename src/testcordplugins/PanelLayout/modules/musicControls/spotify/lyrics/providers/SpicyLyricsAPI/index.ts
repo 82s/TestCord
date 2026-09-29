@@ -161,35 +161,23 @@ function wrapBackgroundWords(words: LyricWord[]): LyricWord[] {
     return wrapped;
 }
 
-function fromBackgroundLine(
-    bg: VocalGroup,
+function buildBackgroundWords(
+    groups: VocalGroup[] | undefined,
     getText: (syllable: Syllable) => string | undefined = s => s.Text
-): SyncedLyric | null {
-    const words = buildWords(bg.Syllables ?? [], getText);
-    if (!words.length) return null;
+): LyricWord[] {
+    if (!groups?.length) return [];
 
-    const text = joinWordsText(words);
-    if (text === "" || text === "♪") return null;
+    const merged: LyricWord[] = [];
+    for (const bg of groups) {
+        const words = buildWords(bg.Syllables ?? [], getText);
+        if (!words.length) continue;
 
-    return {
-        time: bg.StartTime ?? words[0].startTime,
-        text: `(${text})`,
-        words: wrapBackgroundWords(words)
-    };
-}
+        const text = joinWordsText(words);
+        if (text === "" || text === "♪") continue;
 
-function fromBackgroundLines(line: SyllableLine): SyncedLyric[] {
-    if (line.Type !== "Vocal" || !line.Background?.length) return [];
-    return line.Background
-        .map(bg => fromBackgroundLine(bg))
-        .filter((l): l is SyncedLyric => l !== null);
-}
-
-function fromBackgroundLinesRomanized(line: SyllableLine): SyncedLyric[] {
-    if (line.Type !== "Vocal" || !line.Background?.length) return [];
-    return line.Background
-        .map(bg => fromBackgroundLine(bg, s => s.TransliteratedText ?? s.Text))
-        .filter((l): l is SyncedLyric => l !== null);
+        merged.push(...wrapBackgroundWords(words));
+    }
+    return merged;
 }
 
 const STALE_LINE_SEC = 8;
@@ -227,7 +215,10 @@ function insertGapNotes(lines: SyncedLyric[]): SyncedLyric[] {
 function fromSyllableLine(line: SyllableLine): SyncedLyric | null {
     if (line.Type !== "Vocal" || !line.Lead) return null;
 
-    const words = buildWords(line.Lead.Syllables ?? []);
+    const words = [
+        ...buildWords(line.Lead.Syllables ?? []),
+        ...buildBackgroundWords(line.Background)
+    ];
     const text = joinWordsText(words);
 
     return {
@@ -258,7 +249,11 @@ function fromStaticLine(line: StaticLine, index: number): SyncedLyric {
 function fromSyllableLineRomanized(line: SyllableLine): SyncedLyric | null {
     if (line.Type !== "Vocal" || !line.Lead) return null;
 
-    const words = buildWords(line.Lead.Syllables ?? [], s => s.TransliteratedText ?? s.Text);
+    const getText = (s: Syllable) => s.TransliteratedText ?? s.Text;
+    const words = [
+        ...buildWords(line.Lead.Syllables ?? [], getText),
+        ...buildBackgroundWords(line.Background, getText)
+    ];
     const text = joinWordsText(words);
 
     return {
@@ -309,12 +304,9 @@ function buildSpicyRomanizedLyrics(body: Lyrics): SyncedLyric[] | null {
     let lines: SyncedLyric[];
 
     switch (body.Type) {
-        case "Syllable": {
-            const leadLines = body.Content.map(fromSyllableLineRomanized).filter((l): l is SyncedLyric => l !== null);
-            const backgroundLines = body.Content.flatMap(fromBackgroundLinesRomanized);
-            lines = [...leadLines, ...backgroundLines].sort((a, b) => a.time - b.time);
+        case "Syllable":
+            lines = body.Content.map(fromSyllableLineRomanized).filter((l): l is SyncedLyric => l !== null);
             break;
-        }
         case "Line":
             lines = body.Content.map(fromLineLineRomanized).filter((l): l is SyncedLyric => l !== null);
             break;
@@ -405,12 +397,9 @@ export async function getLyricsSpicyLyrics(trackId: string, apiKey: string): Pro
         let lines: SyncedLyric[];
 
         switch (body.Type) {
-            case "Syllable": {
-                const leadLines = body.Content.map(fromSyllableLine).filter((l): l is SyncedLyric => l !== null);
-                const backgroundLines = body.Content.flatMap(fromBackgroundLines);
-                lines = [...leadLines, ...backgroundLines].sort((a, b) => a.time - b.time);
+            case "Syllable":
+                lines = body.Content.map(fromSyllableLine).filter((l): l is SyncedLyric => l !== null);
                 break;
-            }
             case "Line":
                 if (settings.store.showFailedToasts) {
                     showNotification({
