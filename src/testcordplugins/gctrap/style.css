@@ -312,3 +312,27 @@
     flex-direction: column;
     gap: 12px;
 }
+
+.vc-gctrap-list,
+.vc-gctrap-log-list {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thin-thumb) transparent;
+
+    &::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+
+    &::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    &::-webkit-scrollbar-thumb {
+        background: var(--scrollbar-thin-thumb);
+        border-radius: 4px;
+    }
+
+    &::-webkit-scrollbar-thumb:hover {
+        background: var(--scrollbar-thin-thumb-hover);
+    }
+}
