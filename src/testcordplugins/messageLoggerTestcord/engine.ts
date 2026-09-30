@@ -9,7 +9,7 @@ import { Logger } from "@utils/Logger";
 import type { Message, MessageJSON } from "@vencord/discord-types";
 import { ChannelStore, FluxDispatcher, lodash, MessageStore, SelectedChannelStore, UserGuildSettingsStore, UserStore } from "@webpack/common";
 
-import { applyBatch, clearLogs, clearUnprotectedLogs, getChannelLogsAfter, getDatabase, getLogById, runMaintenance, stripUncloneable } from "./db";
+import { applyBatch, clearLogs, clearUnprotectedLogs, getAllHistoryForChannel, getChannelLogsAfter, getDatabase, getLogById, runMaintenance, stripUncloneable } from "./db";
 import { invalidateMessageClassCache } from "./render";
 import { ensureAttachmentSaved } from "./saveImage";
 import { settings } from "./settings";
@@ -1055,6 +1055,54 @@ export async function localRemoveLoggedMessage(id: string, permanent: boolean, f
 export async function deleteManyLogs(ids: string[]) {
     ids.forEach(queueDelete);
     await flushQueuedLogs();
+}
+
+/**
+ * Drop every logged row of a channel, mirroring the per-message context menu items.
+ * Deleted messages leave chat through the same mlDeleted dispatch `localRemoveLoggedMessage`
+ * uses; edit histories go through `clearEditHistoryCache` so the in-memory copy matches.
+ * Temporary clears only touch session state, so the rows come back after a restart,
+ * while permanent clears queue every id for a single batched delete.
+ */
+export async function removeChannelLogs(channelId: string, permanent: boolean) {
+    const [deleted, history] = await Promise.all([
+        getChannelLogsAfter(channelId, new Date(0).toISOString()),
+        getAllHistoryForChannel(channelId)
+    ]);
+
+    const handled = new Set<string>();
+    for (const record of deleted) {
+        const id = record.message_id;
+        handled.add(id);
+        recentMessages.delete(id);
+        channelMessageCache.delete(id);
+        invalidateLoggedCaches(id);
+        tempHiddenMessageIds.delete(id);
+        if (permanent) {
+            queueDelete(id);
+        } else {
+            // A still-pending write must flush unhidden, or the restart would lose the row.
+            pendingDeletes.delete(id);
+            tempHiddenMessageIds.add(id);
+        }
+        FluxDispatcher.dispatch({ type: "MESSAGE_DELETE", channelId, id, mlDeleted: true });
+    }
+
+    for (const record of history) {
+        const id = record.message_id;
+        // A row can be both deleted and edited; the delete above already removed it.
+        if (handled.has(id)) continue;
+        handled.add(id);
+        clearEditHistoryCache(id);
+        if (permanent) queueDelete(id);
+        FluxDispatcher.dispatch({
+            type: "MESSAGE_UPDATE",
+            message: { id, channel_id: channelId, editHistory: [] }
+        });
+    }
+
+    if (permanent) await flushQueuedLogs();
+    return handled.size;
 }
 
 export async function clearAllLogs(includeProtected = false) {
