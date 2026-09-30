@@ -201,6 +201,55 @@
     display: flex;
 }
 
+.vc-gctrap-role {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    border: 1px solid var(--border-subtle, var(--background-modifier-accent));
+    border-radius: 4px;
+    padding: 1px 4px;
+    flex-shrink: 0;
+}
+
+.vc-gctrap-role.vc-gctrap-target {
+    color: var(--status-danger);
+    border-color: var(--status-danger);
+}
+
+.vc-gctrap-role.vc-gctrap-member {
+    color: var(--status-positive);
+    border-color: var(--status-positive);
+}
+
+.vc-gctrap-chips-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.vc-gctrap-chips-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    min-width: 52px;
+    flex-shrink: 0;
+}
+
+.vc-gctrap-chip-role {
+    font-size: 10px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.vc-gctrap-chip.vc-gctrap-target {
+    border-left: 2px solid var(--status-danger);
+}
+
+.vc-gctrap-chip.vc-gctrap-member {
+    border-left: 2px solid var(--status-positive);
+}
+
 .vc-gctrap-picker-foot {
     display: flex;
     gap: 6px;
@@ -210,6 +259,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
+    align-items: center;
 }
 
 .vc-gctrap-chip {

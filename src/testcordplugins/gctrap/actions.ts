@@ -11,7 +11,7 @@ import { ChannelStore, UserStore } from "@webpack/common";
 import { addMembers, getGroupName, recipientIds, removeMembers, selfId } from "./api";
 import { settings } from "./settings";
 import { GctrapStore } from "./store";
-import { GroupConfig, isGroupMode, LogKind } from "./types";
+import { GroupConfig, isGroupMode, isTarget, LogKind, roleOf } from "./types";
 
 export function log(group: Pick<GroupConfig, "id" | "label">, text: string, kind: LogKind = "info"): void {
     GctrapStore.getState().addLog(group.label ?? getGroupName(ChannelStore.getChannel(group.id)), kind, text);
@@ -21,8 +21,12 @@ export function notify(title: string, body: string): void {
     if (settings.store.notify) showNotification({ title, body });
 }
 
+function labelOf(group: Pick<GroupConfig, "id" | "label">): string {
+    return group.label ?? getGroupName(ChannelStore.getChannel(group.id));
+}
+
 /** Start watching a group, or leave the existing config alone if it is tracked */
-export function trackGroup(channelId: string, members?: readonly string[], name?: string): void {
+export function trackGroup(channelId: string, targets?: readonly string[], name?: string): void {
     const store = GctrapStore.getState();
     if (store.getGroup(channelId)) return;
 
@@ -32,7 +36,8 @@ export function trackGroup(channelId: string, members?: readonly string[], name?
         id: channelId,
         label: name?.trim() || undefined,
         mode: isGroupMode(defaultMode) ? defaultMode : "strict",
-        members: [...new Set(members ?? recipients)],
+        targets: [...new Set(targets ?? recipients)],
+        members: [],
         readdLimit: settings.store.readdLimit,
         readdDelay: settings.store.readdDelay,
         readds: {}
@@ -61,29 +66,36 @@ function giveUp(channelId: string, userId: string): void {
     givenUp.set(channelId, list);
 }
 
-function nameOf(userId: string): string {
+export function nameOf(userId: string): string {
     const user = UserStore.getUser(userId);
     return user?.globalName || user?.username || userId;
 }
 
-/** Take a member out, unless the group is set to only ever add people back */
-export async function kickMember(group: GroupConfig, userId: string, reason: string): Promise<void> {
-    if (group.mode === "addonly" || group.mode === "off") return;
+/**
+ * Take a stranger out. Members and targets are never touched, so this only ever
+ * fires for someone who is on neither list. That is the case when a target drags
+ * a friend in, and when a member brings in someone gctrap has not met yet.
+ */
+export async function kickStranger(group: GroupConfig, userId: string, reason: string): Promise<boolean> {
+    if (group.mode === "addonly" || group.mode === "off") return false;
+    if (roleOf(group, userId)) return false;
 
     const { removed } = await removeMembers(group.id, [userId], settings.store.memberSize, settings.store.addDelay);
-    if (!removed) return;
+    if (!removed) return false;
 
     log(group, `${reason}: kicked ${nameOf(userId)}`, "action");
-    notify(`${group.label ?? getGroupName(ChannelStore.getChannel(group.id))} lost a member`, `${nameOf(userId)} ${reason} and was kicked.`);
+    notify(`${labelOf(group)} lost a member`, `${nameOf(userId)} ${reason} and was kicked.`);
+    return true;
 }
 
 /**
- * Put a member back in. Every re-add is counted against readdLimit so a member
- * that keeps walking out is not hammered forever. Returns false when the group
- * only kicks, the member is back already, or the limit is reached.
+ * Put a target back in. Members are left alone, so a member walking out is their
+ * own business. Returns false when the group only kicks, the target is already
+ * back, or the re-add limit is reached.
  */
-export async function readdMember(group: GroupConfig, userId: string, reason: string): Promise<boolean> {
+export async function readdTarget(group: GroupConfig, userId: string, reason: string): Promise<boolean> {
     if (group.mode === "kickonly" || group.mode === "off") return false;
+    if (!isTarget(group, userId)) return false;
     if (isGivenUp(group.id, userId)) return false;
     if (recipientIds(ChannelStore.getChannel(group.id)).includes(userId)) return false;
 
@@ -91,6 +103,7 @@ export async function readdMember(group: GroupConfig, userId: string, reason: st
 
     const current = GctrapStore.getState().getGroup(group.id);
     if (!current || current.mode === "kickonly" || current.mode === "off") return false;
+    if (!isTarget(current, userId)) return false;
 
     const { added } = await addMembers(group.id, [userId], settings.store.memberSize, settings.store.addDelay);
     if (!added) return false;
@@ -113,24 +126,25 @@ function bumpReaddCount(group: GroupConfig, userId: string): number {
 }
 
 /**
- * Bring a group in line with its allowlist in one pass, honouring the mode:
- * missing members go back in unless the group only kicks, extras get kicked out
- * unless the group only adds.
+ * Bring a group in line with its two lists in one pass. Targets that walked out
+ * go back in, strangers get kicked, and members are never readded or removed.
  */
 export async function syncGroup(group: GroupConfig): Promise<string> {
     const present = recipientIds(ChannelStore.getChannel(group.id));
-    const missing = group.members.filter(id => !present.includes(id) && !isGivenUp(group.id, id));
-    const extras = present.filter(id => id !== selfId() && !group.members.includes(id));
+    const known = new Set([...group.targets, ...group.members, selfId()]);
+
+    const missing = group.targets.filter(id => !present.includes(id) && !isGivenUp(group.id, id));
+    const strangers = present.filter(id => !known.has(id));
 
     const parts: string[] = [];
 
     if (missing.length && group.mode !== "kickonly" && group.mode !== "off") {
         const res = await addMembers(group.id, missing, settings.store.memberSize, settings.store.addDelay);
-        parts.push(`${res.added} of ${missing.length} put back in`);
+        parts.push(`${res.added} of ${missing.length} targets put back in`);
     }
-    if (extras.length && group.mode !== "addonly" && group.mode !== "off") {
-        const res = await removeMembers(group.id, extras, settings.store.memberSize, settings.store.addDelay);
-        parts.push(`${res.removed} of ${extras.length} extras kicked out`);
+    if (strangers.length && group.mode !== "addonly" && group.mode !== "off") {
+        const res = await removeMembers(group.id, strangers, settings.store.memberSize, settings.store.addDelay);
+        parts.push(`${res.removed} of ${strangers.length} strangers kicked out`);
     }
 
     log(group, `Synced: ${parts.length ? parts.join(", ") : "nothing to do"}`, "action");

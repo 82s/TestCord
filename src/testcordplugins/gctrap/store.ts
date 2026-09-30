@@ -9,7 +9,8 @@ import { proxyLazy } from "@utils/lazy";
 import { Logger } from "@utils/Logger";
 import { zustandCreate } from "@webpack/common";
 
-import { GroupConfig, LogEntry, LogKind, Preset } from "./types";
+import { settings } from "./settings";
+import { GroupConfig, isGroupMode, LogEntry, LogKind, migrateGroup, Preset } from "./types";
 
 const KEY_GROUPS = "gctrap_groups";
 const KEY_PRESETS = "gctrap_presets";
@@ -34,8 +35,6 @@ interface GctrapState {
     addLog: (group: string, kind: LogKind, text: string) => void;
     clearLog: () => void;
 }
-
-type StateSetter = (partial: Partial<GctrapState> | ((state: GctrapState) => Partial<GctrapState>)) => void;
 
 interface GctrapStore {
     <T>(selector: (state: GctrapState) => T): T;
@@ -65,13 +64,26 @@ export const GctrapStore = proxyLazy(() => createStore((set, get) => ({
     log: [],
 
     async load() {
-        const [groups, presets, log] = await Promise.all([
-            DataStore.get<GroupConfig[]>(KEY_GROUPS),
+        const [saved, presets, log] = await Promise.all([
+            DataStore.get<unknown[]>(KEY_GROUPS),
             DataStore.get<Preset[]>(KEY_PRESETS),
             DataStore.get<LogEntry[]>(KEY_LOG)
         ]);
+
+        const defaults = {
+            mode: isGroupMode(settings.store.defaultMode) ? settings.store.defaultMode : "strict",
+            readdLimit: settings.store.readdLimit,
+            readdDelay: settings.store.readdDelay
+        };
+        const groups = (saved ?? []).flatMap(raw => {
+            const group = migrateGroup(raw, defaults);
+            return group ? [group] : [];
+        });
+
         logSeq = log?.[Math.max(0, (log?.length ?? 1) - 1)]?.id ?? 0;
-        set({ groups: groups ?? [], presets: presets ?? [], log: log ?? [], ready: true });
+        set({ groups, presets: presets ?? [], log: log ?? [], ready: true });
+
+        if (saved?.length !== groups.length) persist(KEY_GROUPS, groups);
     },
 
     getGroup(channelId) {

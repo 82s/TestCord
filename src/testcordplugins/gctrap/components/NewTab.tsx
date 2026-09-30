@@ -24,7 +24,7 @@ import {
 } from "../api";
 import { settings } from "../settings";
 import { GctrapStore } from "../store";
-import { GROUP_MODES, GroupMode, isGroupMode } from "../types";
+import { cycleRole, GROUP_MODES, GroupMode, isGroupMode, Role, rolesToLists, setManyRoles } from "../types";
 import { cl } from "../utils";
 import UserPicker from "./UserPicker";
 
@@ -63,7 +63,7 @@ export default function NewTab({ onTrack }: NewTabProps) {
     const tracked = GctrapStore(state => state.groups);
     const { memberSize } = settings.use(MEMBER_SIZE);
     const [friends, setFriends] = useState(getFriends);
-    const [selected, setSelected] = useState<string[]>([]);
+    const [roles, setRoles] = useState<Map<string, Role>>(() => new Map());
     const [preset, setPreset] = useState<string>("Everyone");
     const [mode, setMode] = useState<GroupMode>(isGroupMode(settings.store.defaultMode) ? settings.store.defaultMode : "strict");
     const [name, setName] = useState("");
@@ -75,12 +75,13 @@ export default function NewTab({ onTrack }: NewTabProps) {
 
     const presetNames = [...BUILT_IN_PRESETS, ...presets.map(item => item.name)];
     const untracked = listGroups().filter(group => !tracked.some(item => item.id === group.id));
+    const selected = [...roles.keys()];
+    const targetCount = [...roles.values()].filter(role => role === "target").length;
+    const memberCount = [...roles.values()].filter(role => role === "member").length;
 
-    const setSelection = (ids: readonly string[]) => setSelected([...ids]);
-    const toggle = (userId: string) =>
-        setSelected(current => current.includes(userId) ? current.filter(id => id !== userId) : [...current, userId]);
+    const setSelection = (ids: readonly string[]) => setRoles(new Map(ids.map(id => [id, "target" as Role])));
     const bulkToggle = (ids: readonly string[], add: boolean) =>
-        setSelected(current => add ? [...new Set([...current, ...ids])] : current.filter(id => !ids.includes(id)));
+        setRoles(current => setManyRoles(current, ids, add ? "target" : undefined));
 
     function applyPreset(next: string) {
         setPreset(next);
@@ -104,7 +105,12 @@ export default function NewTab({ onTrack }: NewTabProps) {
             setError("Pick at least one friend to add.");
             return;
         }
+        if (!targetCount) {
+            setError("Mark at least one person as a target, otherwise gctrap has nobody to hold in place.");
+            return;
+        }
         await run("Creating the group", async () => {
+            const { targets, members } = rolesToLists(roles);
             const [first, ...rest] = chunk(selected, perWave);
             const channelId = await createGroup(first, name);
             if (rest.length) await addMembers(channelId, rest.flat(), perWave, settings.store.addDelay);
@@ -114,11 +120,16 @@ export default function NewTab({ onTrack }: NewTabProps) {
                 id: channelId,
                 label: label || undefined,
                 mode,
-                members: selected,
+                targets,
+                members,
                 readdLimit: settings.store.readdLimit,
                 readdDelay: settings.store.readdDelay
             });
-            GctrapStore.getState().addLog(label || "New group", "action", `Created with ${selected.length} members`);
+            GctrapStore.getState().addLog(
+                label || "New group",
+                "action",
+                `Created with ${pluralize(targets.length, "target")} and ${pluralize(members.length, "member")}`
+            );
             showToast("Group created and added to the dashboard", Toasts.Type.SUCCESS);
             openChannel(channelId);
         });
@@ -233,8 +244,12 @@ export default function NewTab({ onTrack }: NewTabProps) {
 
                     <div className={cl("hint")}>
                         {selected.length
-                            ? `${selected.length} members queued, that is ${pluralize(waves, "wave")} of at most ${pluralize(perWave, "member")} at a time.`
+                            ? `${pluralize(targetCount, "target")} and ${pluralize(memberCount, "member")} queued, that is ${pluralize(waves, "wave")} of at most ${pluralize(perWave, "person")} at a time.`
                             : "Nobody picked yet. Pick friends on the right or load a preset."}
+                    </div>
+                    <div className={cl("hint")}>
+                        Targets are put back in when they leave. Members are left alone. Anyone on neither list gets kicked the
+                        moment they show up, whoever added them.
                     </div>
                     {error && <div className={cl("error")}>{error}</div>}
                     <Button
@@ -248,14 +263,15 @@ export default function NewTab({ onTrack }: NewTabProps) {
 
                 <div className={cl("column")}>
                     <Heading tag="h5">
-                        <span>Pick members ({friends.length} friends)</span>
+                        <span>Pick people ({friends.length} friends)</span>
                         <Button size="xs" variant="secondary" onClick={() => setFriends(getFriends())}>Refresh</Button>
                     </Heading>
                     <UserPicker
                         friends={friends}
-                        selected={selected}
-                        onToggle={toggle}
-                        onBulkToggle={bulkToggle}
+                        roles={roles}
+                        onCycle={userId => setRoles(current => cycleRole(current, userId))}
+                        onCycleMany={(ids, role) => setRoles(current => setManyRoles(current, ids, role))}
+                        onClearAll={() => setRoles(new Map())}
                     />
                 </div>
             </div>

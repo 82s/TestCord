@@ -8,13 +8,13 @@ import { Badge } from "@components/Badge";
 import { Button } from "@components/Button";
 import { copyWithToast } from "@utils/discord";
 import { pluralize } from "@utils/misc";
-import { ChannelStore, showToast, TextInput, Toasts, useState, useStateFromStores } from "@webpack/common";
+import { ChannelStore, showToast, TextInput, Toasts, useMemo, useState, useStateFromStores } from "@webpack/common";
 
 import { isGivenUp, log, notify, resetReaddCounts, syncGroup } from "../actions";
 import { addMembers, describeUser, getErrorMessage, getFriends, getGroupName, openChannel, recipientIds, removeMembers, selfId } from "../api";
 import { settings } from "../settings";
 import { GctrapStore } from "../store";
-import { GROUP_MODES, GroupConfig, GroupMode } from "../types";
+import { cycleRole, GROUP_MODES, GroupConfig, GroupMode, Role, rolesToLists, setManyRoles } from "../types";
 import { cl, GroupAvatar, STATUS_COLORS } from "../utils";
 import UserPicker from "./UserPicker";
 
@@ -51,13 +51,14 @@ function Field({ label, value, onCommit, min = 0, max = 99999 }: {
     );
 }
 
-function MemberChip({ userId, onRemove }: { userId: string; onRemove(): void; }) {
+function MemberChip({ userId, role, onRemove }: { userId: string; role: Role; onRemove(): void; }) {
     const member = describeUser(userId);
     return (
-        <span className={cl("chip")}>
+        <span className={cl("chip", { [role]: true })}>
             <span className={cl("dot")} style={{ background: STATUS_COLORS[member.status] }} />
             <span className={cl("chip-name")}>{member.name}</span>
-            <button className={cl("chip-x")} onClick={onRemove} aria-label={`Remove ${member.name} from the list`}>×</button>
+            <span className={cl("chip-role")}>{role}</span>
+            <button className={cl("chip-x")} onClick={onRemove} aria-label={`Remove ${member.name} from the ${role} list`}>×</button>
         </span>
     );
 }
@@ -69,15 +70,21 @@ interface GroupCardProps {
 export default function GroupCard({ group }: GroupCardProps) {
     const present = useStateFromStores([ChannelStore], () => recipientIds(ChannelStore.getChannel(group.id)));
     const [label, setLabel] = useState(group.label ?? "");
-    const [picked, setPicked] = useState<string[]>(group.members);
+    const [roles, setRoles] = useState<Map<string, Role>>(() => new Map([
+        ...group.targets.map((id): [string, Role] => [id, "target"]),
+        ...group.members.map((id): [string, Role] => [id, "member"])
+    ]));
     const [adding, setAdding] = useState(false);
     const [busy, setBusy] = useState("");
 
     const channel = ChannelStore.getChannel(group.id);
     const name = group.label || getGroupName(channel);
-    const missing = group.members.filter(id => !present.includes(id));
-    const extras = present.filter(id => id !== selfId() && !group.members.includes(id));
-    const stopped = group.members.filter(id => isGivenUp(group.id, id));
+    const known = useMemo(() => new Set([...group.targets, ...group.members, selfId()]), [group.targets, group.members]);
+
+    const missing = group.targets.filter(id => !present.includes(id));
+    const strangers = present.filter(id => !known.has(id));
+    const stopped = group.targets.filter(id => isGivenUp(group.id, id));
+    const absent = group.members.filter(id => !present.includes(id));
     const friends = adding ? getFriends() : [];
 
     const update = (patch: Partial<GroupConfig>) => GctrapStore.getState().upsertGroup({ ...group, ...patch });
@@ -106,7 +113,7 @@ export default function GroupCard({ group }: GroupCardProps) {
                         onBlur={() => label.trim() !== (group.label ?? "") && update({ label: label.trim() || undefined })}
                     />
                     <span className={cl("card-sub")}>
-                        {name} {"·"} {pluralize(group.members.length, "allowed member")} {"·"} {pluralize(present.length, "member")} in the group
+                        {name} {"·"} {pluralize(group.targets.length, "target")} {"·"} {pluralize(group.members.length, "member")} {"·"} {pluralize(present.length, "person")} in the group
                     </span>
                 </div>
                 <div className={cl("card-actions")}>
@@ -136,10 +143,11 @@ export default function GroupCard({ group }: GroupCardProps) {
             </div>
 
             <div className={cl("row")}>
-                <Badge text={pluralize(missing.length, "member")} variant={missing.length ? "warning" : "default"} />
-                <span className={cl("hint")}>out of the group right now</span>
-                <Badge text={pluralize(extras.length, "stranger")} variant={extras.length ? "danger" : "default"} />
-                <span className={cl("hint")}>not on the list</span>
+                <Badge text={pluralize(missing.length, "target out")} variant={missing.length ? "warning" : "default"} />
+                <span className={cl("hint")}>walked out and will be put back</span>
+                <Badge text={pluralize(strangers.length, "stranger")} variant={strangers.length ? "danger" : "default"} />
+                <span className={cl("hint")}>not on either list</span>
+                {!!absent.length && <Badge text={pluralize(absent.length, "member out")} variant="default" />}
                 {stopped.length > 0 && <Badge text={`${stopped.length} given up on`} variant="warning" />}
             </div>
 
@@ -155,9 +163,9 @@ export default function GroupCard({ group }: GroupCardProps) {
                 <Button
                     size="xs"
                     variant="secondary"
-                    disabled={!extras.length || group.mode === "addonly" || group.mode === "off"}
+                    disabled={!strangers.length || group.mode === "addonly" || group.mode === "off"}
                     onClick={() => run(async () => {
-                        const { removed } = await removeMembers(group.id, extras, settings.store.memberSize, settings.store.addDelay);
+                        const { removed } = await removeMembers(group.id, strangers, settings.store.memberSize, settings.store.addDelay);
                         log(group, `Kicked ${pluralize(removed, "stranger")}`, "action");
                     })}
                 >
@@ -169,49 +177,71 @@ export default function GroupCard({ group }: GroupCardProps) {
                     disabled={!missing.length || group.mode === "kickonly" || group.mode === "off"}
                     onClick={() => run(async () => {
                         const { added } = await addMembers(group.id, missing, settings.store.memberSize, settings.store.addDelay);
-                        log(group, `Put ${pluralize(added, "member")} back in`, "action");
+                        log(group, `Put ${pluralize(added, "target")} back in`, "action");
                     })}
                 >
-                    Put everyone back
+                    Put targets back
                 </Button>
                 <Button size="xs" variant="secondary" onClick={() => resetReaddCounts(group)}>
                     Reset counters
                 </Button>
                 <Button size="xs" variant="secondary" onClick={() => setAdding(!adding)}>
-                    {adding ? "Done" : "Edit list"}
+                    {adding ? "Done" : "Edit lists"}
                 </Button>
             </div>
 
             {adding ? (
                 <div className={cl("list-editor")}>
+                    <div className={cl("hint")}>
+                        Targets get put back in when they leave. Members are left alone and may add or remove anyone, but anyone
+                        they bring in has to be on one of these lists first or gctrap will kick them.
+                    </div>
                     <UserPicker
                         friends={friends}
-                        selected={picked}
-                        onToggle={userId => setPicked(current => current.includes(userId) ? current.filter(id => id !== userId) : [...current, userId])}
-                        onBulkToggle={(ids, add) => setPicked(current => add ? [...new Set([...current, ...ids])] : current.filter(id => !ids.includes(id)))}
+                        roles={roles}
+                        onCycle={userId => setRoles(current => cycleRole(current, userId))}
+                        onCycleMany={(ids, role) => setRoles(current => setManyRoles(current, ids, role))}
+                        onClearAll={() => setRoles(new Map())}
                     />
                     <Button
                         size="xs"
                         variant="primary"
                         onClick={() => {
-                            update({ members: picked });
+                            const { targets, members } = rolesToLists(roles);
+                            update({ targets, members });
                             setAdding(false);
-                            showToast(`Saved a list of ${pluralize(picked.length, "member")}`, Toasts.Type.SUCCESS);
+                            showToast(`Saved ${pluralize(targets.length, "target")} and ${pluralize(members.length, "member")}`, Toasts.Type.SUCCESS);
                         }}
                     >
-                        Save list
+                        Save lists
                     </Button>
                 </div>
             ) : (
-                <div className={cl("chips")}>
-                    {group.members.map(id => (
-                        <MemberChip
-                            key={id}
-                            userId={id}
-                            onRemove={() => update({ members: group.members.filter(member => member !== id) })}
-                        />
-                    ))}
-                    {!group.members.length && <span className={cl("hint")}>Nobody on the list yet, so everyone who joins gets kicked.</span>}
+                <div className={cl("chips-wrap")}>
+                    <div className={cl("chips")}>
+                        <span className={cl("chips-label")}>Targets</span>
+                        {group.targets.map(id => (
+                            <MemberChip
+                                key={id}
+                                userId={id}
+                                role="target"
+                                onRemove={() => update({ targets: group.targets.filter(member => member !== id) })}
+                            />
+                        ))}
+                        {!group.targets.length && <span className={cl("hint")}>No targets yet, so anyone who joins gets kicked.</span>}
+                    </div>
+                    <div className={cl("chips")}>
+                        <span className={cl("chips-label")}>Members</span>
+                        {group.members.map(id => (
+                            <MemberChip
+                                key={id}
+                                userId={id}
+                                role="member"
+                                onRemove={() => update({ members: group.members.filter(member => member !== id) })}
+                            />
+                        ))}
+                        {!group.members.length && <span className={cl("hint")}>No members yet, so only you can add people safely.</span>}
+                    </div>
                 </div>
             )}
         </div>

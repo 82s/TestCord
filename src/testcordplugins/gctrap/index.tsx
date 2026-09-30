@@ -16,18 +16,29 @@ import { Channel, RenderModalProps } from "@vencord/discord-types";
 import { Modal, showToast, TabBar, Toasts, useState } from "@webpack/common";
 import type { SVGProps } from "react";
 
-import { forgetAll, forgetGroup, kickMember, log, notify, readdMember, trackGroup } from "./actions";
+import { forgetAll, forgetGroup, kickStranger, log, nameOf, notify, readdTarget, trackGroup } from "./actions";
 import { isGroup, selfId } from "./api";
 import DashboardTab from "./components/DashboardTab";
 import LogTab from "./components/LogTab";
 import NewTab from "./components/NewTab";
 import { settings } from "./settings";
 import { GctrapStore } from "./store";
+import { roleOf } from "./types";
 import { cl } from "./utils";
 
 type Tab = "new" | "dashboard" | "log";
 type CreatedGroup = Channel & { creator_id?: string; };
 const BUTTON_LOCATION: ["buttonLocation"] = ["buttonLocation"];
+
+/**
+ * The gateway documents this event as channel_id plus a partial user, but the
+ * client has also been seen dispatching user_id directly, so both are read.
+ */
+interface RecipientPayload {
+    channel_id?: string;
+    user_id?: string;
+    user?: { id?: string; };
+}
 
 function GctrapIcon(props: SVGProps<SVGSVGElement>) {
     return (
@@ -140,29 +151,40 @@ export default definePlugin({
             trackGroup(channel.id);
         },
 
-        async CHANNEL_RECIPIENT_ADD({ channel_id, user_id }: { channel_id: string; user_id: string; }) {
-            const group = GctrapStore.getState().getGroup(channel_id);
-            if (!group || user_id === selfId()) return;
+        async CHANNEL_RECIPIENT_ADD(payload: RecipientPayload) {
+            const channelId = payload.channel_id;
+            const userId = payload.user_id ?? payload.user?.id;
+            const group = channelId ? GctrapStore.getState().getGroup(channelId) : undefined;
+            if (!group || !userId || userId === selfId()) return;
 
-            if (group.members.includes(user_id)) {
-                log(group, "A member you allowlisted was added back, probably by you");
+            const role = roleOf(group, userId);
+            if (role) {
+                log(group, `${nameOf(userId)} joined the group, already on the ${role} list`);
                 return;
             }
-            await kickMember(group, user_id, "joined the group");
+            await kickStranger(group, userId, "was not on either list");
         },
 
-        async CHANNEL_RECIPIENT_REMOVE({ channel_id, user_id }: { channel_id: string; user_id: string; }) {
-            const group = GctrapStore.getState().getGroup(channel_id);
-            if (!group) return;
+        async CHANNEL_RECIPIENT_REMOVE(payload: RecipientPayload) {
+            const channelId = payload.channel_id;
+            const userId = payload.user_id ?? payload.user?.id;
+            const group = channelId ? GctrapStore.getState().getGroup(channelId) : undefined;
+            if (!group || !userId) return;
 
-            if (user_id === selfId()) {
+            if (userId === selfId()) {
                 notify("You are out of the group", "gctrap stopped tracking it because you are no longer in there.");
                 forgetGroup(group.id);
                 return;
             }
-            if (!group.members.includes(user_id)) return;
 
-            await readdMember(group, user_id, "left the group");
+            const role = roleOf(group, userId);
+            if (role === "member") {
+                log(group, `${nameOf(userId)} left the group, members are free to go`, "info");
+                return;
+            }
+            if (role !== "target") return;
+
+            await readdTarget(group, userId, "left the group");
         }
     }
 });
