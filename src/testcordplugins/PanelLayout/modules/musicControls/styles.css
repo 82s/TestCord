@@ -47,10 +47,12 @@
 
 .vc-spotify-lyrics-align-left {
     text-align: left !important;
+    margin-left: 64px;
 }
 
 .vc-spotify-lyrics-align-right {
     text-align: right !important;
+    margin-right: 64px;
 }
 
 .vc-spotify-lyrics-align-center {
