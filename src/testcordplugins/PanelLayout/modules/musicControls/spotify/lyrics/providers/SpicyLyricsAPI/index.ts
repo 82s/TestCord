@@ -6,7 +6,7 @@
 
 import { showNotification } from "@api/Notifications";
 import { settings } from "@testcordplugins/PanelLayout/modules/musicControls/settings";
-import { LyricsData, LyricWord, Provider, SyncedLyric } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/providers/types";
+import { LyricBackground, LyricsData, LyricWord, Provider, SyncedLyric } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/providers/types";
 
 type Source = "spicy_lyrics" | "apple_music" | "spotify" | "unknown";
 
@@ -146,28 +146,13 @@ function joinWordsText(words: LyricWord[]): string {
     return words.map(w => w.text).join("").trim();
 }
 
-function wrapBackgroundWords(words: LyricWord[]): LyricWord[] {
-    if (!words.length) return words;
-
-    const wrapped = words.map(w => ({ ...w }));
-    wrapped[0] = { ...wrapped[0], text: `(${wrapped[0].text}` };
-
-    const lastIndex = wrapped.length - 1;
-    const last = wrapped[lastIndex];
-    const hadTrailingSpace = last.text.endsWith(" ");
-    const base = hadTrailingSpace ? last.text.slice(0, -1) : last.text;
-    wrapped[lastIndex] = { ...last, text: `${base})${hadTrailingSpace ? " " : ""}` };
-
-    return wrapped;
-}
-
-function buildBackgroundWords(
+function buildBackground(
     groups: VocalGroup[] | undefined,
     getText: (syllable: Syllable) => string | undefined = s => s.Text
-): LyricWord[] {
-    if (!groups?.length) return [];
+): LyricBackground[] | undefined {
+    if (!groups?.length) return undefined;
 
-    const merged: LyricWord[] = [];
+    const result: LyricBackground[] = [];
     for (const bg of groups) {
         const words = buildWords(bg.Syllables ?? [], getText);
         if (!words.length) continue;
@@ -175,16 +160,24 @@ function buildBackgroundWords(
         const text = joinWordsText(words);
         if (text === "" || text === "♪") continue;
 
-        merged.push(...wrapBackgroundWords(words));
+        result.push({
+            text,
+            words,
+            startTime: bg.StartTime ?? words[0].startTime,
+            endTime: bg.EndTime ?? words[words.length - 1].endTime
+        });
     }
-    return merged;
+
+    return result.length ? result : undefined;
 }
 
 const STALE_LINE_SEC = 8;
 const NOTE_LEAD_IN_SEC = 2;
 
 function getLineEndTime(line: SyncedLyric): number {
-    return line.words?.length ? line.words[line.words.length - 1].endTime : line.time;
+    let end = line.words?.length ? line.words[line.words.length - 1].endTime : line.time;
+    for (const bg of line.background ?? []) end = Math.max(end, bg.endTime);
+    return end;
 }
 
 function insertGapNotes(lines: SyncedLyric[]): SyncedLyric[] {
@@ -212,20 +205,24 @@ function insertGapNotes(lines: SyncedLyric[]): SyncedLyric[] {
     return result;
 }
 
-function fromSyllableLine(line: SyllableLine): SyncedLyric | null {
+function buildSyllableLine(line: SyllableLine, getText: (s: Syllable) => string | undefined): SyncedLyric | null {
     if (line.Type !== "Vocal" || !line.Lead) return null;
 
-    const words = [
-        ...buildWords(line.Lead.Syllables ?? []),
-        ...buildBackgroundWords(line.Background)
-    ];
+    const words = buildWords(line.Lead.Syllables ?? [], getText);
+    const background = buildBackground(line.Background, getText);
     const text = joinWordsText(words);
 
     return {
-        time: line.Lead.StartTime ?? 0,
+        time: line.Lead.StartTime ?? words[0]?.startTime ?? background?.[0]?.startTime ?? 0,
         text: (text === "" || text === "♪") ? null : text,
-        words: words.length ? words : undefined
+        words: words.length ? words : undefined,
+        background,
+        oppositeAligned: line.OppositeAligned || undefined
     };
+}
+
+function fromSyllableLine(line: SyllableLine): SyncedLyric | null {
+    return buildSyllableLine(line, s => s.Text);
 }
 
 function fromLineLine(line: LineLine): SyncedLyric | null {
@@ -234,7 +231,8 @@ function fromLineLine(line: LineLine): SyncedLyric | null {
     const text = (line.Text ?? "").trim();
     return {
         time: line.StartTime ?? 0,
-        text: (text === "" || text === "♪") ? null : text
+        text: (text === "" || text === "♪") ? null : text,
+        oppositeAligned: line.OppositeAligned || undefined
     };
 }
 
@@ -247,20 +245,7 @@ function fromStaticLine(line: StaticLine, index: number): SyncedLyric {
 }
 
 function fromSyllableLineRomanized(line: SyllableLine): SyncedLyric | null {
-    if (line.Type !== "Vocal" || !line.Lead) return null;
-
-    const getText = (s: Syllable) => s.TransliteratedText ?? s.Text;
-    const words = [
-        ...buildWords(line.Lead.Syllables ?? [], getText),
-        ...buildBackgroundWords(line.Background, getText)
-    ];
-    const text = joinWordsText(words);
-
-    return {
-        time: line.Lead.StartTime ?? 0,
-        text: (text === "" || text === "♪") ? null : text,
-        words: words.length ? words : undefined
-    };
+    return buildSyllableLine(line, s => s.TransliteratedText ?? s.Text);
 }
 
 function fromLineLineRomanized(line: LineLine): SyncedLyric | null {
@@ -269,7 +254,8 @@ function fromLineLineRomanized(line: LineLine): SyncedLyric | null {
     const text = (line.TransliteratedText ?? line.Text ?? "").trim();
     return {
         time: line.StartTime ?? 0,
-        text: (text === "" || text === "♪") ? null : text
+        text: (text === "" || text === "♪") ? null : text,
+        oppositeAligned: line.OppositeAligned || undefined
     };
 }
 
@@ -298,7 +284,9 @@ function hasAnyTransliteratedText(body: Lyrics): boolean {
     }
 }
 
-function buildSpicyRomanizedLyrics(body: Lyrics): SyncedLyric[] | null {
+async function buildSpicyRomanizedLyrics(body: Lyrics, network: boolean): Promise<SyncedLyric[] | null> {
+    const fromApi = hasAnyTransliteratedText(body);
+
     if (!hasAnyTransliteratedText(body)) return null;
 
     let lines: SyncedLyric[];
@@ -320,7 +308,11 @@ function buildSpicyRomanizedLyrics(body: Lyrics): SyncedLyric[] | null {
     return lines.length >= 2 ? insertGapNotes(lines) : null;
 }
 
-export async function getLyricsSpicyLyrics(trackId: string, apiKey: string): Promise<LyricsData | null> {
+export interface SpicyFetchOptions {
+    networkRomanization?: boolean;
+}
+
+export async function getLyricsSpicyLyrics(trackId: string, apiKey: string, options: SpicyFetchOptions = {}): Promise<LyricsData | null> {
     const id = trackId?.trim();
     const key = apiKey?.trim();
     if (!id) return null;
@@ -438,7 +430,7 @@ export async function getLyricsSpicyLyrics(trackId: string, apiKey: string): Pro
 
         if (body.Type !== "Static" && lines[0].time === 0 && lines[lines.length - 1].time === 0) return null;
 
-        const spicyRomanizedLines = buildSpicyRomanizedLyrics(body);
+        const spicyRomanizedLines = await buildSpicyRomanizedLyrics(body, options.networkRomanization ?? false);
 
         return {
             useLyric: Provider.SpicyLyrics,

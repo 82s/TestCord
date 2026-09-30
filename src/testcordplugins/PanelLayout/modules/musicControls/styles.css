@@ -16,6 +16,14 @@
     z-index: 1;
 }
 
+.vc-spotify-lyrics.vc-spotify-lyrics-spicy {
+    max-height: 100px;
+}
+
+.vc-spotify-lyrics-inner.vc-spotify-lyrics-spicy {
+    max-height: 100px;
+}
+
 .vc-spotify-lyrics-music-note {
     font-size: 16px;
     text-align: center;
@@ -30,6 +38,30 @@
     color: var(--text-muted) !important;
     margin-bottom: 1%;
     margin-top: 1%;
+}
+
+.vc-spotify-lyrics-line-row {
+    display: flex;
+    flex-direction: column;
+}
+
+.vc-spotify-lyrics-align-left {
+    text-align: left !important;
+}
+
+.vc-spotify-lyrics-align-right {
+    text-align: right !important;
+}
+
+.vc-spotify-lyrics-align-center {
+    text-align: center !important;
+}
+
+.vc-spotify-lyrics-bg-row {
+    opacity: 0.72;
+    font-size: 0.78em;
+    line-height: 1.2;
+    margin-top: -2px;
 }
 
 @keyframes side-to-side {

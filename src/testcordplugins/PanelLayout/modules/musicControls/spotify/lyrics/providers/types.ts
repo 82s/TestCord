@@ -11,10 +11,19 @@ export interface LyricWord {
     IsPartOfWord: boolean;
 }
 
+export interface LyricBackground {
+    text: string;
+    words: LyricWord[];
+    startTime: number;
+    endTime: number;
+}
+
 export interface SyncedLyric {
     time: number;
     text: string | null;
     words?: LyricWord[];
+    background?: LyricBackground[];
+    oppositeAligned?: boolean;
 }
 
 export enum Provider {

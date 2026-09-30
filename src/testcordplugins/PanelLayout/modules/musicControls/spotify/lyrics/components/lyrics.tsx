@@ -8,13 +8,14 @@ import { BaseText } from "@components/BaseText";
 import { TooltipContainer } from "@components/TooltipContainer";
 import { settings } from "@testcordplugins/PanelLayout/modules/musicControls/settings";
 import { SpotifyLrcStore } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/providers/store";
+import { Provider } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/providers/types";
 import { useSpicyWordFrame } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/spicyAnimator/useSpicyWordFrame";
 import { SpotifyStore } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/SpotifyStore";
 import { ContextMenuApi, openModalLazy, React, useEffect, useState, useStateFromStores } from "@webpack/common";
 
 import { LyricsContextMenu } from "./ctxMenu";
 import { LyricsModal } from "./modal";
-import { cl, NoteSvg, useLyrics } from "./util";
+import { BackgroundRows, cl, leadAlignCl, MAX_BACKGROUND_GROUPS, NoteSvg, SpicyWordSpans, useLyrics } from "./util";
 
 const prevCl = cl("prev");
 const nextCl = cl("next");
@@ -22,16 +23,35 @@ const currentCl = cl("current");
 
 function LyricsDisplay({ scroll = true, style }: { scroll?: boolean; style?: React.CSSProperties; }) {
     const { showMusicNoteOnNoLyrics } = settings.use(["showMusicNoteOnNoLyrics"]);
-    const { lyricsInfo, lyricRefs, currLrcIndex, isPlaying, positionRef } = useLyrics({ scroll });
+    const { lyricsInfo, lyricRefs, currLrcIndex, trailingLrcIndex, isPlaying, positionRef } = useLyrics({ scroll });
 
     const currentLyrics = lyricsInfo?.lyricsVersions[lyricsInfo.useLyric] || null;
     const wordRefsRef = React.useRef<(HTMLSpanElement | null)[]>([]);
+    const bgWordRefs0 = React.useRef<(HTMLSpanElement | null)[]>([]);
+    const bgWordRefs1 = React.useRef<(HTMLSpanElement | null)[]>([]);
+    const bgWordRefs2 = React.useRef<(HTMLSpanElement | null)[]>([]);
+    const bgWordRefs3 = React.useRef<(HTMLSpanElement | null)[]>([]);
+    const bgWordRefsBySlot = [bgWordRefs0, bgWordRefs1, bgWordRefs2, bgWordRefs3];
+    const trailingWordRefsRef = React.useRef<(HTMLSpanElement | null)[]>([]);
+    const trailingBgWordRefs0 = React.useRef<(HTMLSpanElement | null)[]>([]);
+    const trailingBgWordRefs1 = React.useRef<(HTMLSpanElement | null)[]>([]);
+    const trailingBgWordRefs2 = React.useRef<(HTMLSpanElement | null)[]>([]);
+    const trailingBgWordRefs3 = React.useRef<(HTMLSpanElement | null)[]>([]);
+    const trailingBgWordRefsBySlot = [trailingBgWordRefs0, trailingBgWordRefs1, trailingBgWordRefs2, trailingBgWordRefs3];
 
-    const activeLineWords = currLrcIndex != null ? currentLyrics?.[currLrcIndex]?.words : undefined;
+    const activeLine = currLrcIndex != null ? currentLyrics?.[currLrcIndex] : undefined;
+    const trailingLine = trailingLrcIndex != null ? currentLyrics?.[trailingLrcIndex] : undefined;
+    const getPositionMs = () => positionRef.current;
 
-    useSpicyWordFrame(activeLineWords, wordRefsRef, () => positionRef.current, isPlaying);
+    useSpicyWordFrame(activeLine?.words, wordRefsRef, getPositionMs, isPlaying);
+    useSpicyWordFrame(trailingLine?.words, trailingWordRefsRef, getPositionMs, isPlaying);
+    for (let bI = 0; bI < MAX_BACKGROUND_GROUPS; bI++) {
+        useSpicyWordFrame(activeLine?.background?.[bI]?.words, bgWordRefsBySlot[bI], getPositionMs, isPlaying);
+        useSpicyWordFrame(trailingLine?.background?.[bI]?.words, trailingBgWordRefsBySlot[bI], getPositionMs, isPlaying);
+    }
 
     const makeClassName = (index: number): string => {
+        if (index === trailingLrcIndex) return currentCl;
         if (currLrcIndex == null) return prevCl;
 
         const diff = index - currLrcIndex;
@@ -40,38 +60,41 @@ function LyricsDisplay({ scroll = true, style }: { scroll?: boolean; style?: Rea
         return diff > 0 ? nextCl : prevCl;
     };
 
+    const isSpicyProvider = lyricsInfo?.useLyric === Provider.SpicyLyrics || lyricsInfo?.useLyric === Provider.SpicyRomanized;
+
     return (
         <div
-            className="vc-spotify-lyrics"
+            className={isSpicyProvider ? "vc-spotify-lyrics vc-spotify-lyrics-spicy" : "vc-spotify-lyrics"}
             style={style}
             onClick={() => openModalLazy(async () => props => <LyricsModal props={props} />)}
             onContextMenu={e => ContextMenuApi.openContextMenu(e, () => <LyricsContextMenu />)}
         >
-            <div className="vc-spotify-lyrics-inner">
+            <div className={isSpicyProvider ? "vc-spotify-lyrics-inner vc-spotify-lyrics-spicy" : "vc-spotify-lyrics-inner"}>
                 {currentLyrics ? currentLyrics.map((line, i) => {
                     const isCurrentLine = currLrcIndex === i;
-                    const hasWordTiming = isCurrentLine && !!line.words?.length;
+                    const isTrailingLine = trailingLrcIndex === i;
+                    const isActiveWordLine = isCurrentLine || isTrailingLine;
+                    const hasWordTiming = isActiveWordLine && !!line.words?.length;
+                    const rowWordRefs = isCurrentLine ? wordRefsRef : trailingWordRefsRef;
+                    const rowBgRefs = isCurrentLine ? bgWordRefsBySlot : trailingBgWordRefsBySlot;
 
                     return (
-                        <div ref={lyricRefs[i]} key={i}>
+                        <div ref={lyricRefs[i]} key={i} className={cl("line-row")}>
                             <BaseText
-                                size={isCurrentLine ? "sm" : "xs"}
-                                className={makeClassName(i)}
+                                size={isActiveWordLine ? "sm" : "xs"}
+                                className={[makeClassName(i), leadAlignCl(line, isSpicyProvider, "center")].join(" ")}
                             >
                                 {hasWordTiming
-                                    ? line.words!.map((word, w) => (
-                                        <React.Fragment key={w}>
-                                            <span
-                                                ref={(el: HTMLSpanElement | null) => { wordRefsRef.current[w] = el; }}
-                                                className={word.IsPartOfWord ? "vc-spicy-word vc-spicy-part-of-word" : "vc-spicy-word"}
-                                            >
-                                                {word.text}
-                                            </span>
-                                            {word.IsPartOfWord ? "" : " "}
-                                        </React.Fragment>
-                                    ))
+                                    ? <SpicyWordSpans words={line.words!} refsArray={rowWordRefs} />
                                     : (line.text || NoteSvg())}
                             </BaseText>
+                            <BackgroundRows
+                                background={line.background}
+                                isActive={isActiveWordLine}
+                                line={line}
+                                bgWordRefsBySlot={rowBgRefs}
+                                isSpicyProvider={isSpicyProvider}
+                            />
                         </div>
                     );
                 }) : showMusicNoteOnNoLyrics ? (

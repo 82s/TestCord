@@ -5,9 +5,10 @@
  */
 
 import * as DataStore from "@api/DataStore";
+import { BaseText } from "@components/BaseText";
 import { settings } from "@testcordplugins/PanelLayout/modules/musicControls/settings";
 import { SpotifyLrcStore } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/providers/store";
-import { LyricWord, SyncedLyric } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/providers/types";
+import { LyricBackground, LyricWord, SyncedLyric } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/providers/types";
 import { SpotifyStore } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/SpotifyStore";
 import { classNameFactory } from "@utils/css";
 import { findCssClassesLazy } from "@webpack";
@@ -30,6 +31,86 @@ DataStore.get<Record<string, number>>(DATASTORE_KEY).then(saved => {
     // Force trigger update across components if needed
     FluxDispatcher?.dispatch?.({ type: "SPOTIFY_LYRICS_DELAYS_LOADED" });
 });
+
+export const MAX_BACKGROUND_GROUPS = 4;
+
+function getLineEndTime(line: SyncedLyric): number {
+    let end = line.words?.length ? line.words[line.words.length - 1].endTime : line.time;
+    for (const bg of line.background ?? []) end = Math.max(end, bg.endTime);
+    return end;
+}
+
+export function SpicyWordSpans({ words, refsArray, variant = "lead" }: {
+    words: LyricWord[];
+    refsArray: React.MutableRefObject<(HTMLSpanElement | null)[]>;
+    variant?: "lead" | "bg";
+}) {
+    return (
+        <>
+            {words.map((word, w) => (
+                <React.Fragment key={w}>
+                    <span
+                        ref={(el: HTMLSpanElement | null) => { refsArray.current[w] = el; }}
+                        className={[
+                            "vc-spicy-word",
+                            word.IsPartOfWord && "vc-spicy-part-of-word",
+                            variant === "bg" && "vc-spicy-bg-word"
+                        ].filter(Boolean).join(" ")}
+                    >
+                        {word.text}
+                    </span>
+                    {word.IsPartOfWord ? "" : " "}
+                </React.Fragment>
+            ))}
+        </>
+    );
+}
+
+export function leadAlignCl(
+    line: Pick<SyncedLyric, "oppositeAligned">,
+    isSpicyProvider: boolean,
+    fallback: "left" | "center" = "left"
+): string {
+    if (!isSpicyProvider) return fallback === "center" ? cl("align-center") : cl("align-left");
+    return line.oppositeAligned ? cl("align-right") : cl("align-left");
+}
+
+export function bgAlignCl(line: Pick<SyncedLyric, "oppositeAligned">, isSpicyProvider: boolean): string {
+    if (!isSpicyProvider) return cl("align-right");
+    return line.oppositeAligned ? cl("align-left") : cl("align-right");
+}
+
+export function BackgroundRows({
+    background,
+    isActive,
+    line,
+    bgWordRefsBySlot,
+    isSpicyProvider
+}: {
+    background: LyricBackground[] | undefined;
+    isActive: boolean;
+    line: Pick<SyncedLyric, "oppositeAligned">;
+    bgWordRefsBySlot: React.MutableRefObject<(HTMLSpanElement | null)[]>[];
+    isSpicyProvider: boolean;
+}) {
+    if (!background?.length) return null;
+
+    return (
+        <>
+            {background.map((bg, bI) => (
+                <BaseText
+                    key={bI}
+                    size="xs"
+                    className={[cl("bg-row"), bgAlignCl(line, isSpicyProvider)].join(" ")}
+                >
+                    {isActive && bI < MAX_BACKGROUND_GROUPS
+                        ? <SpicyWordSpans words={bg.words} refsArray={bgWordRefsBySlot[bI]} variant="bg" />
+                        : bg.text}
+                </BaseText>
+            ))}
+        </>
+    );
+}
 
 export function NoteSvg() {
     return (
@@ -59,16 +140,6 @@ const getIndexes = (lyrics: SyncedLyric[], position: number, delay: number) => {
             right = mid - 1;
         } else {
             left = mid + 1;
-        }
-    }
-
-    if (currentIndex !== null && currentIndex > 0) {
-        const prevLine = lyrics[currentIndex - 1];
-        const prevWords = prevLine.words;
-        const prevLastWordEnd = prevWords?.length ? prevWords[prevWords.length - 1].endTime : prevLine.time;
-
-        if (posInSec < prevLastWordEnd) {
-            currentIndex -= 1;
         }
     }
 
@@ -121,6 +192,7 @@ export function useLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
     const { lyricDelay } = settings.use(["lyricDelay"]);
 
     const [currLrcIndex, setCurrLrcIndex] = useState<number | null>(null);
+    const [trailingLrcIndex, setTrailingLrcIndex] = useState<number | null>(null);
     const [nextLyric, setNextLyric] = useState<number | null>(null);
     const [activeWordIndex, setActiveWordIndex] = useState<number | null>(null);
     const [sungWordIndex, setSungWordIndex] = useState(-1);
@@ -173,6 +245,14 @@ export function useLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
 
                 positionRef.current = pos + totalDelay;
                 const posInSec = positionRef.current / 1000;
+
+                let trailingIndex: number | null = null;
+                if (currentIndex != null && currentIndex > 0) {
+                    const prevLine = currentLyrics[currentIndex - 1];
+                    if (posInSec < getLineEndTime(prevLine)) trailingIndex = currentIndex - 1;
+                }
+                setTrailingLrcIndex(prev => prev === trailingIndex ? prev : trailingIndex);
+
                 const words = currentIndex != null ? currentLyrics[currentIndex].words : undefined;
                 const wordIdx = getActiveWordIndex(words, posInSec);
 
@@ -196,6 +276,7 @@ export function useLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
                 }
             } else {
                 setCurrLrcIndex(prev => prev === null ? prev : null);
+                setTrailingLrcIndex(prev => prev === null ? prev : null);
                 setNextLyric(prev => prev === null ? prev : null);
                 setActiveWordIndex(prev => prev === null ? prev : null);
                 setSungWordIndex(prev => prev === -1 ? prev : -1);
@@ -226,5 +307,5 @@ export function useLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
         }
     }, [currLrcIndex, nextLyric, scroll, lyricRefs]);
 
-    return { track, lyricsInfo, lyricRefs, currLrcIndex, nextLyric, activeWordIndex, sungWordIndex, activeWordSync, isPlaying, positionRef };
+    return { track, lyricsInfo, lyricRefs, currLrcIndex, trailingLrcIndex, nextLyric, activeWordIndex, sungWordIndex, activeWordSync, isPlaying, positionRef };
 }
