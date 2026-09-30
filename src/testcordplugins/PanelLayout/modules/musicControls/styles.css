@@ -36,8 +36,6 @@
 .vc-spotify-lyrics-next,
 .vc-spotify-lyrics-prev {
     color: var(--text-muted) !important;
-    margin-bottom: 1%;
-    margin-top: 1%;
 }
 
 .vc-spotify-lyrics-line-row {
@@ -48,6 +46,7 @@
 .vc-spotify-lyrics-align-left {
     text-align: left !important;
     margin-left: 64px;
+    margin-top: 1%;
 }
 
 .vc-spotify-lyrics-align-right {
