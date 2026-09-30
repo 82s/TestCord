@@ -30,14 +30,18 @@ type Tab = "new" | "dashboard" | "log";
 type CreatedGroup = Channel & { creator_id?: string; };
 const BUTTON_LOCATION: ["buttonLocation"] = ["buttonLocation"];
 
-/**
- * The gateway documents this event as channel_id plus a partial user, but the
- * client has also been seen dispatching user_id directly, so both are read.
- */
-interface RecipientPayload {
-    channel_id?: string;
-    user_id?: string;
-    user?: { id?: string; };
+/** Group DM system messages, MessageType.RECIPIENT_ADD and RECIPIENT_REMOVE. */
+const RECIPIENT_ADD = 1;
+const RECIPIENT_REMOVE = 2;
+
+interface SystemMessagePayload {
+    message?: {
+        type?: number;
+        author?: { id?: string; };
+        mentions?: string[];
+    };
+    channelId?: string;
+    optimistic?: boolean;
 }
 
 function GctrapIcon(props: SVGProps<SVGSVGElement>) {
@@ -151,40 +155,58 @@ export default definePlugin({
             trackGroup(channel.id);
         },
 
-        async CHANNEL_RECIPIENT_ADD(payload: RecipientPayload) {
-            const channelId = payload.channel_id;
-            const userId = payload.user_id ?? payload.user?.id;
-            const group = channelId ? GctrapStore.getState().getGroup(channelId) : undefined;
-            if (!group || !userId || userId === selfId()) return;
+        /**
+         * The recipient events carry no actor, but the system message Discord posts
+         * alongside them does: the author is whoever did it and mentions[0] is who it
+         * happened to. That is what lets a target be told off for dragging people in
+         * while a member is left alone.
+         */
+        async MESSAGE_CREATE({ message, channelId, optimistic }: SystemMessagePayload) {
+            if (optimistic || !message || !channelId) return;
+            if (message.type !== RECIPIENT_ADD && message.type !== RECIPIENT_REMOVE) return;
 
-            const role = roleOf(group, userId);
-            if (role) {
-                log(group, `${nameOf(userId)} joined the group, already on the ${role} list`);
+            const group = GctrapStore.getState().getGroup(channelId);
+            if (!group) return;
+
+            const actor = message.author?.id;
+            const subject = message.mentions?.[0];
+            if (!actor || !subject) return;
+
+            if (actor === selfId()) {
+                if (subject === selfId()) {
+                    notify("You are out of the group", "gctrap stopped tracking it because you are no longer in there.");
+                    forgetGroup(group.id);
+                }
                 return;
             }
-            await kickStranger(group, userId, "was not on either list");
-        },
 
-        async CHANNEL_RECIPIENT_REMOVE(payload: RecipientPayload) {
-            const channelId = payload.channel_id;
-            const userId = payload.user_id ?? payload.user?.id;
-            const group = channelId ? GctrapStore.getState().getGroup(channelId) : undefined;
-            if (!group || !userId) return;
-
-            if (userId === selfId()) {
-                notify("You are out of the group", "gctrap stopped tracking it because you are no longer in there.");
-                forgetGroup(group.id);
+            // Members are trusted, so whatever they do to the roster is their call.
+            if (roleOf(group, actor) === "member") {
+                if (message.type !== RECIPIENT_ADD) return;
+                if (roleOf(group, subject)) {
+                    log(group, `${nameOf(actor)} added ${nameOf(subject)}, who is already on a list`, "info");
+                    return;
+                }
+                // Record the guest as a member so a later sync does not undo the call
+                // the member just made.
+                const current = GctrapStore.getState().getGroup(group.id);
+                if (current) GctrapStore.getState().upsertGroup({ ...current, members: [...current.members, subject] });
+                log(group, `${nameOf(actor)} added ${nameOf(subject)}, added them as a member`, "action");
                 return;
             }
 
-            const role = roleOf(group, userId);
-            if (role === "member") {
-                log(group, `${nameOf(userId)} left the group, members are free to go`, "info");
+            if (message.type === RECIPIENT_ADD) {
+                if (roleOf(group, subject)) {
+                    log(group, `${nameOf(actor)} added ${nameOf(subject)}, who is already on a list`, "info");
+                    return;
+                }
+                await kickStranger(group, subject, `was added by ${nameOf(actor)}`);
                 return;
             }
-            if (role !== "target") return;
 
-            await readdTarget(group, userId, "left the group");
+            // A target walked out, or a target threw somebody else out.
+            if (subject === actor) await readdTarget(group, subject, "left the group");
+            else await readdTarget(group, subject, `was removed by ${nameOf(actor)}`);
         }
     }
 });

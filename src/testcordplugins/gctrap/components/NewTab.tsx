@@ -248,8 +248,8 @@ export default function NewTab({ onTrack }: NewTabProps) {
                             : "Nobody picked yet. Pick friends on the right or load a preset."}
                     </div>
                     <div className={cl("hint")}>
-                        Targets are put back in when they leave. Members are left alone. Anyone on neither list gets kicked the
-                        moment they show up, whoever added them.
+                        Targets are put back in when they leave, and anyone they add gets kicked. Members are left alone, and
+                        anyone they add is taken as a member.
                     </div>
                     {error && <div className={cl("error")}>{error}</div>}
                     <Button

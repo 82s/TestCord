@@ -193,8 +193,8 @@ export default function GroupCard({ group }: GroupCardProps) {
             {adding ? (
                 <div className={cl("list-editor")}>
                     <div className={cl("hint")}>
-                        Targets get put back in when they leave. Members are left alone and may add or remove anyone, but anyone
-                        they bring in has to be on one of these lists first or gctrap will kick them.
+                        Targets get put back in when they leave, and anyone they add gets kicked. Members are left alone, and
+                        anyone they add is taken as a member.
                     </div>
                     <UserPicker
                         friends={friends}
