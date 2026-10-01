@@ -154,13 +154,13 @@ export function LyricsAttributionFooter({
             {hasWriters && (
                 <div className={cl("attribution-line")}>
                     <span className={cl("attribution-label")}>
-                        {attr.songWriters!.length > 1 ? "Writers " : "Writer "}
+                        {attr.songWriters!.length > 1 ? "Writers: " : "Writer: "}
                     </span>
                     <span>{attr.songWriters!.join(", ")}</span>
                 </div>
             )}
-            {attr.uploader && <AttributionPersonLine label="Uploaded by" person={attr.uploader} />}
-            {attr.maker && <AttributionPersonLine label="Synced by" person={attr.maker} />}
+            {attr.uploader && <AttributionPersonLine label="Uploaded by: " person={attr.uploader} />}
+            {attr.maker && <AttributionPersonLine label="Synced by: " person={attr.maker} />}
         </div>
     );
 }
