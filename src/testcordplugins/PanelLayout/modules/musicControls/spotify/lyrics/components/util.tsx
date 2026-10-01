@@ -7,11 +7,18 @@
 import * as DataStore from "@api/DataStore";
 import { settings } from "@testcordplugins/PanelLayout/modules/musicControls/settings";
 import { SpotifyLrcStore } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/providers/store";
-import { LyricWord, SyncedLyric } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/providers/types";
+import {
+    LyricsAttribution,
+    LyricsAttributionPerson,
+    LyricsData,
+    LyricWord,
+    Provider,
+    SyncedLyric,
+} from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/providers/types";
 import { SpotifyStore } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/SpotifyStore";
 import { classNameFactory } from "@utils/css";
 import { findCssClassesLazy } from "@webpack";
-import { FluxDispatcher, React, useEffect, useState, useStateFromStores } from "@webpack/common";
+import { FluxDispatcher, MaskedLink, React, useEffect, useState, useStateFromStores } from "@webpack/common";
 
 export const scrollClasses = findCssClassesLazy("auto", "customTheme");
 
@@ -75,6 +82,86 @@ export function NoteSvg() {
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 480 720" fill="currentColor" className={cl("music-note")}>
             <path d="m160,-240 q -66,0 -113,-47 -47,-47 -47,-113 0,-66 47,-113 47,-47 113,-47 23,0 42.5,5.5 19.5,5.5 37.5,16.5 v -422 h 240 v 160 H 320 v 400 q 0,66 -47,113 -47,47 -113,47 z" />
         </svg>
+    );
+}
+
+function humanizeSource(source: string): string {
+    if (!source) return "";
+    return source
+        .split(/[_\s]+/)
+        .filter(Boolean)
+        .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ");
+}
+
+export function getCurrentAttribution(lyricsInfo: LyricsData | null): LyricsAttribution | undefined {
+    if (!lyricsInfo?.attributions) return undefined;
+    const use = lyricsInfo.useLyric;
+    if (use === Provider.SpicyLyrics || use === Provider.SpicyRomanized) {
+        return lyricsInfo.attributions[Provider.SpicyLyrics];
+    }
+    return lyricsInfo.attributions[use];
+}
+
+function AttributionPersonLine({ label, person }: { label: string; person: LyricsAttributionPerson; }) {
+    const href = person.url ?? (person.id ? `https://discord.com/users/${person.id}` : undefined);
+
+    return (
+        <div className={cl("attribution-line")}>
+            <span className={cl("attribution-label")}>{label} </span>
+            {person.avatar && (
+                <img
+                    src={person.avatar}
+                    alt=""
+                    className={cl("attribution-avatar")}
+                />
+            )}
+            {href ? (
+                <MaskedLink href={href}>{person.username}</MaskedLink>
+            ) : (
+                <span>{person.username}</span>
+            )}
+        </div>
+    );
+}
+
+export function LyricsAttributionFooter({
+    lyricsInfo,
+    className,
+}: {
+    lyricsInfo: LyricsData | null;
+    className?: string;
+}) {
+    if (!lyricsInfo) return null;
+
+    const attr = getCurrentAttribution(lyricsInfo);
+    if (!attr) return null;
+
+    const hasCredit = !!attr.uploader || !!attr.maker;
+    const hasWriters = !!attr.songWriters?.length;
+    const hasProvider = !!attr.provider;
+
+    if (!hasCredit && !hasWriters && !hasProvider) return null;
+
+    return (
+        <div className={[cl("attribution"), className].filter(Boolean).join(" ")}>
+            {hasProvider && (
+                <div className={cl("attribution-line")}>
+                    <span className={cl("attribution-label")}>Source: </span>
+                    <span>{humanizeSource(attr.provider)}</span>
+                </div>
+            )}
+            {hasWriters && (
+                <div className={cl("attribution-line")}>
+                    <span className={cl("attribution-label")}>
+                        {attr.songWriters!.length > 1 ? "Writers " : "Writer "}
+                    </span>
+                    <span>{attr.songWriters!.join(", ")}</span>
+                </div>
+            )}
+            {attr.uploader && <AttributionPersonLine label="Uploaded by" person={attr.uploader} />}
+            {attr.maker && <AttributionPersonLine label="Synced by" person={attr.maker} />}
+        </div>
     );
 }
 
@@ -152,6 +239,7 @@ export function useLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
     }, []);
 
     const currentLyrics = lyricsInfo?.lyricsVersions[lyricsInfo.useLyric];
+    const isUntimed = !!currentLyrics?.[0]?.untimed;
 
     useEffect(() => {
         if (currentLyrics) {
@@ -163,7 +251,7 @@ export function useLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
         let rafId: number | undefined;
 
         const tick = () => {
-            if (currentLyrics) {
+            if (currentLyrics && !isUntimed) {
                 const pos = SpotifyStore.position;
                 const [currentIndex, nextLyricIndex] = getIndexes(currentLyrics, pos, totalDelay);
 
@@ -195,7 +283,7 @@ export function useLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
         return () => {
             if (rafId !== undefined) cancelAnimationFrame(rafId);
         };
-    }, [currentLyrics, totalDelay, isPlaying, storePosition]);
+    }, [currentLyrics, isUntimed, totalDelay, isPlaying, storePosition]);
 
     useEffect(() => {
         if (scroll && currLrcIndex !== null) {
@@ -208,5 +296,5 @@ export function useLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
         }
     }, [currLrcIndex, nextLyric, scroll, lyricRefs]);
 
-    return { track, lyricsInfo, lyricRefs, currLrcIndex, trailingLrcIndex, nextLyric, isPlaying, positionRef };
+    return { track, lyricsInfo, lyricRefs, currLrcIndex, trailingLrcIndex, nextLyric, isPlaying, positionRef, isUntimed };
 }
