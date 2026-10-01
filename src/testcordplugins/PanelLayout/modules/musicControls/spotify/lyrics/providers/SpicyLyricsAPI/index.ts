@@ -284,9 +284,7 @@ function hasAnyTransliteratedText(body: Lyrics): boolean {
     }
 }
 
-async function buildSpicyRomanizedLyrics(body: Lyrics, network: boolean): Promise<SyncedLyric[] | null> {
-    const fromApi = hasAnyTransliteratedText(body);
-
+function buildSpicyRomanizedLyrics(body: Lyrics): SyncedLyric[] | null {
     if (!hasAnyTransliteratedText(body)) return null;
 
     let lines: SyncedLyric[];
@@ -308,11 +306,7 @@ async function buildSpicyRomanizedLyrics(body: Lyrics, network: boolean): Promis
     return lines.length >= 2 ? insertGapNotes(lines) : null;
 }
 
-export interface SpicyFetchOptions {
-    networkRomanization?: boolean;
-}
-
-export async function getLyricsSpicyLyrics(trackId: string, apiKey: string, options: SpicyFetchOptions = {}): Promise<LyricsData | null> {
+export async function getLyricsSpicyLyrics(trackId: string, apiKey: string): Promise<LyricsData | null> {
     const id = trackId?.trim();
     const key = apiKey?.trim();
     if (!id) return null;
@@ -430,7 +424,7 @@ export async function getLyricsSpicyLyrics(trackId: string, apiKey: string, opti
 
         if (body.Type !== "Static" && lines[0].time === 0 && lines[lines.length - 1].time === 0) return null;
 
-        const spicyRomanizedLines = await buildSpicyRomanizedLyrics(body, options.networkRomanization ?? false);
+        const spicyRomanizedLines = buildSpicyRomanizedLyrics(body);
 
         return {
             useLyric: Provider.SpicyLyrics,

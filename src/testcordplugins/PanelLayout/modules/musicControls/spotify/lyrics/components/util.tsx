@@ -5,10 +5,9 @@
  */
 
 import * as DataStore from "@api/DataStore";
-import { BaseText } from "@components/BaseText";
 import { settings } from "@testcordplugins/PanelLayout/modules/musicControls/settings";
 import { SpotifyLrcStore } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/providers/store";
-import { LyricBackground, LyricWord, SyncedLyric } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/providers/types";
+import { LyricWord, SyncedLyric } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/providers/types";
 import { SpotifyStore } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/SpotifyStore";
 import { classNameFactory } from "@utils/css";
 import { findCssClassesLazy } from "@webpack";
@@ -20,15 +19,11 @@ export const cl = classNameFactory("vc-spotify-lyrics-");
 
 const DATASTORE_KEY = "vc-spotify-custom-song-delays";
 const customSongDelays: Record<string, number> = {};
-let isLoaded = false;
 
-// Pre-load data globally once
 DataStore.get<Record<string, number>>(DATASTORE_KEY).then(saved => {
     if (saved) {
         Object.assign(customSongDelays, saved);
     }
-    isLoaded = true;
-    // Force trigger update across components if needed
     FluxDispatcher?.dispatch?.({ type: "SPOTIFY_LYRICS_DELAYS_LOADED" });
 });
 
@@ -40,9 +35,10 @@ function getLineEndTime(line: SyncedLyric): number {
     return end;
 }
 
-export function SpicyWordSpans({ words, refsArray }: {
+export function SpicyWordSpans({ words, refsArray, variant = "lead" }: {
     words: LyricWord[];
     refsArray: React.MutableRefObject<(HTMLSpanElement | null)[]>;
+    variant?: "lead" | "bg";
 }) {
     return (
         <>
@@ -52,7 +48,8 @@ export function SpicyWordSpans({ words, refsArray }: {
                         ref={(el: HTMLSpanElement | null) => { refsArray.current[w] = el; }}
                         className={[
                             "vc-spicy-word",
-                            word.IsPartOfWord && "vc-spicy-part-of-word"
+                            word.IsPartOfWord && "vc-spicy-part-of-word",
+                            variant === "bg" && "vc-spicy-bg-word"
                         ].filter(Boolean).join(" ")}
                     >
                         {word.text}
@@ -71,38 +68,6 @@ export function leadAlignCl(
 ): string {
     if (!isSpicyProvider) return fallback === "center" ? cl("align-center") : cl("align-left");
     return line.oppositeAligned ? cl("align-right") : cl("align-left");
-}
-
-export function BackgroundRows({
-    background,
-    isActive,
-    line,
-    bgWordRefsBySlot,
-    isSpicyProvider
-}: {
-    background: LyricBackground[] | undefined;
-    isActive: boolean;
-    line: Pick<SyncedLyric, "oppositeAligned">;
-    bgWordRefsBySlot: React.MutableRefObject<(HTMLSpanElement | null)[]>[];
-    isSpicyProvider: boolean;
-}) {
-    if (!background?.length) return null;
-
-    return (
-        <>
-            {background.map((bg, bI) => (
-                <BaseText
-                    key={bI}
-                    size="xs"
-                    className={[cl("bg-row"), bgAlignCl(line, isSpicyProvider)].join(" ")}
-                >
-                    {isActive && bI < MAX_BACKGROUND_GROUPS
-                        ? <SpicyWordSpans words={bg.words} refsArray={bgWordRefsBySlot[bI]} />
-                        : bg.text}
-                </BaseText>
-            ))}
-        </>
-    );
 }
 
 export function NoteSvg() {
@@ -146,33 +111,6 @@ const getIndexes = (lyrics: SyncedLyric[], position: number, delay: number) => {
     return [currentIndex, nextLyricIdx];
 };
 
-function getActiveWordIndex(words: LyricWord[] | undefined, posInSec: number): number | null {
-    if (!words?.length) return null;
-
-    for (let i = 0; i < words.length; i++) {
-        if (posInSec >= words[i].startTime && posInSec < words[i].endTime) return i;
-    }
-
-    return null;
-}
-
-function getSungUpToIndex(words: LyricWord[] | undefined, posInSec: number): number {
-    if (!words?.length) return -1;
-
-    let last = -1;
-    for (let i = 0; i < words.length; i++) {
-        if (words[i].endTime <= posInSec) last = i;
-        else break;
-    }
-
-    return last;
-}
-
-export interface WordSweepSync {
-    duration: number;
-    elapsed: number;
-}
-
 export function useLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
     const [track, storePosition, isPlaying] = useStateFromStores(
         [SpotifyStore], () => [
@@ -187,10 +125,6 @@ export function useLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
     const [currLrcIndex, setCurrLrcIndex] = useState<number | null>(null);
     const [trailingLrcIndex, setTrailingLrcIndex] = useState<number | null>(null);
     const [nextLyric, setNextLyric] = useState<number | null>(null);
-    const [activeWordIndex, setActiveWordIndex] = useState<number | null>(null);
-    const [sungWordIndex, setSungWordIndex] = useState(-1);
-    const [activeWordSync, setActiveWordSync] = useState<WordSweepSync | null>(null);
-    const activeWordKeyRef = React.useRef<string | null>(null);
     const [lyricRefs, setLyricRefs] = useState<React.RefObject<HTMLDivElement | null>[]>([]);
     const [, forceUpdate] = useState({});
     const positionRef = React.useRef(0);
@@ -245,36 +179,10 @@ export function useLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
                     if (posInSec < getLineEndTime(prevLine)) trailingIndex = currentIndex - 1;
                 }
                 setTrailingLrcIndex(prev => prev === trailingIndex ? prev : trailingIndex);
-
-                const words = currentIndex != null ? currentLyrics[currentIndex].words : undefined;
-                const wordIdx = getActiveWordIndex(words, posInSec);
-
-                setActiveWordIndex(prev => prev === wordIdx ? prev : wordIdx);
-
-                const sungIdx = getSungUpToIndex(words, posInSec);
-                setSungWordIndex(prev => prev === sungIdx ? prev : sungIdx);
-
-                const key = wordIdx != null ? `${currentIndex}:${wordIdx}` : null;
-                if (key !== activeWordKeyRef.current) {
-                    activeWordKeyRef.current = key;
-
-                    if (key != null && words) {
-                        const word = words[wordIdx!];
-                        const durationMs = Math.max((word.endTime - word.startTime) * 1000, 50);
-                        const elapsedMs = Math.min(Math.max((posInSec - word.startTime) * 1000, 0), durationMs);
-                        setActiveWordSync({ duration: durationMs, elapsed: elapsedMs });
-                    } else {
-                        setActiveWordSync(null);
-                    }
-                }
             } else {
                 setCurrLrcIndex(prev => prev === null ? prev : null);
                 setTrailingLrcIndex(prev => prev === null ? prev : null);
                 setNextLyric(prev => prev === null ? prev : null);
-                setActiveWordIndex(prev => prev === null ? prev : null);
-                setSungWordIndex(prev => prev === -1 ? prev : -1);
-                activeWordKeyRef.current = null;
-                setActiveWordSync(prev => prev === null ? prev : null);
             }
 
             if (isPlaying) {
@@ -300,5 +208,5 @@ export function useLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
         }
     }, [currLrcIndex, nextLyric, scroll, lyricRefs]);
 
-    return { track, lyricsInfo, lyricRefs, currLrcIndex, trailingLrcIndex, nextLyric, activeWordIndex, sungWordIndex, activeWordSync, isPlaying, positionRef };
+    return { track, lyricsInfo, lyricRefs, currLrcIndex, trailingLrcIndex, nextLyric, isPlaying, positionRef };
 }

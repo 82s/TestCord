@@ -93,7 +93,7 @@ export const SpotifyLrcStore = proxyLazyWebpack(() => {
             if (!track) return;
             const { provider } = e;
             const notify = e.silent ? () => { } : showNotif;
-            const currentInfo = await getLyrics(track);
+            const currentInfo = (lyricsInfo && loadedTrackId === track.id) ? lyricsInfo : await getLyrics(track);
             if (currentInfo?.useLyric === provider) return;
 
             if (currentInfo?.lyricsVersions[provider]) {

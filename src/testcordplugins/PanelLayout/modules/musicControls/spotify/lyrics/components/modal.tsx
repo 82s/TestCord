@@ -116,7 +116,7 @@ export function LyricsModal({ props }: { props: RenderModalProps; }) {
                                             {formatTime(bg.startTime)}
                                         </span>
                                         {isActiveWordLine && bI < MAX_BACKGROUND_GROUPS
-                                            ? <SpicyWordSpans words={bg.words} refsArray={rowBgRefs[bI]} />
+                                            ? <SpicyWordSpans words={bg.words} refsArray={rowBgRefs[bI]} variant="bg" />
                                             : bg.text}
                                     </BaseText>
                                 ))}

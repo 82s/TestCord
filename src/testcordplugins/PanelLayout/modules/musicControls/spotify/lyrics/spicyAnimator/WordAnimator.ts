@@ -95,6 +95,9 @@ function getOrCreateSprings(el: HTMLElement, state: WordState, progress: number)
     return springs;
 }
 
+const MAX_SCALE = 1.08;
+const MIN_SCALE = 0.9;
+
 export function stepWord(el: HTMLElement, state: WordState, progress: number, deltaTimeSec: number): void {
     const springs = getOrCreateSprings(el, state, progress);
     const targets = targetsFor(state, progress);
@@ -103,9 +106,9 @@ export function stepWord(el: HTMLElement, state: WordState, progress: number, de
     springs.yOffset.SetGoal(targets.yOffset);
     springs.glow.SetGoal(targets.glow);
 
-    const currentScale = springs.scale.Step(deltaTimeSec);
+    const currentScale = Math.min(Math.max(springs.scale.Step(deltaTimeSec), MIN_SCALE), MAX_SCALE);
     const currentYOffset = springs.yOffset.Step(deltaTimeSec);
-    const currentGlow = springs.glow.Step(deltaTimeSec);
+    const currentGlow = Math.max(springs.glow.Step(deltaTimeSec), 0);
 
     el.style.scale = String(currentScale);
     el.style.translate = `0 ${currentYOffset.toFixed(4)}em`;

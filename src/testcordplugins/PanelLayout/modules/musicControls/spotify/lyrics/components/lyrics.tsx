@@ -95,7 +95,7 @@ function LyricsDisplay({ scroll = true, style }: { scroll?: boolean; style?: Rea
                                     className={[makeClassName(i), leadAlignCl(line, isSpicyProvider, "center")].join(" ")}
                                 >
                                     {isActiveWordLine && bI < MAX_BACKGROUND_GROUPS
-                                        ? <SpicyWordSpans words={bg.words} refsArray={rowBgRefs[bI]} />
+                                        ? <SpicyWordSpans words={bg.words} refsArray={rowBgRefs[bI]} variant="bg" />
                                         : bg.text}
                                 </BaseText>
                             ))}

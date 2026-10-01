@@ -45,6 +45,7 @@
 
 .vc-spotify-lyrics-align-left {
     text-align: left !important;
+    margin-right: 20%;
     margin-left: 15%;
     margin-top: 1%;
 }
@@ -52,18 +53,12 @@
 .vc-spotify-lyrics-align-right {
     text-align: right !important;
     margin-right: 15%;
+    margin-left: 20%;
     margin-top: 1%;
 }
 
 .vc-spotify-lyrics-align-center {
     text-align: center !important;
-}
-
-.vc-spotify-lyrics-bg-row {
-    opacity: 0.72;
-    font-size: 0.78em;
-    line-height: 1.2;
-    margin-top: -2px;
 }
 
 @keyframes side-to-side {

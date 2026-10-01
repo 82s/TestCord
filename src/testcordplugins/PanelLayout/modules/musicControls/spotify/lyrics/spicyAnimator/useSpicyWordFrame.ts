@@ -30,7 +30,7 @@ export function useSpicyWordFrame(
         mountedForRef.current = words;
 
         const frame = (now: number) => {
-            const deltaTimeSec = Math.min((now - lastFrameTime) / 1000, 0.1);
+            const deltaTimeSec = Math.min((now - lastFrameTime) / 1000, 0.05);
             lastFrameTime = now;
 
             const posSec = getPositionMs() / 1000;
