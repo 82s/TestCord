@@ -43,18 +43,18 @@
     flex-direction: column;
 }
 
+.vc-spotify-lyrics-align-right,
+.vc-spotify-lyrics-align-left {
+    margin: 0 15%;
+    margin-top: 1%;
+}
+
 .vc-spotify-lyrics-align-left {
     text-align: left !important;
-    margin-right: 20%;
-    margin-left: 15%;
-    margin-top: 1%;
 }
 
 .vc-spotify-lyrics-align-right {
     text-align: right !important;
-    margin-right: 15%;
-    margin-left: 20%;
-    margin-top: 1%;
 }
 
 .vc-spotify-lyrics-align-center {
