@@ -45,13 +45,13 @@
 
 .vc-spotify-lyrics-align-left {
     text-align: left !important;
-    margin-left: 64px;
+    margin-left: 15%;
     margin-top: 1%;
 }
 
 .vc-spotify-lyrics-align-right {
     text-align: right !important;
-    margin-right: 64px;
+    margin-right: 15%;
     margin-top: 1%;
 }
 
