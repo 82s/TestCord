@@ -128,6 +128,14 @@ interface AwaiterOpts<T> {
     onError?(e: any): void;
     onSuccess?(value: T): void;
 }
+
+/**
+ * Stable identity so `useAwaiter` called without deps runs its factory once instead of
+ * once per render. A literal `[]` default would be a new array every render, which is the
+ * render loop this exists to prevent.
+ */
+const EMPTY_DEPS: unknown[] = [];
+
 /**
  * Await a promise
  * @param factory Factory
@@ -137,11 +145,15 @@ interface AwaiterOpts<T> {
 export function useAwaiter<T>(factory: () => Promise<T>): AwaiterRes<T | null>;
 export function useAwaiter<T>(factory: () => Promise<T>, providedOpts: AwaiterOpts<T>): AwaiterRes<T>;
 export function useAwaiter<T>(factory: () => Promise<T>, providedOpts?: AwaiterOpts<T | null>): AwaiterRes<T | null> {
-    // Object.assign built a fresh opts object on every render, so the three
-    // fields read below never compared equal and every consumer of this hook
-    // re-allocated its effect closure for nothing. Read the fields directly.
     const fallbackValue = providedOpts?.fallbackValue ?? null;
-    const deps = providedOpts?.deps;
+    // The old code read `opts.deps` off an object rebuilt by Object.assign on every
+    // render, so it defaulted to a brand new `[]` each time. Passing a fresh array to
+    // useEffect makes React re-run the effect on every render, and this effect calls
+    // setState when it settles, which renders again. For a factory that resolves from
+    // cache that is an unbounded render loop: the component never yields, so the whole
+    // tab locks up. Reading the caller's array directly restores the intended behaviour
+    // of running once when no deps are given.
+    const deps = providedOpts?.deps ?? EMPTY_DEPS;
     const onError = providedOpts?.onError;
     const onSuccess = providedOpts?.onSuccess;
 

@@ -182,6 +182,37 @@ export function cacheChannelMessages(records: LogRecord[]) {
     }
 }
 
+// Per-channel mirror of two DB queries: every logged row of the channel that is
+// not an edit, and every row carrying an edit history. They exist so a channel
+// switch does not have to re-read the channel's whole log, which is why they have
+// to be dropped whenever something actually changes those rows - a clear, an
+// edit, a delete. They live here rather than in index.tsx so the functions that
+// mutate the DB can invalidate them too; a stale copy is not a stale cache, it
+// re-injects rows that no longer exist.
+export const channelAllDeleted = new Map<string, LogRecord[]>();
+export const channelAllEdited = new Map<string, LogRecord[]>();
+export const channelSnapshotVersions = new Map<string, number>();
+
+export function snapshotVersion(channelId: string) {
+    return channelSnapshotVersions.get(channelId) ?? 0;
+}
+
+export function isCurrentSnapshot(channelId: string, version: number) {
+    return snapshotVersion(channelId) === version;
+}
+
+/** Bump only. For events that cannot change any already-logged row. */
+export function touchChannelSnapshot(channelId: string) {
+    channelSnapshotVersions.set(channelId, snapshotVersion(channelId) + 1);
+}
+
+/** Bump and drop the mirrors, so the next read comes back from the DB. */
+export function forgetChannelSnapshots(channelId: string) {
+    touchChannelSnapshot(channelId);
+    channelAllDeleted.delete(channelId);
+    channelAllEdited.delete(channelId);
+}
+
 export function invalidateChannelCache(channelId: string) {
     for (const [id, message] of [...recentMessages.entries()]) {
         if (message.channel_id !== channelId) continue;
@@ -1069,6 +1100,13 @@ export async function removeChannelLogs(channelId: string, permanent: boolean) {
         getChannelLogsAfter(channelId, new Date(0).toISOString()),
         getAllHistoryForChannel(channelId)
     ]);
+
+    // The rows are about to stop existing, so the channel's DB mirrors have to go
+    // with them. Without this they survived the clear, and the next channel switch
+    // injected every "deleted" message back out of the stale copy - so only the
+    // rows the MESSAGE_DELETE dispatches below had actually been in chat ever
+    // looked cleared, and everything else came straight back.
+    forgetChannelSnapshots(channelId);
 
     const handled = new Set<string>();
     for (const record of deleted) {
