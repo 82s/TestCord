@@ -19,13 +19,14 @@
 // This plugin is a port from Alyxia's Vendetta plugin
 import "./styles.css";
 
-import { definePluginSettings } from "@api/Settings";
+import { definePluginSettings, Settings } from "@api/Settings";
 import { BaseText } from "@components/BaseText";
 import { Divider } from "@components/Divider";
 import ErrorBoundary from "@components/ErrorBoundary";
 import { Flex } from "@components/Flex";
 import { HeadingSecondary } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
+import { buildNsTag, resolveNameColors } from "@testcordplugins/NameStyleChanger";
 import { Devs } from "@utils/constants";
 import { copyWithToast, fetchUserProfile } from "@utils/discord";
 import { Margins } from "@utils/margins";
@@ -42,8 +43,28 @@ interface Colors {
     accent: number;
 }
 
+function appendNameStyleTag(message: string): string {
+    try {
+        const nsSettings = (Settings as any).plugins?.NameStyleChanger;
+        if (!nsSettings?.enabled) return message;
+
+        return message + buildNsTag({
+            font: nsSettings.font,
+            effect: nsSettings.effect,
+            colors: nsSettings.customColors
+                ? resolveNameColors(nsSettings.color1, nsSettings.color2)
+                : null
+        });
+    } catch {
+        return message;
+    }
+}
+
 function encode(primary: number, accent: number): string {
-    const message = `[#${primary.toString(16).padStart(6, "0")},#${accent.toString(16).padStart(6, "0")}]`;
+    const message = appendNameStyleTag(
+        `[#${(primary & 0xffffff).toString(16).padStart(6, "0")},#${(accent & 0xffffff).toString(16).padStart(6, "0")}]`
+    );
+
     const padding = "";
     const encoded = Array.from(message)
         .map(x => x.codePointAt(0))
