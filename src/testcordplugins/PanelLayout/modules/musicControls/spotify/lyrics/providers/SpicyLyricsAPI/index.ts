@@ -8,12 +8,12 @@ import { showNotification } from "@api/Notifications";
 import { settings } from "@testcordplugins/PanelLayout/modules/musicControls/settings";
 import {
     LyricBackground,
+    LyricsAttribution,
+    LyricsAttributionPerson,
     LyricsData,
     LyricWord,
     Provider,
     SyncedLyric,
-    LyricsAttribution,
-    LyricsAttributionPerson,
 } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/providers/types";
 
 type Source = "spicy_lyrics" | "apple_music" | "spotify" | "unknown";
