@@ -12,7 +12,7 @@ import { openImageModal } from "@utils/discord";
 import { RenderModalProps } from "@vencord/discord-types";
 import { Modal, React } from "@webpack/common";
 
-import { BackgroundRows, cl, leadAlignCl, MAX_BACKGROUND_GROUPS, NoteSvg, scrollClasses, SpicyWordSpans, useLyrics } from "./util";
+import { cl, leadAlignCl, MAX_BACKGROUND_GROUPS, NoteSvg, scrollClasses, SpicyWordSpans, useLyrics } from "./util";
 
 const formatTime = (time: number) => {
     const minutes = Math.floor(time / 60);
@@ -105,13 +105,21 @@ export function LyricsModal({ props }: { props: RenderModalProps; }) {
                                         ? <SpicyWordSpans words={line.words!} refsArray={rowWordRefs} />
                                         : (line.text || NoteSvg())}
                                 </BaseText>
-                                <BackgroundRows
-                                    background={line.background}
-                                    isActive={isActiveWordLine}
-                                    line={line}
-                                    bgWordRefsBySlot={rowBgRefs}
-                                    isSpicyProvider={isSpicyProvider}
-                                />
+                                {line.background?.map((bg, bI) => (
+                                    <BaseText
+                                        key={bI}
+                                        size={isActiveWordLine ? "sm" : "xs"}
+                                        weight={isActiveWordLine ? "normal" : "light"}
+                                        className={[isActiveWordLine ? modalCurrentLine : modalLine, leadAlignCl(line, isSpicyProvider)].join(" ")}
+                                    >
+                                        <span className={cl("modal-timestamp")} onClick={() => SpotifyStore.seek(bg.startTime * 1000)}>
+                                            {formatTime(bg.startTime)}
+                                        </span>
+                                        {isActiveWordLine && bI < MAX_BACKGROUND_GROUPS
+                                            ? <SpicyWordSpans words={bg.words} refsArray={rowBgRefs[bI]} />
+                                            : bg.text}
+                                    </BaseText>
+                                ))}
                             </div>
                         );
                     })

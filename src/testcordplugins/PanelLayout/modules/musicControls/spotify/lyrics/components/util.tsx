@@ -40,10 +40,9 @@ function getLineEndTime(line: SyncedLyric): number {
     return end;
 }
 
-export function SpicyWordSpans({ words, refsArray, variant = "lead" }: {
+export function SpicyWordSpans({ words, refsArray }: {
     words: LyricWord[];
     refsArray: React.MutableRefObject<(HTMLSpanElement | null)[]>;
-    variant?: "lead" | "bg";
 }) {
     return (
         <>
@@ -53,8 +52,7 @@ export function SpicyWordSpans({ words, refsArray, variant = "lead" }: {
                         ref={(el: HTMLSpanElement | null) => { refsArray.current[w] = el; }}
                         className={[
                             "vc-spicy-word",
-                            word.IsPartOfWord && "vc-spicy-part-of-word",
-                            variant === "bg" && "vc-spicy-bg-word"
+                            word.IsPartOfWord && "vc-spicy-part-of-word"
                         ].filter(Boolean).join(" ")}
                     >
                         {word.text}
@@ -73,11 +71,6 @@ export function leadAlignCl(
 ): string {
     if (!isSpicyProvider) return fallback === "center" ? cl("align-center") : cl("align-left");
     return line.oppositeAligned ? cl("align-right") : cl("align-left");
-}
-
-export function bgAlignCl(line: Pick<SyncedLyric, "oppositeAligned">, isSpicyProvider: boolean): string {
-    if (!isSpicyProvider) return cl("align-right");
-    return line.oppositeAligned ? cl("align-left") : cl("align-right");
 }
 
 export function BackgroundRows({
@@ -104,7 +97,7 @@ export function BackgroundRows({
                     className={[cl("bg-row"), bgAlignCl(line, isSpicyProvider)].join(" ")}
                 >
                     {isActive && bI < MAX_BACKGROUND_GROUPS
-                        ? <SpicyWordSpans words={bg.words} refsArray={bgWordRefsBySlot[bI]} variant="bg" />
+                        ? <SpicyWordSpans words={bg.words} refsArray={bgWordRefsBySlot[bI]} />
                         : bg.text}
                 </BaseText>
             ))}

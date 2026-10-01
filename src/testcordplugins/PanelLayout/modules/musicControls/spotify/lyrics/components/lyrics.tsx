@@ -15,7 +15,7 @@ import { ContextMenuApi, openModalLazy, React, useEffect, useState, useStateFrom
 
 import { LyricsContextMenu } from "./ctxMenu";
 import { LyricsModal } from "./modal";
-import { BackgroundRows, cl, leadAlignCl, MAX_BACKGROUND_GROUPS, NoteSvg, SpicyWordSpans, useLyrics } from "./util";
+import { cl, leadAlignCl, MAX_BACKGROUND_GROUPS, NoteSvg, SpicyWordSpans, useLyrics } from "./util";
 
 const prevCl = cl("prev");
 const nextCl = cl("next");
@@ -88,13 +88,17 @@ function LyricsDisplay({ scroll = true, style }: { scroll?: boolean; style?: Rea
                                     ? <SpicyWordSpans words={line.words!} refsArray={rowWordRefs} />
                                     : (line.text || NoteSvg())}
                             </BaseText>
-                            <BackgroundRows
-                                background={line.background}
-                                isActive={isActiveWordLine}
-                                line={line}
-                                bgWordRefsBySlot={rowBgRefs}
-                                isSpicyProvider={isSpicyProvider}
-                            />
+                            {line.background?.map((bg, bI) => (
+                                <BaseText
+                                    key={bI}
+                                    size={isActiveWordLine ? "xs" : "xxs"}
+                                    className={[makeClassName(i), leadAlignCl(line, isSpicyProvider, "center")].join(" ")}
+                                >
+                                    {isActiveWordLine && bI < MAX_BACKGROUND_GROUPS
+                                        ? <SpicyWordSpans words={bg.words} refsArray={rowBgRefs[bI]} />
+                                        : bg.text}
+                                </BaseText>
+                            ))}
                         </div>
                     );
                 }) : showMusicNoteOnNoLyrics ? (
