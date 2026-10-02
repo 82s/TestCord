@@ -34,6 +34,20 @@ export function collectEmbedText(embed: any): string {
     return parts.join("\n");
 }
 
+/**
+ * Whether an embed still carries a body of its own.
+ *
+ * This is what separates a stripped embed, which Discord emptied and left as a husk,
+ * from a replacement one. Bots that paginate or switch tabs reuse a single url across
+ * every page and send a complete new embed each time, so "this field is missing" on
+ * its own is no reason to restore the previous embed's field over it - that leaves the
+ * new page's rows sitting under the old page's title and footer.
+ */
+export function embedHasBody(embed: any): boolean {
+    if (!embed || typeof embed !== "object") return false;
+    return !!embed.title || !!embed.description || (Array.isArray(embed.fields) && embed.fields.length > 0);
+}
+
 export function collectComponentText(component: any): string {
     if (!component || typeof component !== "object") return "";
     const parts: string[] = [];
@@ -94,5 +108,19 @@ export function collectLoggedMessageText(message: any): string {
         }
     }
     if (typeof message.poll?.question?.text === "string") parts.push(message.poll.question.text);
+    // Revisions count as content: an embed-only edit leaves the current message empty,
+    // so without this the old text and embeds are neither searchable nor copyable.
+    if (Array.isArray(message.editHistory)) {
+        for (const edit of message.editHistory) {
+            if (!edit || typeof edit !== "object") continue;
+            if (typeof edit.content === "string" && edit.content) parts.push(edit.content);
+            if (Array.isArray(edit.embeds)) {
+                for (const embed of edit.embeds) {
+                    const text = collectEmbedText(embed);
+                    if (text) parts.push(text);
+                }
+            }
+        }
+    }
     return parts.join("\n");
 }

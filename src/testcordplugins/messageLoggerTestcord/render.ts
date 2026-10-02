@@ -27,7 +27,8 @@ function getTimestamp(timestamp: any, id?: string): Date {
 export const mapTimestamp = (m: any) => {
     if (m.timestamp) m.timestamp = getTimestamp(m.timestamp, m.id);
     if (m.editedTimestamp) m.editedTimestamp = getTimestamp(m.editedTimestamp, m.id);
-    // Edit history entries carry embeds but no channel_id/message id, which sanitizeEmbed needs.
+    // Edit history entries carry embeds plus the id/channel_id of the message they
+    // belong to, so their embeds sanitize exactly like the current ones do.
     if (m.embeds && m.channel_id) m.embeds = m.embeds.map((e: any) => sanitizeEmbed(m.channel_id, m.id, e));
     return m;
 };

@@ -58,7 +58,7 @@ import { osintScanLoggedMessages } from "./osintBridge";
 import { ensureDefaultDir, restoreAttachmentBlobs } from "./saveImage";
 import { settings } from "./settings";
 import type { EditRecord, FetchMessagesResponse, LoadMessagesPayload, LoggedMessage, LogRecord, MessageCreatePayload, MessageDeleteBulkPayload, MessageDeletePayload, MessageUpdatePayload } from "./types";
-import { cl } from "./utils";
+import { cl, embedHasBody } from "./utils";
 
 const log = new Logger("MessageLoggerTestcord");
 const HEADER_SETTINGS = ["showLogsButton"] as const;
@@ -309,9 +309,18 @@ function mergeLoadedMessages(messages: LoggedMessage[] & { extra?: LoggedMessage
     dropNonObjectMentions(extra);
     delete messages.extra;
 
+    // The channel this load is for. processMessageFetch attaches the rows it picked
+    // without re-checking the fetch's own channel: an empty fetch resolves with
+    // nothing in the body to identify it, so it reads SelectedChannelStore instead,
+    // which by then can name a different channel. Anything fetched at the same time
+    // as a channel switch is enough to land another channel's logs in this one, so
+    // the rows are dropped unless they belong to the channel being loaded.
+    const targetChannelId = payload.channelId ?? messages[0]?.channel_id ?? SelectedChannelStore.getChannelId();
+    const ownChannel = extra.filter(message => !message.channel_id || message.channel_id === targetChannelId);
+
     if (messages.length === 0) {
         // Empty channel (e.g. #pending after all accepted) — show all deleted logs for it
-        const sorted = [...extra].sort((a, b) => Date.parse(String(b.timestamp)) - Date.parse(String(a.timestamp)));
+        const sorted = [...ownChannel].sort((a, b) => Date.parse(String(b.timestamp)) - Date.parse(String(a.timestamp)));
         messages.push(...sorted);
         mergedPayloads.add(messages);
         return messages;
@@ -326,7 +335,7 @@ function mergeLoadedMessages(messages: LoggedMessage[] & { extra?: LoggedMessage
     const includeNewer = !payload.hasMoreAfter && !payload.isBefore;
     const includeOlder = !payload.hasMoreBefore && !payload.isAfter;
     const knownIds = new Set(messages.map(message => message.id));
-    const toMerge = extra.filter(message => {
+    const toMerge = ownChannel.filter(message => {
         if (knownIds.has(message.id)) return false;
         const tsMs = toMs(String(message.timestamp));
         if (!includeNewer && tsMs > newestMs) return false;
@@ -1356,6 +1365,10 @@ export default definePlugin({
                                 if (!old?.url) continue;
                                 const match: any = latestByUrl.get(old.url);
                                 if (!match) continue;
+                                // Same rule as the live path: a bot that paginates or switches
+                                // tabs sends a whole new embed under a reused url, and filling
+                                // it from the previous page pins the old footer over the new one.
+                                if (embedHasBody(match)) continue;
                                 if (old.description && !match.description) { match.description = old.description; hasMergedMiddle = true; }
                                 if (old.title && !match.title) { match.title = old.title; hasMergedMiddle = true; }
                                 if (Array.isArray(old.fields) && old.fields.length && (!Array.isArray(match.fields) || !match.fields.length)) { match.fields = old.fields; hasMergedMiddle = true; }

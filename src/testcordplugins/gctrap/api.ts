@@ -35,10 +35,10 @@ function endpoint(key: string, ...args: string[]): string | undefined {
     return undefined;
 }
 
-const groupDmCreateUrl = () => endpoint("GROUP_DM_CREATE") ?? "/users/@me/channels";
+const groupDmCreateUrl = () => endpoint("USER_CHANNELS") ?? "/users/@me/channels";
 const channelUrl = (channelId: string) => endpoint("CHANNEL", channelId) ?? `/channels/${channelId}`;
 const recipientUrl = (channelId: string, userId: string) =>
-    endpoint("CHANNEL_RECIPIENTS", channelId) ?? `/channels/${channelId}/recipients/${userId}`;
+    endpoint("CHANNEL_RECIPIENT", channelId, userId) ?? `/channels/${channelId}/recipients/${userId}`;
 const inviteUrl = (code: string) => endpoint("INVITE", code) ?? `/invite/${code}`;
 
 export function isGroup(channel?: Channel | null): boolean {
@@ -86,6 +86,8 @@ export function privateGroupIds(): Set<string> {
 
 export function getErrorMessage(err: any): string {
     const body = err?.body;
+    const fieldError = body?.errors?._errors?.[0]?.message;
+    if (fieldError) return fieldError;
     switch (body?.code) {
         case 30001:
             return "This group already has the maximum number of members.";
@@ -97,8 +99,6 @@ export function getErrorMessage(err: any): string {
             return "That user cannot be added, they may have blocked you or closed DMs.";
         case 50033:
             return "That user cannot be added. Blocked, removed, and selfbot accounts are rejected.";
-        case 50035:
-            return "One of the IDs you entered is not valid.";
         default:
             return body?.message ?? err?.message ?? "The request failed.";
     }
@@ -109,7 +109,7 @@ export async function renameGroup(channelId: string, name: string): Promise<void
 }
 
 export async function createGroup(recipientList: readonly string[], name?: string): Promise<string> {
-    const res = await RestAPI.post({ url: groupDmCreateUrl(), body: { recipient_ids: recipientList } });
+    const res = await RestAPI.post({ url: groupDmCreateUrl(), body: { recipients: recipientList } });
     const channelId = res?.body?.id;
     if (!channelId) throw new Error("Discord did not return the new group.");
     if (name?.trim()) await renameGroup(channelId, name);

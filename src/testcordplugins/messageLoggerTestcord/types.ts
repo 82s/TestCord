@@ -21,6 +21,16 @@ export interface EditRecord {
     // Embed-driven messages (leaderboards, paginated bots) keep everything in the
     // embed, so without this every history entry collapses to the same stub text.
     embeds?: EmbedJSON[];
+    attachments?: LoggedAttachment[];
+    components?: unknown[];
+    stickerItems?: unknown[];
+    poll?: unknown;
+    flags?: number;
+    webhookId?: string | null;
+    // Identity of the message this revision belongs to. Embeds are only sanitized
+    // and renderable once the revision can be placed back in its channel.
+    id?: string;
+    channel_id?: string;
 }
 
 export interface LoggedAuthor {
@@ -113,6 +123,7 @@ export interface FetchMessagesResponse {
 }
 
 export interface LoadMessagesPayload {
+    channelId?: string;
     hasMoreAfter: boolean;
     hasMoreBefore: boolean;
     isAfter: boolean;

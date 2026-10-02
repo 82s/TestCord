@@ -195,7 +195,22 @@ function LogEntry({ record, onDelete, onProtect }: LogEntryProps) {
                             <time>{new Date(edit.timestamp).toLocaleString()}</time>
                             {edit.content && <div>{Parser.parse(edit.content)}</div>}
                             {edit.embeds?.map((embed: any, i: number) => <LoggedEmbed key={i} embed={embed} />)}
-                            {!edit.content && !edit.embeds?.length && <div className={cl("muted")}>No text content.</div>}
+                            {edit.components?.length ? (
+                                <div className={cl("components")}>
+                                    {edit.components.map((component: any, i: number) => <LoggedComponent key={i} component={component} />)}
+                                </div>
+                            ) : null}
+                            {edit.attachments?.length ? (
+                                <div className={cl("attachments")}>
+                                    {edit.attachments.map((attachment, i) => (
+                                        <MaskedLink key={attachment.id ?? i} href={attachment.blobUrl ?? attachment.url ?? "#"}>
+                                            <AttachmentIcon width={14} height={14} />
+                                            {attachment.filename ?? "Attachment"}
+                                        </MaskedLink>
+                                    ))}
+                                </div>
+                            ) : null}
+                            {!edit.content && !edit.embeds?.length && !edit.attachments?.length && <div className={cl("muted")}>No text content.</div>}
                         </div>
                     ))}
                 </details>

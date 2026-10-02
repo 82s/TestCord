@@ -81,7 +81,10 @@ export async function kickStranger(group: GroupConfig, userId: string, reason: s
     if (roleOf(group, userId)) return false;
 
     const { removed } = await removeMembers(group.id, [userId], settings.store.memberSize, settings.store.addDelay);
-    if (!removed) return false;
+    if (!removed) {
+        log(group, `${reason}, but Discord would not take ${nameOf(userId)} out`, "error");
+        return false;
+    }
 
     log(group, `${reason}: kicked ${nameOf(userId)}`, "action");
     notify(`${labelOf(group)} lost a member`, `${nameOf(userId)} ${reason} and was kicked.`);

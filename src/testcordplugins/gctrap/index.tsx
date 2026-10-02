@@ -13,11 +13,11 @@ import { TestcordDevs } from "@utils/constants";
 import { openModal } from "@utils/modal";
 import definePlugin from "@utils/types";
 import { Channel, RenderModalProps } from "@vencord/discord-types";
-import { Modal, showToast, TabBar, Toasts, useState } from "@webpack/common";
+import { ChannelStore, Modal, showToast, TabBar, Toasts, useState } from "@webpack/common";
 import type { SVGProps } from "react";
 
-import { forgetAll, forgetGroup, kickStranger, log, nameOf, notify, readdTarget, trackGroup } from "./actions";
-import { isGroup, selfId } from "./api";
+import { forgetAll, forgetGroup, kickStranger, log, nameOf, notify, readdTarget, syncGroup, trackGroup } from "./actions";
+import { getGroupName, isGroup, selfId } from "./api";
 import DashboardTab from "./components/DashboardTab";
 import LogTab from "./components/LogTab";
 import NewTab from "./components/NewTab";
@@ -42,6 +42,19 @@ interface SystemMessagePayload {
     };
     channelId?: string;
     optimistic?: boolean;
+}
+
+const unwatched = new Set<string>();
+
+/** Once per group, so a group missing from the dashboard explains itself */
+function logUnwatched(channelId: string): void {
+    if (unwatched.has(channelId)) return;
+    unwatched.add(channelId);
+    log(
+        { id: channelId, label: getGroupName(ChannelStore.getChannel(channelId)) },
+        "gctrap is not watching this group, so it left the roster alone. Add it to the dashboard to make it act.",
+        "warn"
+    );
 }
 
 function GctrapIcon(props: SVGProps<SVGSVGElement>) {
@@ -160,17 +173,27 @@ export default definePlugin({
          * alongside them does: the author is whoever did it and mentions[0] is who it
          * happened to. That is what lets a target be told off for dragging people in
          * while a member is left alone.
+         *
+         * Discord does not always fill both in, so a bare system message falls back to
+         * a roster diff, which reaches the same outcome without needing the payload.
          */
         async MESSAGE_CREATE({ message, channelId, optimistic }: SystemMessagePayload) {
             if (optimistic || !message || !channelId) return;
             if (message.type !== RECIPIENT_ADD && message.type !== RECIPIENT_REMOVE) return;
 
             const group = GctrapStore.getState().getGroup(channelId);
-            if (!group) return;
+            if (!group) {
+                logUnwatched(channelId);
+                return;
+            }
+            unwatched.delete(channelId);
 
             const actor = message.author?.id;
             const subject = message.mentions?.[0];
-            if (!actor || !subject) return;
+            if (!actor || !subject) {
+                await syncGroup(group);
+                return;
+            }
 
             if (actor === selfId()) {
                 if (subject === selfId()) {

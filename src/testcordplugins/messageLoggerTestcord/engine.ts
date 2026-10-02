@@ -13,7 +13,8 @@ import { applyBatch, clearLogs, clearUnprotectedLogs, getAllHistoryForChannel, g
 import { invalidateMessageClassCache } from "./render";
 import { ensureAttachmentSaved } from "./saveImage";
 import { settings } from "./settings";
-import { LoggedMessage, LogRecord, LogStatus, MessageCreatePayload, MessageDeleteBulkPayload, MessageDeletePayload, MessageUpdatePayload } from "./types";
+import { EditRecord, LoggedMessage, LogRecord, LogStatus, MessageCreatePayload, MessageDeleteBulkPayload, MessageDeletePayload, MessageUpdatePayload } from "./types";
+import { embedHasBody } from "./utils";
 
 const log = new Logger("MessageLoggerTestcord");
 const recentMessages = new Map<string, LoggedMessage>();
@@ -273,6 +274,11 @@ export function clearEditHistoryCache(id: string) {
 // ── Anti-antilog: merged from AntiAntilog ──
 const SUPPRESS_EMBEDS = 1 << 2;
 const mediaPreservedMessages = new WeakSet<object>();
+// MessageStore already holds the edited copy by the time the flux handler runs, so a
+// message missing from the logger caches can only be read back in its new state. The
+// store patch calls preserveRemovedMedia before that happens and parks the pre-edit
+// copy here, which is what gives webhook and embed-only edits a real previous version.
+const preEditMessages = new WeakMap<object, SnapshotMessage>();
 
 function isLegitimateOptimisticConfirmation(payload: MessageCreatePayload): boolean {
     const action: any = payload as any;
@@ -347,6 +353,7 @@ export function preserveRemovedMedia(payload: MessageUpdatePayload) {
 
         const old: any = MessageStore.getMessage(newMsg.channel_id, newMsg.id);
         if (!old) return;
+        preEditMessages.set(newMsg, old);
         mediaPreservedMessages.add(newMsg);
 
         let updated: any = null;
@@ -404,6 +411,12 @@ export function preserveRemovedMedia(payload: MessageUpdatePayload) {
                         if (!old?.url) continue;
                         const match: any = incomingByUrl.get(old.url);
                         if (!match) continue;
+                        // Only fill an embed that came back as a husk. A paginated or
+                        // tabbed bot reuses one url for every page and sends a whole new
+                        // embed on each click, so merging here restores the previous
+                        // page's footer onto the new one and the page number stops
+                        // matching the rows.
+                        if (embedHasBody(match)) continue;
                         if (old.description && !match.description) { match.description = old.description; hasMergedMiddle = true; }
                         if (old.title && !match.title) { match.title = old.title; hasMergedMiddle = true; }
                         if (Array.isArray(old.fields) && old.fields.length && (!Array.isArray(match.fields) || !match.fields.length)) { match.fields = lodash.cloneDeep(old.fields); hasMergedMiddle = true; }
@@ -471,6 +484,7 @@ export function preserveRemovedMedia(payload: MessageUpdatePayload) {
             // Mark the clone as well: the store patch replaces payload.message
             // with it, so the flux-side call sees this object, not newMsg.
             mediaPreservedMessages.add(updated);
+            preEditMessages.set(updated, old);
             (payload as any).message = updated;
             // Ensure anti-antilogg'd attachments are saved to disk immediately so they survive CDN expiry
             if (restoredAttachments.length > 0 && settings.store.saveImages && !IS_WEB) {
@@ -719,6 +733,34 @@ export function handleMessageCreate(payload: MessageCreatePayload) {
     }
 }
 
+function toEditRecord(previous: LoggedMessage): EditRecord {
+    const source = previous as unknown as {
+        components?: unknown[];
+        stickerItems?: unknown[];
+        poll?: unknown;
+        flags?: number;
+        webhookId?: string | null;
+        webhook_id?: string | null;
+    };
+    const record: EditRecord = {
+        content: previous.content,
+        timestamp: new Date().toISOString()
+    };
+    // Webhook and embed-only messages put everything but the text outside content, so a
+    // revision that stored text alone read back as the same empty stub every time.
+    if (previous.embeds?.length) record.embeds = lodash.cloneDeep(previous.embeds);
+    if (previous.attachments?.length) record.attachments = lodash.cloneDeep(previous.attachments);
+    if (source.components?.length) record.components = lodash.cloneDeep(source.components);
+    if (source.stickerItems?.length) record.stickerItems = lodash.cloneDeep(source.stickerItems);
+    if (source.poll) record.poll = lodash.cloneDeep(source.poll);
+    if (source.flags != null) record.flags = source.flags;
+    const webhookId = source.webhookId ?? source.webhook_id;
+    if (webhookId != null) record.webhookId = webhookId;
+    record.id = previous.id;
+    if (previous.channel_id) record.channel_id = previous.channel_id;
+    return record;
+}
+
 export async function handleMessageUpdate(payload: MessageUpdatePayload) {
     if (!active) return;
 
@@ -749,6 +791,18 @@ export async function handleMessageUpdate(payload: MessageUpdatePayload) {
     if (!hasContent && !hasEmbeds && !hasAttachments && !hasComponents) return;
 
     let previous: LoggedMessage | undefined = recentMessages.get(payload.message.id) ?? channelMessageCache.get(payload.message.id);
+    if (!previous) {
+        // A cache miss is the normal case for webhook and bot messages the logger never
+        // saw created (after a restart, or outside the whitelisted ids). Reading
+        // MessageStore here yields the copy the update already replaced, so the store
+        // patch parked the pre-edit state for us instead.
+        const preEdit = preEditMessages.get(payload.message as object);
+        if (preEdit) {
+            try {
+                previous = snapshotMessage(preEdit);
+            } catch { }
+        }
+    }
     if (!previous) {
         const storedMessage = MessageStore.getMessage(payload.message.channel_id, payload.message.id);
         if (storedMessage) {
@@ -824,11 +878,7 @@ export async function handleMessageUpdate(payload: MessageUpdatePayload) {
     message.guildId = payload.guildId ?? previous.guildId;
     message.editHistory = [
         ...(previous.editHistory ?? []),
-        {
-            content: previous.content,
-            embeds: previous.embeds?.length ? lodash.cloneDeep(previous.embeds) : undefined,
-            timestamp: new Date().toISOString()
-        }
+        toEditRecord(previous)
     ];
     if (settings.store.maxEditHistory > 0) {
         message.editHistory = message.editHistory.slice(-settings.store.maxEditHistory);
