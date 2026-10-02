@@ -6,7 +6,8 @@
 
 import "./styles.css";
 
-import definePlugin from "@utils/types";
+import { definePluginSettings } from "@api/Settings";
+import definePlugin, { OptionType } from "@utils/types";
 import type { Channel, User } from "@vencord/discord-types";
 import { ChannelType } from "@vencord/discord-types/enums";
 import { ChannelActionCreators, ChannelActions, ChannelStore, UserProfileStore, UserStore, VoiceStateStore } from "@webpack/common";
@@ -18,6 +19,60 @@ import { clearDetectionState, detectBlockedUsers, primeClear } from "./detection
 interface VoiceState {
     userId: string;
     channelId?: string;
+}
+
+const settings = definePluginSettings({
+    showModal: {
+        type: OptionType.BOOLEAN,
+        description: "Show the blocked user warning modal",
+        default: true,
+        onChange: resetModalWarningState
+    },
+    voiceJoinModal: {
+        type: OptionType.BOOLEAN,
+        description: "Ask for confirmation before joining a voice channel with someone who blocked you",
+        default: true,
+        onChange: resetModalWarningState,
+        get hidden() {
+            return !settings.store.showModal;
+        }
+    },
+    voiceLeaveModal: {
+        type: OptionType.BOOLEAN,
+        description: "Ask for confirmation before staying in a voice channel someone who blocked you joined",
+        default: true,
+        onChange: resetModalWarningState,
+        get hidden() {
+            return !settings.store.showModal;
+        }
+    },
+    groupDmModal: {
+        type: OptionType.BOOLEAN,
+        description: "Ask for confirmation before staying in a group DM with someone who blocked you",
+        default: true,
+        onChange: resetModalWarningState,
+        get hidden() {
+            return !settings.store.showModal;
+        }
+    }
+});
+
+type WarningVariant = "voiceJoin" | "voiceLeave" | "group";
+
+const MODAL_SETTING_KEYS = {
+    voiceJoin: "voiceJoinModal",
+    voiceLeave: "voiceLeaveModal",
+    group: "groupDmModal"
+} as const satisfies Record<WarningVariant, keyof typeof settings.store>;
+
+function shouldShowModal(variant: WarningVariant) {
+    return settings.store.showModal && settings.store[MODAL_SETTING_KEYS[variant]];
+}
+
+function resetModalWarningState() {
+    warnedVoiceKeys.clear();
+    warnedGroupChannels.clear();
+    seenVoiceChannelMembers.clear();
 }
 
 const VoiceChannelActions = ChannelActions as {
@@ -81,6 +136,8 @@ function shouldWarnForVoiceChannel(channel: Channel | undefined) {
 }
 
 async function maybeWarnBeforeVoiceJoin(channelId: string, proceed: () => void | Promise<void>) {
+    if (!shouldShowModal("voiceJoin")) return void proceed();
+
     const pendingJoin = pendingVoiceJoins.get(channelId);
     if (pendingJoin) return pendingJoin;
 
@@ -126,6 +183,8 @@ async function maybeWarnBeforeVoiceJoin(channelId: string, proceed: () => void |
 }
 
 async function maybeWarnForCurrentVoiceChannel(channelId: string) {
+    if (!shouldShowModal("voiceLeave")) return;
+
     const pendingWarning = pendingVoiceWarnings.get(channelId);
     if (pendingWarning) {
         pendingWarning.needsRecheck = true;
@@ -206,6 +265,8 @@ async function maybeWarnForCurrentVoiceChannel(channelId: string) {
 }
 
 async function maybeWarnForGroupChannel(channelId: string) {
+    if (!shouldShowModal("group")) return;
+
     const channel = ChannelStore.getChannel(channelId);
     if (channel?.type !== ChannelType.GROUP_DM) return;
     const pendingWarning = pendingGroupWarnings.get(channelId);
@@ -260,6 +321,7 @@ export default definePlugin({
         { name: "irritably", id: 928787166916640838n }
     ],
     tags: ["Privacy", "Utility"],
+    settings,
     flux: {
         USER_PROFILE_FETCH_SUCCESS({ userProfile }: { userProfile: { user: User; user_profile: unknown | null; }; }) {
             const userId = userProfile.user.id;
