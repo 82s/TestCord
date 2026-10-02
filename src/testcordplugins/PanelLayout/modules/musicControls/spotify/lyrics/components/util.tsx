@@ -306,6 +306,13 @@ export function useLyrics({ scroll = true, containerRef }: { scroll?: boolean; c
         if (containerRef) {
             const container = containerRef.current;
             if (!container) return;
+
+            const isLastLine = idx === lyricRefs.length - 1;
+            if (isLastLine) {
+                container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+                return;
+            }
+
             scrollLineIntoContainer(container, el);
         } else {
             el.scrollIntoView({ behavior: "smooth", block: "center" });
