@@ -43,7 +43,6 @@
 }
 
 @keyframes vc-health-pulse {
-
     0%,
     100% {
         box-shadow: 0 0 0 0 var(--status-danger-text, #f04747);
@@ -73,7 +72,6 @@
 }
 
 @keyframes vc-health-glow {
-
     0%,
     100% {
         box-shadow: 0 0 6px 0 rgb(0 168 252 / 0%);
@@ -125,7 +123,6 @@
 /* ─── Reduced motion ─────────────────────────────────────────── */
 
 @media (prefers-reduced-motion: reduce) {
-
     .vc-plugin-health-card,
     .vc-plugin-health-card-body,
     .vc-plugin-health-summary-fill,
@@ -337,13 +334,20 @@
 }
 
 .vc-health-table-row-clickable:hover {
-    background: var(--background-modifier-hover, rgb(255 255 255 / 6%));
+    background: var(--background-modifier-selected, rgb(255 255 255 / 6%));
 }
 
+.vc-health-table-row-clickable:focus-visible {
+    outline: 2px solid var(--brand-500, #5865f2);
+    outline-offset: -2px;
+}
+
+/* padding needs !important: ".vc-health-table th, .vc-health-table td" is (0,1,1) and outranks this (0,1,0). */
 .vc-health-table-empty {
     text-align: center;
-    padding: 2.5rem 1rem;
+    padding: 2rem 1rem !important;
     color: var(--text-muted, #949ba4);
+    font-style: italic;
 }
 
 .vc-patch-viewer-meta code {
@@ -378,26 +382,6 @@
 
 .vc-health-table tbody {
     background: var(--card-background-default, #2b2d31);
-}
-
-.vc-health-table-row-clickable {
-    cursor: pointer;
-}
-
-.vc-health-table-row-clickable:hover {
-    background: var(--background-modifier-selected, rgb(255 255 255 / 6%));
-}
-
-.vc-health-table-row-clickable:focus-visible {
-    outline: 2px solid var(--brand-500, #5865f2);
-    outline-offset: -2px;
-}
-
-.vc-health-table-empty {
-    padding: 2rem 1rem !important;
-    text-align: center;
-    color: var(--text-muted, #949ba4);
-    font-style: italic;
 }
 
 /* ─── Impact Badges & Cards ───────────────────────────────────── */

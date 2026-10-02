@@ -99,7 +99,7 @@ function StaffBadge({ guildId, userId, place }: { guildId: string; userId: strin
 export default definePlugin({
     name: "StaffTag",
     description: "Show owner, administrator and moderator badges in voice channels, member lists, messages and profiles.",
-    authors: [TestcordDevs.DevilBro, TestcordDevs.DavidHiFi],
+    authors: [TestcordDevs.DavidHiFi],
     tags: ["Appearance", "Roles", "Voice"],
     dependencies: ["MemberListDecoratorsAPI", "MessageDecorationsAPI", "NicknameIconsAPI"],
     settings,
