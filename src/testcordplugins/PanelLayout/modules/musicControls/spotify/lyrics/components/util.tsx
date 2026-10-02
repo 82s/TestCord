@@ -198,7 +198,18 @@ const getIndexes = (lyrics: SyncedLyric[], position: number, delay: number) => {
     return [currentIndex, nextLyricIdx];
 };
 
-export function useLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
+function scrollLineIntoContainer(
+    container: HTMLElement | null,
+    el: HTMLElement | null
+) {
+    if (!container || !el) return;
+    const cRect = container.getBoundingClientRect();
+    const eRect = el.getBoundingClientRect();
+    const target = container.scrollTop + (eRect.top - cRect.top) - (cRect.height - eRect.height) / 2;
+    container.scrollTo({ top: target, behavior: "smooth" });
+}
+
+export function useLyrics({ scroll = true, containerRef }: { scroll?: boolean; containerRef?: React.RefObject<HTMLElement | null>; } = {}) {
     const [track, storePosition, isPlaying] = useStateFromStores(
         [SpotifyStore], () => [
             SpotifyStore.track,
@@ -225,7 +236,6 @@ export function useLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
             if (action.type === "SPOTIFY_LYRICS_CUSTOM_DELAY_CHANGE" && action.trackKey) {
                 customSongDelays[action.trackKey] = action.delay!;
             }
-            // Trigger a re-render once DataStore finishes loading or delay changes
             forceUpdate({});
         };
 
@@ -286,15 +296,21 @@ export function useLyrics({ scroll = true }: { scroll?: boolean; } = {}) {
     }, [currentLyrics, isUntimed, totalDelay, isPlaying, storePosition]);
 
     useEffect(() => {
-        if (scroll && currLrcIndex !== null) {
-            if (currLrcIndex >= 0) {
-                lyricRefs[currLrcIndex].current?.scrollIntoView({ behavior: "smooth", block: "center" });
-            }
-            if (currLrcIndex < 0 && nextLyric !== null) {
-                lyricRefs[nextLyric]?.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-            }
+        if (!scroll || currLrcIndex === null) return;
+        const idx = currLrcIndex >= 0 ? currLrcIndex : nextLyric;
+        if (idx == null || idx < 0) return;
+
+        const el = lyricRefs[idx]?.current;
+        if (!el) return;
+
+        if (containerRef) {
+            const container = containerRef.current;
+            if (!container) return;
+            scrollLineIntoContainer(container, el);
+        } else {
+            el.scrollIntoView({ behavior: "smooth", block: "center" });
         }
-    }, [currLrcIndex, nextLyric, scroll, lyricRefs]);
+    }, [currLrcIndex, nextLyric, scroll, lyricRefs, containerRef]);
 
     return { track, lyricsInfo, lyricRefs, currLrcIndex, trailingLrcIndex, nextLyric, isPlaying, positionRef, isUntimed };
 }

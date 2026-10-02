@@ -23,7 +23,9 @@ const currentCl = cl("current");
 
 function LyricsDisplay({ scroll = true, style }: { scroll?: boolean; style?: React.CSSProperties; }) {
     const { showMusicNoteOnNoLyrics } = settings.use(["showMusicNoteOnNoLyrics"]);
-    const { lyricsInfo, lyricRefs, currLrcIndex, trailingLrcIndex, isPlaying, positionRef, isUntimed } = useLyrics({ scroll });
+    const containerRef = React.useRef<HTMLDivElement>(null);
+
+    const { lyricsInfo, lyricRefs, currLrcIndex, trailingLrcIndex, isPlaying, positionRef, isUntimed } = useLyrics({ scroll, containerRef });
 
     const currentLyrics = lyricsInfo?.lyricsVersions[lyricsInfo.useLyric] || null;
     const wordRefsRef = React.useRef<(HTMLSpanElement | null)[]>([]);
@@ -38,8 +40,6 @@ function LyricsDisplay({ scroll = true, style }: { scroll?: boolean; style?: Rea
     const trailingBgWordRefs2 = React.useRef<(HTMLSpanElement | null)[]>([]);
     const trailingBgWordRefs3 = React.useRef<(HTMLSpanElement | null)[]>([]);
     const trailingBgWordRefsBySlot = [trailingBgWordRefs0, trailingBgWordRefs1, trailingBgWordRefs2, trailingBgWordRefs3];
-    const footerRef = React.useRef<HTMLDivElement | null>(null);
-    const lastIndex = currentLyrics ? currentLyrics.length - 1 : -1;
 
     const activeLine = currLrcIndex != null ? currentLyrics?.[currLrcIndex] : undefined;
     const trailingLine = trailingLrcIndex != null ? currentLyrics?.[trailingLrcIndex] : undefined;
@@ -51,13 +51,6 @@ function LyricsDisplay({ scroll = true, style }: { scroll?: boolean; style?: Rea
         useSpicyWordFrame(activeLine?.background?.[bI]?.words, bgWordRefsBySlot[bI], getPositionMs, isPlaying);
         useSpicyWordFrame(trailingLine?.background?.[bI]?.words, trailingBgWordRefsBySlot[bI], getPositionMs, isPlaying);
     }
-
-    useEffect(() => {
-        if (!scroll || isUntimed) return;
-        if (currLrcIndex === lastIndex && footerRef.current) {
-            footerRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
-        }
-    }, [currLrcIndex, lastIndex, scroll, isUntimed]);
 
     const makeClassName = (index: number): string => {
         if (isUntimed) return "";
@@ -79,7 +72,10 @@ function LyricsDisplay({ scroll = true, style }: { scroll?: boolean; style?: Rea
             onClick={() => openModalLazy(async () => props => <LyricsModal props={props} />)}
             onContextMenu={e => ContextMenuApi.openContextMenu(e, () => <LyricsContextMenu />)}
         >
-            <div className={isSpicyProvider ? "vc-spotify-lyrics-inner vc-spotify-lyrics-spicy" : "vc-spotify-lyrics-inner"}>
+            <div
+                ref={containerRef}
+                className={isSpicyProvider ? "vc-spotify-lyrics-inner vc-spotify-lyrics-spicy" : "vc-spotify-lyrics-inner"}
+            >
                 {currentLyrics ? (
                     <>
                         {currentLyrics.map((line, i) => {
@@ -114,9 +110,7 @@ function LyricsDisplay({ scroll = true, style }: { scroll?: boolean; style?: Rea
                                 </div>
                             );
                         })}
-                        <div ref={footerRef}>
-                            <LyricsAttributionFooter lyricsInfo={lyricsInfo} />
-                        </div>
+                        <LyricsAttributionFooter lyricsInfo={lyricsInfo} />
                     </>
                 ) : showMusicNoteOnNoLyrics ? (
                     <TooltipContainer text="No synced lyrics found">
