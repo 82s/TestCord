@@ -1,9 +1,10 @@
-/* eslint-disable simple-header/header -- This permitted fork uses the MIT license. */
 /*
- * FakeVoice user plugin
- * Original plugin by deracul; maintained by DavidHiFi
- * SPDX-License-Identifier: MIT
- *
+ * Vencord, a Discord client mod
+ * Copyright (c) 2026 Vendicated and contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+/*
  * Main-process (native) side of FakeVoice.
  *
  * The fake states themselves live in the renderer, so this module does not
