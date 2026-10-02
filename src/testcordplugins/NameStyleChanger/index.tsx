@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import "./style.css";
+
 import { definePluginSettings } from "@api/Settings";
 import { BaseText } from "@components/BaseText";
 import { Divider } from "@components/Divider";
@@ -370,9 +372,12 @@ let originalSmynGetActiveNowElement: typeof showMeYourName.getActiveNowNameEleme
 let fontLink: HTMLLinkElement | null = null;
 let cachedSelfId: string | null = null;
 let isStyling = false;
+let namePainter: ReturnType<typeof setInterval> | null = null;
 
 function getCurrentUserId(): string | null {
-    // Re-read rather than trusting the cache, so an account switch takes effect.
+    // Cached: this runs on every name render, and reading through the store
+    // each time re-enters patched code. Invalidated by CURRENT_USER_UPDATE.
+    if (cachedSelfId) return cachedSelfId;
     try {
         const me = originalGetCurrentUser ? originalGetCurrentUser.call(UserStore) : UserStore.getCurrentUser();
         if (me?.id) cachedSelfId = me.id;
@@ -438,7 +443,7 @@ function applyDisplayNameStylesToUser(target: any, isMe?: boolean) {
     const effectId = getEffectId(effect);
     const existing = target._nsOriginalDisplayNameStyles;
 
-    target.displayNameStyles = {
+    const next = {
         ...(existing ?? {}),
         fontId,
         font_id: fontId,
@@ -447,6 +452,38 @@ function applyDisplayNameStylesToUser(target: any, isMe?: boolean) {
         colors: ensureEffectColors(effect, colors),
         [DISPLAY_NAME_STYLES_OVERRIDE_KEY]: true
     };
+
+    // Only write when something actually changed. UserStore.getCurrentUser runs
+    // during render all over the client, and handing back a fresh object every
+    // call makes every subscriber see a new reference, re-render, and call it
+    // again. That loop locks up the whole UI.
+    if (!displayNameStylesEqual(target.displayNameStyles, next)) {
+        target.displayNameStyles = next;
+    }
+}
+
+function displayNameStylesEqual(a: any, b: any): boolean {
+    if (a === b) return true;
+    if (!a || typeof a !== "object" || !b || typeof b !== "object") return false;
+
+    const aKeys = Object.keys(a);
+    const bKeys = Object.keys(b);
+    if (aKeys.length !== bKeys.length) return false;
+
+    for (const key of aKeys) {
+        if (key === "colors") {
+            const ac = a.colors;
+            const bc = b.colors;
+            if (!Array.isArray(ac) || !Array.isArray(bc) || ac.length !== bc.length) return false;
+            for (let i = 0; i < ac.length; i++) {
+                if (ac[i] !== bc[i]) return false;
+            }
+            continue;
+        }
+        if (a[key] !== b[key]) return false;
+    }
+
+    return true;
 }
 
 function restoreDisplayNameStylesOnUser(target: any) {
@@ -468,7 +505,111 @@ function restoreAllMutatedTargets() {
     mutatedTargets.clear();
 }
 
+function syncRootVariables() {
+    const { effect, customColors, color1, color2 } = settings.store;
+    document.documentElement.dataset.nsEffect = effect || "solid";
+    document.documentElement.dataset.nsCustomColors = customColors ? "true" : "false";
+
+    if (customColors) {
+        const [c1, c2] = resolveNameColors(color1, color2);
+        const toHex = (c: number) => "#" + (c & 0xffffff).toString(16).padStart(6, "0");
+        document.documentElement.style.setProperty("--ns-user-color-1", toHex(c1));
+        document.documentElement.style.setProperty("--ns-user-color-2", toHex(c2));
+    } else {
+        document.documentElement.style.removeProperty("--ns-user-color-1");
+        document.documentElement.style.removeProperty("--ns-user-color-2");
+    }
+}
+
+/**
+ * Re-injects the styles onto the current user without touching the stores.
+ * Discord overwrites displayNameStyles on its own refreshes, and the surfaces
+ * that render straight off the user object (user area, account popout) never
+ * call getCurrentUser again, so nothing else would put them back.
+ */
+function reapplySelfStyles() {
+    const me = originalGetCurrentUser ? originalGetCurrentUser.call(UserStore) : UserStore.getCurrentUser();
+    if (!me) return;
+
+    isStyling = true;
+    try {
+        applyDisplayNameStylesToUser(me, true);
+    } finally {
+        isStyling = false;
+    }
+
+    paintSelfName();
+}
+
+/**
+ * The user area and account popout are painted by Discord's own renderer, which
+ * flattens a gradient to one solid colour. Their markup carries no stable hook
+ * for the gradient, so the name element is located by its text content and
+ * styled directly. Styles are written with the important priority so they beat
+ * Discord's inline styles, and re-applied because Discord recreates these
+ * elements whenever the panel re-renders.
+ */
+// Verified against the live client: Discord renders every display-name effect
+// through the same innerContainer_/gradient_ span, and it lightens the
+// gradient stops for contrast on the way in (our #0a0809 came out as #7a6071).
+// The lightening happens in its JS, so it has to be undone in the DOM.
+function paintSelfName() {
+    if ((settings.store.effect || "solid") !== "gradient") return;
+
+    const me = originalGetCurrentUser ? originalGetCurrentUser.call(UserStore) : UserStore.getCurrentUser();
+    // Display name only. The username is deliberately left alone so surfaces
+    // that show it keep Discord's muted styling.
+    const name = (me?.globalName || "").trim();
+    if (!name) return;
+
+    const { customColors, color1, color2 } = settings.store;
+    const [c1, c2] = customColors
+        ? resolveNameColors(color1, color2)
+        : resolveNameColors(undefined, undefined);
+    const h1 = "#" + (c1 & 0xffffff).toString(16).padStart(6, "0");
+    const h2 = "#" + (c2 & 0xffffff).toString(16).padStart(6, "0");
+    const sig = `${h1}${h2}`;
+    const duration = `${Math.max(1, 1.5 * (name.length / 12)).toFixed(2)}s`;
+
+    for (const el of document.body.querySelectorAll<HTMLElement>("*")) {
+        // Only the leaf that actually paints the glyphs.
+        if (el.querySelector("*")) continue;
+        // showMeYourName already renders these with the right colours.
+        if (el.closest(".smyn-container")) continue;
+
+        const text = (el.textContent || "").trim();
+        if (!text.startsWith(name) || text.length > name.length + 8) continue;
+
+        if (el.dataset.nsPaint === sig) continue;
+        el.dataset.nsPaint = sig;
+        // Colours live on the element so the stylesheet does not depend on the
+        // root variables being current.
+        el.style.setProperty("--ns-c1", h1);
+        el.style.setProperty("--ns-c2", h2);
+        el.style.setProperty("--ns-name-duration", duration);
+    }
+}
+
+function startNamePainter() {
+    if (namePainter) return;
+    paintSelfName();
+    namePainter = setInterval(paintSelfName, 700);
+}
+
+function stopNamePainter() {
+    if (!namePainter) return;
+    clearInterval(namePainter);
+    namePainter = null;
+    for (const el of document.querySelectorAll<HTMLElement>("[data-ns-paint]")) {
+        delete el.dataset.nsPaint;
+        el.style.removeProperty("--ns-c1");
+        el.style.removeProperty("--ns-c2");
+        el.style.removeProperty("--ns-name-duration");
+    }
+}
+
 function notifyUpdate() {
+    syncRootVariables();
     const me = originalGetCurrentUser ? originalGetCurrentUser.call(UserStore) : UserStore.getCurrentUser();
     if (me) {
         isStyling = true;
@@ -485,6 +626,8 @@ function notifyUpdate() {
         UserStore.emitChange();
         GuildMemberStore?.emitChange?.();
     } catch { }
+
+    paintSelfName();
 }
 
 function SettingsAboutComponent() {
@@ -713,6 +856,8 @@ export default definePlugin({
 
     start() {
         loadFonts();
+        syncRootVariables();
+        startNamePainter();
 
         if (typeof settings.store.color1 !== "number" || isNaN(settings.store.color1) || settings.store.color1 < 0) {
             settings.store.color1 = 0xff007f;
@@ -816,6 +961,11 @@ export default definePlugin({
 
     stop() {
         unloadFonts();
+        stopNamePainter();
+        document.documentElement.style.removeProperty("--ns-user-color-1");
+        document.documentElement.style.removeProperty("--ns-user-color-2");
+        delete document.documentElement.dataset.nsEffect;
+        delete document.documentElement.dataset.nsCustomColors;
 
         if (originalGetUser) UserStore.getUser = originalGetUser;
         if (originalGetCurrentUser) UserStore.getCurrentUser = originalGetCurrentUser;
@@ -858,6 +1008,21 @@ export default definePlugin({
     },
 
     flux: {
+        CURRENT_USER_UPDATE() {
+            // An account switch changes who "self" is.
+            cachedSelfId = null;
+            reapplySelfStyles();
+        },
+
+        // Discord's first presence/session sync lands a couple of minutes after
+        // start and replaces displayNameStyles with the server value, which
+        // strips the injected styles from the user area and everything else
+        // rendering straight off the user object. No emitChange: this event
+        // already schedules the re-render, and emitting here would re-enter.
+        READY() {
+            reapplySelfStyles();
+        },
+
         USER_PROFILE_FETCH_SUCCESS(event: any) {
             const userId = event?.userProfile?.user?.id ?? event?.userProfile?.userId;
             const bio = event?.userProfile?.user_profile?.bio ?? event?.userProfile?.bio;
@@ -882,10 +1047,10 @@ export default definePlugin({
             if (decoded) applyDisplayNameStylesToUser(user, false);
             else restoreDisplayNameStylesOnUser(user);
 
-            try {
-                UserStore.emitChange();
-                GuildMemberStore?.emitChange?.();
-            } catch { }
+            // Deliberately no emitChange here. USER_PROFILE_FETCH_SUCCESS is
+            // itself triggered by rendering a profile, so emitting a store
+            // change re-renders that profile, which fetches again, which emits
+            // again. That loop freezes the client.
         }
     },
 
