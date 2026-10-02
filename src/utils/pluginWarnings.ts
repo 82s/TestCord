@@ -52,7 +52,8 @@ export const LEGACY_PLUGINS: string[] = [
     "TokenImporter",
     "UserAreaTweaks",
     "OSSpoofer",
-    "BetterScreenshare"
+    "BetterScreenshare",
+    "CustomStreamQuality"
 ];
 
 /**
@@ -78,6 +79,7 @@ export const LEGACY_REPLACEMENTS: Record<string, string> = {
     "userareatweaks": "PanelLayout",
     "BetterScreenshare": "StreamEnhancer",
     "betterscreenshare": "StreamEnhancer",
+    "CustomStreamQuality": "StreamEnhancer",
     "MusicControls": "PanelLayout",
     "musiccontrols": "PanelLayout",
     "ActivityBanner": "PanelLayout",
