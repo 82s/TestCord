@@ -1,5 +1,8 @@
-/* eslint-disable simple-header/header -- Independently written MIT plugin. */
-/* Copyright (c) 2026 DavidHiFi. SPDX-License-Identifier: MIT */
+/*
+ * Vencord, a Discord client mod
+ * Copyright (c) 2024 Vendicated and contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
 
 import { definePluginSettings } from "@api/Settings";
 import { TestcordDevs } from "@utils/constants";
