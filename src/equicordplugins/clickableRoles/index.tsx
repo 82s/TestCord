@@ -171,13 +171,13 @@ export default definePlugin({
                 // wrapped a `(function(i){let{id:...}})` IIFE. Discord dropped both that
                 // intl key and the IIFE, so `find` still matched the module while `match`
                 // matched nothing usable, and the replacement it did emit was unbalanced.
-                match: /return\(0,(\w+)\.jsx\)\((\w+),\{id:(\w+)\.id,label:/,
-                replace: "return(0,$1)($self.wrapRoleSection($2,\"$3\"),{id:$3.id,label:",
+                match: /return\(0,(\i\.jsx)\)\((\i),\{id:(\i)\.id,label:/,
+                replace: "return(0,$1)($self.wrapRoleSection($2),{id:$3.id,label:",
             },
         },
     ],
 
-    wrapRoleSection(Component: React.ComponentType<any>, idKey: string) {
+    wrapRoleSection(Component: React.ComponentType<any>) {
         // The patch runs inside Discord's render, so this is called on every render of
         // every section header. Caching per component keeps the returned identity stable,
         // otherwise React unmounts and remounts the subtree on each pass.
@@ -185,7 +185,7 @@ export default definePlugin({
         if (cache) return cache;
 
         const Wrapped: React.ComponentType<any> = props => {
-            const roleId = props?.[idKey];
+            const roleId = props?.id;
             const guildId = props?.guildId;
             if (typeof roleId !== "string" || typeof guildId !== "string") return <Component {...props} />;
             if (!GuildRoleStore.getRole(guildId, roleId)) return <Component {...props} />;
