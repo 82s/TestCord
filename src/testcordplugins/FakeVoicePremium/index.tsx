@@ -14,6 +14,7 @@ import type { Channel, VoiceState } from "@vencord/discord-types";
 import { findByCodeLazy, findByProps, findByPropsLazy, findStore } from "@webpack";
 import { ChannelStore, ContextMenuApi, MediaEngineStore, Menu, PermissionsBits, PermissionStore, React, SelectedChannelStore, useMemo, UserStore, VoiceActions } from "@webpack/common";
 
+import { type FakeVoicePreset, isPresetActive, PRESET_KEYS, type PresetConfig,PresetIcon } from "./presets";
 import { settings } from "./settings";
 
 const CONTEXT_MENU_KEYS = ["fakeMute", "fakeDeafen", "fakeStream", "fakeGame", "fakeCam", "cutMicTransmission"] as const;
@@ -346,6 +347,22 @@ function applyAndSync() {
     }
 }
 
+// A preset swaps every toggle at once, so fake voice is re-entered around the swap:
+// tearing down first runs the stream and activity cleanup against the combination
+// that was actually live, and coming back up starts them for the incoming one.
+function applyPreset(config: PresetConfig) {
+    const wasFaked = faked;
+
+    if (wasFaked) setFakeVoiceEnabled(false);
+
+    Object.assign(settings.store, config);
+    applyAndSync();
+
+    // Turning fake voice off entirely never broadcasts, so the previous preset's
+    // spoofed state would otherwise stick around until the next voice state update.
+    if (wasFaked && !faked) syncFakeVoiceState();
+}
+
 // Auto-mute-on-deafen (from fakeMuteDeafen): enabling fake deafen implies fake mute.
 function applyAutoMute() {
     if (settings.store.autoMute && settings.store.fakeDeafen) {
@@ -508,6 +525,48 @@ function FakeVoiceOptionToggleButton({ iconForeground, hideTooltips, nameplate }
     );
 }
 
+function PresetButton({ preset, iconForeground, hideTooltips, plated }: {
+    preset: FakeVoicePreset;
+    iconForeground?: string;
+    hideTooltips?: boolean;
+    plated: boolean;
+}) {
+    const flags = settings.use(PRESET_KEYS);
+    const active = isPresetActive(preset.config, flags);
+    const name = preset.name.trim() || "Preset";
+
+    return (
+        <UserAreaButton
+            tooltipText={hideTooltips ? void 0 : active ? name : `Apply "${name}"`}
+            icon={<PresetIcon className={iconForeground} />}
+            aria-label={name}
+            orangeGlow={!active}
+            plated={plated}
+            onClick={() => applyPreset(preset.config)}
+        />
+    );
+}
+
+function PresetButtons(props: UserAreaRenderProps) {
+    const { presets } = settings.use(["presets"]);
+
+    if (!presets?.length) return null;
+
+    return (
+        <>
+            {presets.map(preset => (
+                <PresetButton
+                    key={preset.id}
+                    preset={preset}
+                    iconForeground={props.iconForeground}
+                    hideTooltips={props.hideTooltips}
+                    plated={props.nameplate != null}
+                />
+            ))}
+        </>
+    );
+}
+
 function ContextMenu() {
     const [enabled, setEnabled] = React.useState(faked);
     settings.use(CONTEXT_MENU_KEYS);
@@ -596,7 +655,7 @@ const VideoDeviceContext: NavContextMenuPatchCallback = children => {
 
 export default definePlugin({
     name: "FakeVoicePremium",
-    description: "Fake deafen, mute, stream, game, and camera in one plugin. Toggle via the user-area button (right-click for options), audio/video device menus, keybinds, or slash commands.",
+    description: "Fake deafen, mute, stream, game, and camera in one plugin. Toggle via the user-area button (right-click for options), audio/video device menus, keybinds, or slash commands. Save presets to get your own button per setup.",
     authors: [EquicordDevs.omaw, TestcordDevs.x2b, TestcordDevs.dot, TestcordDevs.sirphantom89, TestcordDevs.hyyven],
     tags: ["Privacy", "Utility", "Voice"],
     dependencies: ["CommandsAPI", "UserAreaAPI"],
@@ -609,7 +668,12 @@ export default definePlugin({
     },
     userAreaButton: {
         icon: (props: { className?: string; }) => <Icon {...props} enabled={faked} />,
-        render: FakeVoiceOptionToggleButton
+        render: (props: UserAreaRenderProps) => (
+            <>
+                <FakeVoiceOptionToggleButton {...props} />
+                <PresetButtons {...props} />
+            </>
+        )
     },
     patches: [
         {

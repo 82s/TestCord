@@ -1,14 +1,16 @@
 /*
- * Vencord, a Discord client mod
- * Copyright (c) 2026 Vendicated and contributors
+ * TestCord - Plugins Shortcut Button
+ * Copyright (c) 2026 szcx404
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { UserAreaButton, UserAreaRenderProps } from "@api/UserArea";
 import { PluginsIcon } from "@components/Icons";
+import { UserAreaButton, UserAreaRenderProps } from "@api/UserArea";
 import { TestcordDevs } from "@utils/constants";
 import definePlugin from "@utils/types";
-import { SettingsRouter } from "@webpack/common";
+import { findByPropsLazy } from "@webpack";
+
+const OpenSettingsModule = findByPropsLazy("openUserSettings");
 
 function PluginsShortcutButton({
     iconForeground,
@@ -17,11 +19,10 @@ function PluginsShortcutButton({
 }: UserAreaRenderProps) {
     return (
         <UserAreaButton
-            className="button__201d5 wrapper__201d5"
             tooltipText={hideTooltips ? void 0 : "Plugins"}
             aria-label="Plugins"
             plated={nameplate != null}
-            onClick={() => SettingsRouter.openUserSettings("testcord_plugins_panel")}
+            onClick={() => OpenSettingsModule.openUserSettings("testcord_plugins_panel")}
             icon={<PluginsIcon className={iconForeground} />}
         />
     );
@@ -29,7 +30,7 @@ function PluginsShortcutButton({
 
 export default definePlugin({
     name: "Plugins Shortcut Button",
-    description: "Adds a shortcut button to the user area that opens the TestCord Plugins settings.",
+    description: "Adds a shortcut button to the user area that opens the full TestCord Plugins settings page.",
     authors: [TestcordDevs.szcx404],
 
     dependencies: ["UserAreaAPI"],
