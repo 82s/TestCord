@@ -45,10 +45,6 @@ export function capturePresetConfig(): PresetConfig {
     };
 }
 
-export function isPresetActive(config: PresetConfig, flags: PresetConfig) {
-    return PRESET_KEYS.every(key => flags[key] === config[key]);
-}
-
 export function PresetIcon({ className }: { className?: string; }) {
     return (
         <svg className={className} xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24">
@@ -74,17 +70,17 @@ export function PresetSettings() {
     return (
         <Flex flexDirection="column" gap="md">
             <Paragraph size="xs">
-                Each preset gets its own button in the user area that applies the whole combination at once. Set your states up with the toggles or the right-click menu, then hit "Save current" to store them into a preset.
+                Each button here gets its own button in the user area that spoofs only what you tick below, leaving the states above untouched. Clicking one makes it the live combination; changing a state above, using the right-click menu, a keybind or a slash command hands control back to those states. Hit "Save current" to copy the states from above into this button.
             </Paragraph>
 
             {list.length === 0
-                ? <Paragraph size="sm">No presets yet.</Paragraph>
+                ? <Paragraph size="sm">No buttons yet.</Paragraph>
                 : list.map((preset, index) => (
                     <Card key={preset.id}>
                         <Flex flexDirection="column" gap="md">
                             <TextInput
                                 value={preset.name}
-                                placeholder="Preset name"
+                                placeholder="Button name"
                                 onChange={name => replace(index, { ...preset, name })}
                             />
 
@@ -118,12 +114,12 @@ export function PresetSettings() {
                 onClick={() => {
                     settings.store.presets = [...list, {
                         id: nanoid(),
-                        name: `Preset ${list.length + 1}`,
+                        name: `Button ${list.length + 1}`,
                         config: capturePresetConfig()
                     }];
                 }}
             >
-                Add preset
+                Add button
             </Button>
         </Flex>
     );

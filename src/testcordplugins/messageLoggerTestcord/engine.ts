@@ -82,6 +82,44 @@ function snapshotMessage(message: SnapshotMessage): LoggedMessage {
     return copy;
 }
 
+/**
+ * Flatten a payload's media into plain, prototype-less data.
+ *
+ * A stored copy of a message is plain JSON, but an update payload carries Discord's own
+ * embed/attachment/component objects. Comparing the two directly never matches, so every
+ * update looked like a change and a paginated bot filled its history with revisions that
+ * differ from nothing. Storing the payload as it arrives is the other half: those objects
+ * hold their data behind a prototype that IndexedDB drops on write, so the embed comes
+ * back out with none of its fields left and every revision after the first reads as an
+ * empty husk. Copying own enumerable data into bare objects makes what is compared and
+ * what is logged the same plain shape the rest of the record is stored in. Cycles and
+ * functions are dropped because structured clone rejects them.
+ */
+function toPlainMedia<T>(value: T, seen = new WeakSet<object>()): T {
+    if (value == null || typeof value !== "object") return typeof value === "function" ? undefined as never : value;
+    if (value instanceof Date) return value;
+    if (seen.has(value)) return undefined as never;
+    seen.add(value);
+    try {
+        if (Array.isArray(value)) {
+            const out: unknown[] = [];
+            for (const item of value) {
+                const mapped = toPlainMedia(item, seen);
+                if (mapped !== undefined) out.push(mapped);
+            }
+            return out as never;
+        }
+        const out: Record<string, unknown> = {};
+        for (const key of Object.keys(value)) {
+            const mapped = toPlainMedia((value as Record<string, unknown>)[key], seen);
+            if (mapped !== undefined) out[key] = mapped;
+        }
+        return out as never;
+    } finally {
+        seen.delete(value);
+    }
+}
+
 function remember(message: LoggedMessage) {
     while (!recentMessages.has(message.id) && recentMessages.size >= settings.store.memoryCacheLimit) {
         const oldestId = recentMessages.keys().next().value;
@@ -821,9 +859,16 @@ export async function handleMessageUpdate(payload: MessageUpdatePayload) {
     }
     if (!previous) return;
 
-    const embedsChanged = hasEmbeds && jsonChanged((payload.message as any).embeds, (previous as any).embeds);
-    const attachmentsChanged = hasAttachments && jsonChanged((payload.message as any).attachments, (previous as any).attachments);
-    const componentsChanged = hasComponents && jsonChanged((payload.message as any).components, (previous as any).components);
+    const payloadAny = payload.message as any;
+    // One shape for both the comparison and the stored copy, so jsonChanged is never
+    // comparing a payload object against the snapshot it is stored as.
+    const incomingEmbeds = hasEmbeds ? toPlainMedia(payloadAny.embeds) : undefined;
+    const incomingAttachments = hasAttachments ? toPlainMedia(payloadAny.attachments) : undefined;
+    const incomingComponents = hasComponents ? toPlainMedia(payloadAny.components) : undefined;
+
+    const embedsChanged = hasEmbeds && jsonChanged(incomingEmbeds, (previous as any).embeds);
+    const attachmentsChanged = hasAttachments && jsonChanged(incomingAttachments, (previous as any).attachments);
+    const componentsChanged = hasComponents && jsonChanged(incomingComponents, (previous as any).components);
     const contentChanged = hasContent && previous.content !== payload.message.content;
     const hasEditedTimestamp = (payload.message as any).edited_timestamp != null;
 
@@ -836,9 +881,9 @@ export async function handleMessageUpdate(payload: MessageUpdatePayload) {
         // No real edit: either nothing changed, or just an auto embed (link unfurl) without edited_timestamp
         if (embedsChanged || attachmentsChanged || componentsChanged) {
             const updated = lodash.cloneDeep(previous);
-            if (hasEmbeds) (updated as any).embeds = (payload.message as any).embeds;
-            if (hasAttachments) (updated as any).attachments = (payload.message as any).attachments;
-            if (hasComponents) (updated as any).components = (payload.message as any).components;
+            if (incomingEmbeds) (updated as any).embeds = incomingEmbeds;
+            if (incomingAttachments) (updated as any).attachments = incomingAttachments;
+            if (incomingComponents) (updated as any).components = incomingComponents;
             // If this message's history was temp-hidden, drop the old history on the updated copy
             if (isEditHistoryTempCleared(updated.id)) updated.editHistory = [];
             remember(updated);
@@ -858,18 +903,22 @@ export async function handleMessageUpdate(payload: MessageUpdatePayload) {
     }
 
     const message = lodash.cloneDeep(previous);
-    const payloadAny = payload.message as any;
-    // Assign payload fields but don't clobber content/embeds/attachments when payload didn't include them
+    // Assign payload fields but don't clobber content/embeds/attachments when payload didn't include them.
+    // Every value is taken as a plain copy: Discord hangs helper functions off messages
+    // and their media, structured clone rejects a single one of them, and one rejects the
+    // whole transaction - so an edit record built from the raw payload never lands at
+    // all, which is why embed edits went missing while ordinary ones did.
     for (const [k, v] of Object.entries(payloadAny)) {
         if (k === "content" && !hasContent) continue;
         if (k === "embeds" && !hasEmbeds) continue;
         if (k === "attachments" && !hasAttachments) continue;
         if (k === "components" && !hasComponents) continue;
-        if (v !== undefined) (message as any)[k] = v;
+        if (v === undefined || typeof v === "function") continue;
+        (message as any)[k] = typeof v === "object" ? toPlainMedia(v) : v;
     }
-    if (hasEmbeds) (message as any).embeds = payloadAny.embeds;
-    if (hasAttachments) (message as any).attachments = payloadAny.attachments;
-    if (hasComponents) (message as any).components = payloadAny.components;
+    if (hasEmbeds) (message as any).embeds = incomingEmbeds;
+    if (hasAttachments) (message as any).attachments = incomingAttachments;
+    if (hasComponents) (message as any).components = incomingComponents;
     if (hasContent) (message as any).content = payloadAny.content;
     else (message as any).content = previous.content;
     if (!hasEmbeds) (message as any).embeds = previous.embeds;
@@ -888,6 +937,11 @@ export async function handleMessageUpdate(payload: MessageUpdatePayload) {
     if (isEditHistoryTempCleared(message.id)) {
         message.editHistory = message.editHistory.slice(-1);
     }
+    // Belt and braces for a message that was cached before this path took plain copies:
+    // cloneDeep copies nested functions by reference, so a revision inherited from the
+    // cache can still carry one. Safe to strip here because everything in `message` is
+    // ours alone, which is the same condition snapshotMessage relies on.
+    stripUncloneable(message, new WeakSet());
     remember(message);
     invalidateLoggedCaches(message.id);
     // Ensure anti-antilogg'd and edited attachments are saved to disk before the record is flushed

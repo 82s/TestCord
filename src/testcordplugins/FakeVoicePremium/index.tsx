@@ -6,6 +6,7 @@
 
 import { ApplicationCommandInputType, sendBotMessage } from "@api/Commands";
 import { NavContextMenuPatchCallback } from "@api/ContextMenu";
+import { SettingsStore } from "@api/Settings";
 import { UserAreaButton, UserAreaRenderProps } from "@api/UserArea";
 import ErrorBoundary from "@components/ErrorBoundary";
 import { EquicordDevs, TestcordDevs } from "@utils/constants";
@@ -14,26 +15,36 @@ import type { Channel, VoiceState } from "@vencord/discord-types";
 import { findByCodeLazy, findByProps, findByPropsLazy, findStore } from "@webpack";
 import { ChannelStore, ContextMenuApi, MediaEngineStore, Menu, PermissionsBits, PermissionStore, React, SelectedChannelStore, useMemo, UserStore, VoiceActions } from "@webpack/common";
 
-import { type FakeVoicePreset, isPresetActive, PRESET_KEYS, type PresetConfig,PresetIcon } from "./presets";
+import { type FakeVoicePreset, PRESET_KEYS, type PresetConfig,PresetIcon } from "./presets";
 import { settings } from "./settings";
 
 const CONTEXT_MENU_KEYS = ["fakeMute", "fakeDeafen", "fakeStream", "fakeGame", "fakeCam", "cutMicTransmission"] as const;
 
 export let faked = false;
 
-// Subscribers notified whenever `faked` changes, so mounted UI (the user-area
-// toggle button) can re-render event-driven instead of polling on an interval.
-const fakedListeners = new Set<() => void>();
+// Every custom user-area button carries its own combination of states. While one is
+// active it wins over the saved settings, so a button drives the live spoof without
+// ever rewriting what the user configured. Any change to the saved settings drops it
+// (see start), handing the live state back to the settings.
+let customConfig: PresetConfig | null = null;
 
-function subscribeFaked(listener: () => void) {
-    fakedListeners.add(listener);
+function isSpoofed(key: keyof PresetConfig) {
+    return customConfig ? customConfig[key] : Boolean(settings.store[key]);
+}
+
+// Subscribers notified whenever the live spoof changes (`faked` or which custom button
+// is active), so mounted UI can re-render event-driven instead of polling on an interval.
+const stateListeners = new Set<() => void>();
+
+function subscribeLiveState(listener: () => void) {
+    stateListeners.add(listener);
     return () => {
-        fakedListeners.delete(listener);
+        stateListeners.delete(listener);
     };
 }
 
-function notifyFakedChanged() {
-    for (const listener of fakedListeners) listener();
+function notifyLiveStateChanged() {
+    for (const listener of stateListeners) listener();
 }
 
 // Direct gateway socket access — fakeMuteDeafen's mechanism. The voiceStateSender
@@ -178,7 +189,7 @@ function leaveActivity(channelId?: string) {
 }
 
 function syncMicCutoff(enabled: boolean) {
-    const shouldCutMic = enabled && settings.store.cutMicTransmission && getSelectedVoiceChannel();
+    const shouldCutMic = enabled && isSpoofed("cutMicTransmission") && getSelectedVoiceChannel();
 
     if (!shouldCutMic) {
         if (!micCutoffApplied) return;
@@ -292,11 +303,11 @@ function Icon({ className, enabled }: { className?: string; enabled?: boolean; }
 function setFakeVoiceEnabled(enabled: boolean) {
     const changed = faked !== enabled;
     faked = enabled;
-    if (changed) notifyFakedChanged();
+    if (changed) notifyLiveStateChanged();
 
     const channel = getSelectedVoiceChannel();
 
-    if (!enabled && settings.store.fakeGame) {
+    if (!enabled && isSpoofed("fakeGame")) {
         leaveActivity(channel?.id);
     }
 
@@ -306,17 +317,17 @@ function setFakeVoiceEnabled(enabled: boolean) {
         return;
     }
 
-    fakeStreamActive = enabled && settings.store.fakeStream && PermissionStore.can(STREAM, channel);
+    fakeStreamActive = enabled && isSpoofed("fakeStream") && PermissionStore.can(STREAM, channel);
 
     if (fakeStreamActive) {
         startStream();
     }
 
-    if (settings.store.fakeGame && enabled && canUseFakeActivity(channel)) {
+    if (isSpoofed("fakeGame") && enabled && canUseFakeActivity(channel)) {
         void startActivity(channel.id);
     }
 
-    if (!enabled && settings.store.fakeStream) {
+    if (!enabled && isSpoofed("fakeStream")) {
         const ConnectionStore = getStreamConnectionStore();
         for (const streamKey of ConnectionStore.getAllActiveStreamKeys()) {
             stopStreamAction(streamKey, { streamKey, appContext: "app" });
@@ -324,7 +335,7 @@ function setFakeVoiceEnabled(enabled: boolean) {
         }
     }
 
-    if (settings.store.fakeMute || settings.store.fakeDeafen || settings.store.fakeCam) {
+    if (isSpoofed("fakeMute") || isSpoofed("fakeDeafen") || isSpoofed("fakeCam")) {
         syncFakeVoiceState();
     }
 
@@ -335,8 +346,8 @@ function setFakeVoiceEnabled(enabled: boolean) {
 // All folded-in controls (keybinds, device menus, slash commands) route through this
 // so the single voiceStateUpdate patch stays the only interception mechanism.
 function applyAndSync() {
-    const anyFake = settings.store.fakeMute || settings.store.fakeDeafen
-        || settings.store.fakeStream || settings.store.fakeGame || settings.store.fakeCam;
+    const anyFake = isSpoofed("fakeMute") || isSpoofed("fakeDeafen")
+        || isSpoofed("fakeStream") || isSpoofed("fakeGame") || isSpoofed("fakeCam");
 
     if (anyFake && !faked) {
         setFakeVoiceEnabled(true);
@@ -347,20 +358,30 @@ function applyAndSync() {
     }
 }
 
-// A preset swaps every toggle at once, so fake voice is re-entered around the swap:
-// tearing down first runs the stream and activity cleanup against the combination
-// that was actually live, and coming back up starts them for the incoming one.
-function applyPreset(config: PresetConfig) {
+// A custom button becomes the live spoof: fake voice is re-entered around the swap so
+// the stream and activity are torn down against the combination that was actually live
+// and brought back up for the incoming one.
+function applyCustomConfig(config: PresetConfig) {
     const wasFaked = faked;
 
     if (wasFaked) setFakeVoiceEnabled(false);
 
-    Object.assign(settings.store, config);
+    customConfig = config;
+    notifyLiveStateChanged();
     applyAndSync();
 
-    // Turning fake voice off entirely never broadcasts, so the previous preset's
+    // Turning fake voice off entirely never broadcasts, so the previous combination's
     // spoofed state would otherwise stick around until the next voice state update.
     if (wasFaked && !faked) syncFakeVoiceState();
+}
+
+// Dropping the custom button hands the live state back to the saved settings.
+function clearCustomConfig() {
+    if (!customConfig) return;
+
+    customConfig = null;
+    notifyLiveStateChanged();
+    applyAndSync();
 }
 
 // Auto-mute-on-deafen (from fakeMuteDeafen): enabling fake deafen implies fake mute.
@@ -506,7 +527,7 @@ function FakeVoiceOptionToggleButton({ iconForeground, hideTooltips, nameplate }
     // Re-render so the button reflects `faked` after it changes via any control
     // (keybind, context menu, slash command). Event-driven: subscribe to the
     // single mutation point (setFakeVoiceEnabled) instead of polling.
-    React.useEffect(() => { return subscribeFaked(forceUpdate); }, []);
+    React.useEffect(() => { return subscribeLiveState(forceUpdate); }, []);
 
     return (
         <UserAreaButton
@@ -518,6 +539,9 @@ function FakeVoiceOptionToggleButton({ iconForeground, hideTooltips, nameplate }
             plated={nameplate != null}
             onContextMenu={e => ContextMenuApi.openContextMenu(e, () => <ContextMenu />)}
             onClick={() => {
+                // This button always speaks for the saved settings, so any custom
+                // button steps aside before it toggles.
+                clearCustomConfig();
                 setFakeVoiceEnabled(!faked);
                 forceUpdate();
             }}
@@ -531,18 +555,20 @@ function PresetButton({ preset, iconForeground, hideTooltips, plated }: {
     hideTooltips?: boolean;
     plated: boolean;
 }) {
-    const flags = settings.use(PRESET_KEYS);
-    const active = isPresetActive(preset.config, flags);
-    const name = preset.name.trim() || "Preset";
+    const [, forceUpdate] = React.useReducer(x => x + 1, 0);
+    React.useEffect(() => { return subscribeLiveState(forceUpdate); }, []);
+
+    const active = customConfig === preset.config;
+    const name = preset.name.trim() || "Button";
 
     return (
         <UserAreaButton
-            tooltipText={hideTooltips ? void 0 : active ? name : `Apply "${name}"`}
+            tooltipText={hideTooltips ? void 0 : name}
             icon={<PresetIcon className={iconForeground} />}
             aria-label={name}
             orangeGlow={!active}
             plated={plated}
-            onClick={() => applyPreset(preset.config)}
+            onClick={() => { applyCustomConfig(preset.config); forceUpdate(); }}
         />
     );
 }
@@ -720,11 +746,11 @@ export default definePlugin({
 
             scheduleMicCutoffSync(faked);
 
-            if (settings.store.fakeGame && faked && myVoiceState && canUseFakeActivity(channel) && !hasFakeActivity(selected)) {
+            if (isSpoofed("fakeGame") && faked && myVoiceState && canUseFakeActivity(channel) && !hasFakeActivity(selected)) {
                 void startActivity(selected);
             }
 
-            if (settings.store.fakeStream && faked && myVoiceState && PermissionStore.can(STREAM, channel)) {
+            if (isSpoofed("fakeStream") && faked && myVoiceState && PermissionStore.can(STREAM, channel)) {
                 fakeStreamActive = true;
 
                 if (!hasFakeStream()) {
@@ -786,12 +812,18 @@ export default definePlugin({
             originalSocketSend = socket.send;
             socket.send = function (op: number, data: any, ...args: any[]) {
                 if (op === 4 && data && faked) {
-                    if (settings.store.fakeMute) data.self_mute = true;
-                    if (settings.store.fakeDeafen) data.self_deaf = true;
-                    if (settings.store.fakeCam) data.self_video = true;
+                    if (isSpoofed("fakeMute")) data.self_mute = true;
+                    if (isSpoofed("fakeDeafen")) data.self_deaf = true;
+                    if (isSpoofed("fakeCam")) data.self_video = true;
                 }
                 return originalSocketSend.apply(this, [op, data, ...args]);
             };
+        }
+        // Touching any of the states by hand (settings page, context menu, keybinds,
+        // slash commands) hands the live spoof back to those settings, so a custom
+        // button never leaves the UI claiming a combination that isn't in effect.
+        for (const key of PRESET_KEYS) {
+            SettingsStore.addChangeListener(`plugins.${settings.pluginName}.${key}`, clearCustomConfig);
         }
         document.addEventListener("keydown", handleKeydown);
     },
@@ -801,10 +833,14 @@ export default definePlugin({
             socket.send = originalSocketSend;
             originalSocketSend = undefined;
         }
+        for (const key of PRESET_KEYS) {
+            SettingsStore.removeChangeListener(`plugins.${settings.pluginName}.${key}`, clearCustomConfig);
+        }
         document.removeEventListener("keydown", handleKeydown);
+        customConfig = null;
         setFakeVoiceEnabled(false);
     },
-    shouldOpenEmbeddedActivity: () => !(faked && settings.store.fakeGame),
+    shouldOpenEmbeddedActivity: () => !(faked && isSpoofed("fakeGame")),
     shouldOpenStreamPip: () => !(faked && fakeStreamActive),
-    toggle: (value: boolean, key: keyof typeof settings.store) => (faked ? settings.store[key] : value)
+    toggle: (value: boolean, key: keyof PresetConfig) => (faked ? isSpoofed(key) : value)
 });
