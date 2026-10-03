@@ -9,7 +9,7 @@ import { isPluginEnabled } from "@api/PluginManager";
 import { Alerts, FluxDispatcher, Menu, MessageActions, React, SortedGuildStore, Toasts, UserStore } from "@webpack/common";
 
 import { silentDeleteMessage } from "./antilog";
-import { clearEditHistoryCache, deleteLog, invalidateLoggedCaches, localRemoveLoggedMessage, removeChannelLogs } from "./engine";
+import { clearEditHistoryCache, deleteLog, invalidateLoggedCaches, localRemoveLoggedMessage, removeChannelLogs, removeGuildLogs } from "./engine";
 import { addToOppositeAndList, isInList, type ListType,removeFromList } from "./lists";
 import { openLogs } from "./LogsModal";
 import { osintScanLoggedMessages } from "./osintBridge";
@@ -217,6 +217,57 @@ function buildHideFromLoggersItem(navId: string, props: MenuProps) {
     );
 }
 
+function buildGuildClearItems(navId: string, props: MenuProps) {
+    if (navId !== "guild-context") return null;
+    const guildId = idFunctions.Server(props);
+    if (typeof guildId !== "string" || !guildId) return null;
+
+    const run = async (permanent: boolean) => {
+        try {
+            const count = await removeGuildLogs(guildId, permanent);
+            Toasts.show({
+                message: count === 0
+                    ? "No logs in this server."
+                    : permanent
+                        ? `Deleted ${count} logs from this server forever.`
+                        : `Hidden ${count} logs from this server. They return after a restart.`,
+                type: count === 0 ? Toasts.Type.MESSAGE : Toasts.Type.SUCCESS,
+                id: Toasts.genId()
+            });
+        } catch {
+            Toasts.show({
+                message: "Failed to remove logs from this server.",
+                type: Toasts.Type.FAILURE,
+                id: Toasts.genId()
+            });
+        }
+    };
+
+    return [
+        <Menu.MenuItem
+            key="testcord-ml-clear-guild-temp"
+            id="testcord-ml-clear-guild-temp"
+            label="Rm All Server Logs (Tmp)"
+            color="danger"
+            action={() => void run(false)}
+        />,
+        <Menu.MenuItem
+            key="testcord-ml-clear-guild-permanent"
+            id="testcord-ml-clear-guild-permanent"
+            label="Rm All Server Logs (Perm)"
+            color="danger"
+            action={() => Alerts.show({
+                title: "Remove all server logs",
+                body: "This deletes every saved deleted message and edit history for every channel in this server and cannot be undone.",
+                confirmText: "Delete everything",
+                confirmVariant: "critical-primary",
+                cancelText: "Cancel",
+                onConfirm: () => run(true)
+            })}
+        />
+    ];
+}
+
 function buildChannelClearItems(navId: string, props: MenuProps) {
     if (navId !== "channel-context" && navId !== "gdm-context") return null;
     const channelId = idFunctions.Channel(props);
@@ -314,6 +365,7 @@ function createContextMenuPatch(navId: string): NavContextMenuPatchCallback {
                 )}
 
                 {buildChannelClearItems(navId, props)}
+                {buildGuildClearItems(navId, props)}
 
                 <Menu.MenuSeparator />
                 {Object.keys(idFunctions).map(IdType => renderListOption("blacklistedIds", IdType, props))}

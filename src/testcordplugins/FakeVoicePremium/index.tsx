@@ -574,9 +574,17 @@ function PresetButton({ preset, iconForeground, hideTooltips, plated }: {
 }
 
 function PresetButtons(props: UserAreaRenderProps) {
-    const { presets } = settings.use(["presets"]);
+    // Subscribes for re-renders, but hands the button a detached copy: applying a
+    // proxied config would hold a settings proxy in the live spoof state, and reading
+    // flags back out of it keeps the button tied to the store instead of its own value.
+    settings.use(["presets"]);
+    const presets = (settings.plain.presets ?? []).map(preset => ({
+        id: preset.id,
+        name: preset.name,
+        config: { ...preset.config }
+    }));
 
-    if (!presets?.length) return null;
+    if (!presets.length) return null;
 
     return (
         <>

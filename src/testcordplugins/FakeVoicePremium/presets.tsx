@@ -33,16 +33,28 @@ export const PRESET_LABELS: Record<keyof PresetConfig, string> = {
 };
 
 export function capturePresetConfig(): PresetConfig {
-    const { store } = settings;
+    const { plain } = settings;
 
     return {
-        fakeMute: store.fakeMute,
-        fakeDeafen: store.fakeDeafen,
-        fakeStream: store.fakeStream,
-        fakeGame: store.fakeGame,
-        fakeCam: store.fakeCam,
-        cutMicTransmission: store.cutMicTransmission
+        fakeMute: plain.fakeMute,
+        fakeDeafen: plain.fakeDeafen,
+        fakeStream: plain.fakeStream,
+        fakeGame: plain.fakeGame,
+        fakeCam: plain.fakeCam,
+        cutMicTransmission: plain.cutMicTransmission
     };
+}
+
+// Settings store reads hand back proxies, and the persistence IPC refuses to clone
+// them: writing a single proxied entry back into presets poisons the whole settings
+// tree and every later save of every setting fails with "An object could not be
+// cloned". Always rebuild entries from this raw copy instead of touching store values.
+function rawPresets(): FakeVoicePreset[] {
+    return (settings.plain.presets ?? []).map(preset => ({
+        id: preset.id,
+        name: preset.name,
+        config: { ...preset.config }
+    }));
 }
 
 export function PresetIcon({ className }: { className?: string; }) {
@@ -60,11 +72,31 @@ export function PresetIcon({ className }: { className?: string; }) {
 }
 
 export function PresetSettings() {
-    const { presets } = settings.use(["presets"]);
-    const list = presets ?? [];
+    // Subscribing keeps this component re-rendering on change, but every value it acts
+    // on comes from rawPresets() — a subscription hands back proxies, and writing those
+    // back makes the settings tree impossible to serialise, which silently drops the
+    // save entirely.
+    settings.use(["presets"]);
+    const list = rawPresets();
 
-    const replace = (index: number, preset: FakeVoicePreset) => {
-        settings.store.presets = list.map((current, i) => i === index ? preset : current);
+    const write = (next: FakeVoicePreset[]) => {
+        settings.store.presets = next;
+    };
+
+    const replace = (index: number, preset: FakeVoicePreset) =>
+        write(rawPresets().map((current, i) => i === index ? preset : current));
+
+    const remove = (index: number) =>
+        write(rawPresets().filter((_, i) => i !== index));
+
+    const add = () => {
+        const current = rawPresets();
+
+        write([...current, {
+            id: nanoid(),
+            name: `Button ${current.length + 1}`,
+            config: capturePresetConfig()
+        }]);
     };
 
     return (
@@ -101,7 +133,7 @@ export function PresetSettings() {
                                 <Button variant="secondary" size="small" onClick={() => replace(index, { ...preset, config: capturePresetConfig() })}>
                                     Save current
                                 </Button>
-                                <Button variant="dangerPrimary" size="small" onClick={() => { settings.store.presets = list.filter((_, i) => i !== index); }}>
+                                <Button variant="dangerPrimary" size="small" onClick={() => remove(index)}>
                                     Delete
                                 </Button>
                             </Flex>
@@ -109,16 +141,7 @@ export function PresetSettings() {
                     </Card>
                 ))}
 
-            <Button
-                variant="secondary"
-                onClick={() => {
-                    settings.store.presets = [...list, {
-                        id: nanoid(),
-                        name: `Button ${list.length + 1}`,
-                        config: capturePresetConfig()
-                    }];
-                }}
-            >
+            <Button variant="secondary" onClick={add}>
                 Add button
             </Button>
         </Flex>

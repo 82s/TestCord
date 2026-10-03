@@ -58,7 +58,7 @@ import { osintScanLoggedMessages } from "./osintBridge";
 import { ensureDefaultDir, restoreAttachmentBlobs } from "./saveImage";
 import { settings } from "./settings";
 import type { EditRecord, FetchMessagesResponse, LoadMessagesPayload, LoggedMessage, LogRecord, MessageCreatePayload, MessageDeleteBulkPayload, MessageDeletePayload, MessageUpdatePayload } from "./types";
-import { cl, embedFingerprint, embedHasBody } from "./utils";
+import { cl, embedFingerprint, embedHasBody, withValidEmbedTimestamps } from "./utils";
 
 const log = new Logger("MessageLoggerTestcord");
 const HEADER_SETTINGS = ["showLogsButton"] as const;
@@ -1357,7 +1357,10 @@ export default definePlugin({
                                 // Same rule as the live path: a bot that paginates or switches
                                 // tabs sends a whole new embed under a reused url, and filling
                                 // it from the previous page pins the old footer over the new one.
-                                if (embedHasBody(match)) continue;
+                                // Same rule as the live path: a bot that paginates or switches
+                        // tabs sends a whole new embed under a reused url, and filling
+                        // it from the previous page pins the old footer over the new one.
+                        if (embedHasBody(match)) continue;
                                 if (old.description && !match.description) { match.description = old.description; hasMergedMiddle = true; }
                                 if (old.title && !match.title) { match.title = old.title; hasMergedMiddle = true; }
                                 if (Array.isArray(old.fields) && old.fields.length && (!Array.isArray(match.fields) || !match.fields.length)) { match.fields = old.fields; hasMergedMiddle = true; }
@@ -1371,9 +1374,14 @@ export default definePlugin({
                             const loggedSeen = new Set(oldEmbeds.map(embedFingerprint));
                             const hasNewEmbeds = latestEmbeds.some((e: any) => !loggedSeen.has(embedFingerprint(e)));
                             const missing = hasNewEmbeds ? [] : oldEmbeds.filter((e: any) => !seen.has(embedFingerprint(e)));
-                            if (missing.length) merged.embeds = latestEmbeds.length ? [...latestEmbeds, ...missing] : [...oldEmbeds];
-                            else if (!latestMessage.embeds) merged.embeds = [...oldEmbeds];
-                            else if (hasMergedMiddle) merged.embeds = [...latestEmbeds];
+                            // A resurrected embed can carry a timestamp that came back
+                            // invalid from the database. Discord formats it with Intl,
+                            // which throws "RangeError: Invalid time value" and takes the
+                            // whole channel render down, so it is validated here rather
+                            // than trusted.
+                            if (missing.length) merged.embeds = withValidEmbedTimestamps(latestEmbeds.length ? [...latestEmbeds, ...missing] : [...oldEmbeds]);
+                            else if (!latestMessage.embeds) merged.embeds = withValidEmbedTimestamps([...oldEmbeds]);
+                            else if (hasMergedMiddle) merged.embeds = withValidEmbedTimestamps([...latestEmbeds]);
                         }
                         const SUPPRESS = 1 << 2;
                         const oldFlags = (loggedMessage as any).flags ?? 0;

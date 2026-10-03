@@ -6,10 +6,10 @@
 
 import { showNotification } from "@api/Notifications";
 import { Logger } from "@utils/Logger";
-import type { Message, MessageJSON } from "@vencord/discord-types";
+import type { Channel, Message, MessageJSON } from "@vencord/discord-types";
 import { ChannelStore, FluxDispatcher, lodash, MessageStore, SelectedChannelStore, UserGuildSettingsStore, UserStore } from "@webpack/common";
 
-import { applyBatch, clearLogs, clearUnprotectedLogs, getAllHistoryForChannel, getChannelLogsAfter, getDatabase, getLogById, runMaintenance, stripUncloneable } from "./db";
+import { applyBatch, clearLogs, clearUnprotectedLogs, getAllHistoryForChannel, getChannelLogsAfter, getDatabase, getGuildLogs, getLogById, repairEditedRecords, runMaintenance, stripUncloneable } from "./db";
 import { invalidateMessageClassCache } from "./render";
 import { ensureAttachmentSaved } from "./saveImage";
 import { settings } from "./settings";
@@ -461,7 +461,7 @@ export function preserveRemovedMedia(payload: MessageUpdatePayload) {
                 if (removed.length > 0) {
                     const target = ensureClone();
                     // Save all of the original embed, including website title/description/fields/author/footer, not just image
-                    target.embeds = [...baseEmbeds, ...removed];
+                    target.embeds = withValidEmbedTimestamps([...baseEmbeds, ...removed]);
                     if (nowSuppressed) {
                         target.flags = incomingFlags & ~SUPPRESS_EMBEDS;
                     }
@@ -525,6 +525,13 @@ export function preserveRemovedMedia(payload: MessageUpdatePayload) {
 function hasCurrentUserMention(message: LoggedMessage) {
     const currentUserId = UserStore.getCurrentUser().id;
     return message.mention_everyone || message.mentions.some(mention => mention.id === currentUserId);
+}
+
+function sameEmbeds(next: unknown, prev: unknown): boolean {
+    if (next === prev) return true;
+    if (!Array.isArray(next) || !Array.isArray(prev)) return false;
+    if (next.length !== prev.length) return false;
+    return next.every((embed, i) => embedFingerprint(embed) === embedFingerprint(prev[i]));
 }
 
 function jsonChanged(next: unknown, prev: unknown): boolean {
@@ -843,7 +850,10 @@ export async function handleMessageUpdate(payload: MessageUpdatePayload) {
     const incomingAttachments = hasAttachments ? toPlainMedia(payloadAny.attachments) : undefined;
     const incomingComponents = hasComponents ? toPlainMedia(payloadAny.components) : undefined;
 
-    const embedsChanged = hasEmbeds && jsonChanged(incomingEmbeds, (previous as any).embeds);
+    // Fingerprints, not stringified payloads. An incoming embed and a stored snapshot of
+    // the same embed are different shapes, so a byte comparison reported a change on
+    // every update and logged the state that was already there as a fresh revision.
+    const embedsChanged = hasEmbeds && !sameEmbeds(incomingEmbeds, (previous as any).embeds);
     const attachmentsChanged = hasAttachments && jsonChanged(incomingAttachments, (previous as any).attachments);
     const componentsChanged = hasComponents && jsonChanged(incomingComponents, (previous as any).components);
     const contentChanged = hasContent && previous.content !== payload.message.content;
@@ -1224,6 +1234,36 @@ export async function removeChannelLogs(channelId: string, permanent: boolean) {
     return handled.size;
 }
 
+/**
+ * Clear the logs of every channel in a server.
+ *
+ * Walks the by_guild index rather than each channel's own mirror: the per-channel
+ * queries only know about channels that have been visited, so a server-wide clear built
+ * on them would leave behind everything logged in channels the user has not opened.
+ */
+export async function removeGuildLogs(guildId: string, permanent: boolean) {
+    const channelIds = new Set<string>();
+    const { getChannels } = ChannelStore as { getChannels?: (guildId: string) => Channel[] };
+    for (const channel of getChannels?.(guildId) ?? []) {
+        if (channel?.id) channelIds.add(channel.id);
+    }
+
+    const records = await getGuildLogs(guildId);
+    for (const record of records) {
+        const channelId = record.channel_id ?? record.message?.channel_id;
+        if (channelId) channelIds.add(channelId);
+    }
+
+    for (const channelId of channelIds) {
+        removeChannelLogs(channelId, permanent);
+        forgetChannelSnapshots(channelId);
+        invalidateChannelCache(channelId);
+    }
+
+    if (permanent) await flushQueuedLogs();
+    return records.length;
+}
+
 export async function clearAllLogs(includeProtected = false) {
     if (flushTimer !== undefined) {
         clearTimeout(flushTimer);
@@ -1281,6 +1321,10 @@ export function startEngine() {
     // Defer DB/prime work so Discord can paint first; chunking inside primeLoggedCache keeps it off the main thread.
     const scheduleStart = () => {
         void getDatabase()
+            .then(repairEditedRecords)
+            .then(repaired => {
+                if (repaired) log.info(`Repaired ${repaired} edited record(s) with duplicate embed state.`);
+            })
             .then(performMaintenance)
             .then(primeLoggedCache)
             .catch(error => log.error("Failed to initialize the log database.", error));
