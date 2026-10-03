@@ -152,8 +152,9 @@ export async function removeMembers(
     delay: number
 ): Promise<{ removed: number; failed: string[]; }> {
     const failed = new Set<string>();
+    const targets = userIds.filter(id => recipientIds(ChannelStore.getChannel(channelId)).includes(id));
 
-    for (const batch of chunk(userIds, size)) {
+    for (const batch of chunk(targets, size)) {
         await Promise.all(batch.map(async userId => {
             try {
                 await RestAPI.del({ url: recipientUrl(channelId, userId) });
@@ -165,7 +166,7 @@ export async function removeMembers(
         if (delay > 0) await sleep(delay);
     }
 
-    return { removed: userIds.length - failed.size, failed: [...failed] };
+    return { removed: targets.length - failed.size, failed: [...failed] };
 }
 
 /** Accept an invite and work out which group it dropped us into */
