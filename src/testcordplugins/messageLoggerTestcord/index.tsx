@@ -58,7 +58,7 @@ import { osintScanLoggedMessages } from "./osintBridge";
 import { ensureDefaultDir, restoreAttachmentBlobs } from "./saveImage";
 import { settings } from "./settings";
 import type { EditRecord, FetchMessagesResponse, LoadMessagesPayload, LoggedMessage, LogRecord, MessageCreatePayload, MessageDeleteBulkPayload, MessageDeletePayload, MessageUpdatePayload } from "./types";
-import { cl, embedHasBody } from "./utils";
+import { cl, embedFingerprint, embedHasBody } from "./utils";
 
 const log = new Logger("MessageLoggerTestcord");
 const HEADER_SETTINGS = ["showLogsButton"] as const;
@@ -1345,17 +1345,6 @@ export default definePlugin({
                     if (settings.store.preserveRemovedEmbeds && isEditedForEmbeds && Array.isArray(loggedMessage.embeds) && (loggedMessage.embeds as any[]).length) {
                         const latestEmbeds: any[] = latestMessage.embeds ?? [];
                         const oldEmbeds: any[] = loggedMessage.embeds as any[];
-                        const stableFp = (e: any) => {
-                            if (!e || typeof e !== "object") return String(e);
-                            try {
-                                return JSON.stringify({
-                                    url: e.url, type: e.type, title: e.title, description: e.description,
-                                    author: e.author?.name ?? e.author?.url, provider: e.provider?.name,
-                                    fields: Array.isArray(e.fields) ? e.fields.map((f: any) => ({ name: f.name, value: f.value, inline: f.inline })) : undefined,
-                                    footer: e.footer?.text, image: e.image?.url, thumbnail: e.thumbnail?.url, video: e.video?.url
-                                });
-                            } catch { return `${e?.type ?? ""}|${e?.url ?? ""}|${e?.title ?? ""}|${e?.description ?? ""}`; }
-                        };
                         {
                             // If same URL but middle content (description/fields) stripped, restore it into latest embed instead of duplicating
                             const latestByUrl = new Map<string, any>();
@@ -1376,12 +1365,12 @@ export default definePlugin({
                                 if (old.footer?.text && !match.footer?.text) { match.footer = old.footer; hasMergedMiddle = true; }
                                 if (old.provider && !match.provider) { match.provider = old.provider; hasMergedMiddle = true; }
                             }
-                            const seen = new Set(latestEmbeds.map(stableFp));
+                            const seen = new Set(latestEmbeds.map(embedFingerprint));
                             // Same rule as the live path: resurrect only on pure removal. A fresh
                             // embed set is a legitimate replacement, not a strip.
-                            const loggedSeen = new Set(oldEmbeds.map(stableFp));
-                            const hasNewEmbeds = latestEmbeds.some((e: any) => !loggedSeen.has(stableFp(e)));
-                            const missing = hasNewEmbeds ? [] : oldEmbeds.filter((e: any) => !seen.has(stableFp(e)));
+                            const loggedSeen = new Set(oldEmbeds.map(embedFingerprint));
+                            const hasNewEmbeds = latestEmbeds.some((e: any) => !loggedSeen.has(embedFingerprint(e)));
+                            const missing = hasNewEmbeds ? [] : oldEmbeds.filter((e: any) => !seen.has(embedFingerprint(e)));
                             if (missing.length) merged.embeds = latestEmbeds.length ? [...latestEmbeds, ...missing] : [...oldEmbeds];
                             else if (!latestMessage.embeds) merged.embeds = [...oldEmbeds];
                             else if (hasMergedMiddle) merged.embeds = [...latestEmbeds];

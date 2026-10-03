@@ -14,7 +14,7 @@ import { invalidateMessageClassCache } from "./render";
 import { ensureAttachmentSaved } from "./saveImage";
 import { settings } from "./settings";
 import { EditRecord, LoggedMessage, LogRecord, LogStatus, MessageCreatePayload, MessageDeleteBulkPayload, MessageDeletePayload, MessageUpdatePayload } from "./types";
-import { embedHasBody } from "./utils";
+import { embedFingerprint, embedHasBody, withValidEmbedTimestamps } from "./utils";
 
 const log = new Logger("MessageLoggerTestcord");
 const recentMessages = new Map<string, LoggedMessage>();
@@ -414,29 +414,6 @@ export function preserveRemovedMedia(payload: MessageUpdatePayload) {
                 let removed: any[] = [];
                 let baseEmbeds: any[] = incomingEmbeds ?? oldEmbeds;
 
-                // Stable fingerprint: only content-defining fields, ignores volatile proxy_url/width/height/id/color/timestamp
-                // This prevents duplicates when Discord re-fetches same website embed with new proxy URL
-                const stableFp = (e: any) => {
-                    if (!e || typeof e !== "object") return String(e);
-                    try {
-                        return JSON.stringify({
-                            url: e.url,
-                            type: e.type,
-                            title: e.title,
-                            description: e.description,
-                            author: e.author?.name ?? e.author?.url,
-                            provider: e.provider?.name,
-                            fields: Array.isArray(e.fields) ? e.fields.map((f: any) => ({ name: f.name, value: f.value, inline: f.inline })) : undefined,
-                            footer: e.footer?.text,
-                            image: e.image?.url,
-                            thumbnail: e.thumbnail?.url,
-                            video: e.video?.url
-                        });
-                    } catch {
-                        return `${e?.type ?? ""}|${e?.url ?? ""}|${e?.title ?? ""}|${e?.description ?? ""}`;
-                    }
-                };
-
                 if (!wasSuppressed && nowSuppressed) {
                     removed = oldEmbeds;
                     baseEmbeds = incomingEmbeds ?? [];
@@ -464,13 +441,13 @@ export function preserveRemovedMedia(payload: MessageUpdatePayload) {
                         if (old.image?.url && !match.image?.url) { match.image = lodash.cloneDeep(old.image); hasMergedMiddle = true; }
                         if (old.thumbnail?.url && !match.thumbnail?.url) { match.thumbnail = lodash.cloneDeep(old.thumbnail); hasMergedMiddle = true; }
                     }
-                    const seen = new Set(incomingEmbeds.map(stableFp));
+                    const seen = new Set(incomingEmbeds.map(embedFingerprint));
                     // Pure removal (e.g. stripped preview) restores the missing embeds. A fresh
                     // embed set (e.g. a bot advancing to the next step) is a legitimate replacement:
                     // resurrecting the old ones here piles stale embeds onto every edit.
-                    const oldSeen = new Set(oldEmbeds.map(stableFp));
-                    const hasNewEmbeds = incomingEmbeds.some((e: any) => !oldSeen.has(stableFp(e)));
-                    removed = hasNewEmbeds ? [] : oldEmbeds.filter((e: any) => !seen.has(stableFp(e)));
+                    const oldSeen = new Set(oldEmbeds.map(embedFingerprint));
+                    const hasNewEmbeds = incomingEmbeds.some((e: any) => !oldSeen.has(embedFingerprint(e)));
+                    removed = hasNewEmbeds ? [] : oldEmbeds.filter((e: any) => !seen.has(embedFingerprint(e)));
                     baseEmbeds = incomingEmbeds;
                     if (hasMergedMiddle && removed.length === 0) {
                         const target = ensureClone();
@@ -862,7 +839,7 @@ export async function handleMessageUpdate(payload: MessageUpdatePayload) {
     const payloadAny = payload.message as any;
     // One shape for both the comparison and the stored copy, so jsonChanged is never
     // comparing a payload object against the snapshot it is stored as.
-    const incomingEmbeds = hasEmbeds ? toPlainMedia(payloadAny.embeds) : undefined;
+    const incomingEmbeds = hasEmbeds ? withValidEmbedTimestamps(toPlainMedia(payloadAny.embeds)) : undefined;
     const incomingAttachments = hasAttachments ? toPlainMedia(payloadAny.attachments) : undefined;
     const incomingComponents = hasComponents ? toPlainMedia(payloadAny.components) : undefined;
 
