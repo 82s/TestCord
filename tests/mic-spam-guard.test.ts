@@ -35,6 +35,7 @@ interface Harness {
     speech: (db: number, ms: number, user?: string) => void;
     store: Record<string, any>;
     storeWrites: string[];
+    channel: { id: string | null; };
     notifications: Array<{ title: string; body: string; }>;
     toasts: Array<{ message: string; options: { duration?: number; position?: number; }; }>;
     volumes: Map<string, number>;
@@ -59,6 +60,7 @@ function setup(initial: Record<string, number> = {}): Harness {
     const muted = new Set<string>();
     const friends = new Set<string>();
     const members = new Set(["1", "2", "3", "4"]);
+    const channel: { id: string | null; } = { id: "channel" };
     const emitter = { on() {}, off() {} };
     const conn = { context: "default", emitter, getUserIdBySsrc: () => "2" };
     let store: Record<string, any>;
@@ -112,9 +114,12 @@ function setup(initial: Record<string, number> = {}): Harness {
         }),
         findByCodeLazy: (...filters: any[]) => (filters.includes("Math.log10") ? toSlider : toRaw),
         Button: {},
-        React: {},
+        React: { useSyncExternalStore: (_subscribe: any, read: any) => read(), createElement: (type: any, props: any, ...children: any[]) => ({ type, props, children }) },
+        ReactDOM: { createPortal: (child: any, target: any) => ({ child, target }) },
+        NotificationComponent() {},
+        document: { body: {} },
         RelationshipStore: { isFriend: (user: string) => friends.has(user) },
-        SelectedChannelStore: { getVoiceChannelId: () => "channel" },
+        SelectedChannelStore: { getVoiceChannelId: () => channel.id },
         UserStore: { getCurrentUser: () => ({ id: "1" }), getUser: (user: string) => ({ username: user, bot: user === "4" }) },
         VoiceStateStore: {
             getVoiceStatesForChannel: () => Object.fromEntries([...members].map(user => [user, {}]))
@@ -125,7 +130,8 @@ function setup(initial: Record<string, number> = {}): Harness {
             isLocalMute: (user: string) => muted.has(user)
         },
         showToast(message: string, _type: number, options: { duration?: number; position?: number; }) { toasts.push({ message, options }); },
-        showNotification(data: { title: string; body: string; }) { notifications.push(data); return Promise.resolve(); },
+        persistNotification(data: { title: string; body: string; }) { notifications.push(data); return Promise.resolve(); },
+        showNotification() { throw Error("MicSpamGuard must not use the shared notification queue"); },
         Toasts: { Type: { MESSAGE: 1 }, Position: { TOP: 0 } }
     };
     sandbox.lodash = {
@@ -184,7 +190,7 @@ function setup(initial: Record<string, number> = {}): Harness {
 
     return {
         run, sample, stats, advance, speech, store,
-        storeWrites, notifications, toasts, volumes, writes, persisted, muted, friends, members,
+        storeWrites, channel, notifications, toasts, volumes, writes, persisted, muted, friends, members,
         plugin: sandbox.plugin
     };
 }
@@ -767,4 +773,50 @@ test("Verbose adds context without adding a second notification channel", () => 
     assert.equal(t.notifications.length, 2); assert.equal(t.toasts.length, 0);
     assert(t.notifications[0].body.includes("Level 100%"));
     assert(t.notifications[1].body.includes("After 3 seconds"));
+});
+
+
+test("A burst replaces current activity instead of creating a popup backlog", () => {
+    const t = setup(); t.store.notify = true; t.store.notificationMode = "verbose";
+    for (let i = 0; i < 100; i++) t.run(`notifyAction("Action ${i}", {userId:"2"})`);
+    assert.equal(t.run("noticeItems.length"), 1);
+    assert.equal(t.run("noticeItems[0].body"), "Action 99");
+    t.advance(3100); assert.equal(t.run("noticeItems.length"), 0);
+});
+
+test("The activity card bounds rows and expires old participants independently", () => {
+    const t = setup(); t.store.notify = true;
+    for (const id of ["1", "2", "3", "4"]) t.run(`notifyAction("User ${id}", {userId:"${id}"})`);
+    assert.equal(t.run("noticeItems.length"), 3);
+    t.advance(2000); t.run('notifyAction("Updated", {userId:"2"})');
+    t.advance(1100); assert.equal(t.run("noticeItems.length"), 1);
+    assert.equal(t.run("noticeItems[0].body"), "Updated");
+});
+
+test("Leaving the call clears activity and rejects later stale actions", () => {
+    const t = setup(); t.run("poll()"); t.store.notify = true;
+    t.run('notifyAction("Before leaving", {userId:"2"})');
+    t.channel.id = null; t.run("poll()"); assert.equal(t.run("noticeItems.length"), 0);
+    t.run('notifyAction("Stale", {userId:"2"})'); assert.equal(t.run("noticeItems.length"), 0);
+    t.advance(10000); assert.equal(t.run("noticeItems.length"), 0);
+});
+
+test("Mode changes, disabling notices and plugin shutdown clear current activity", () => {
+    const t = setup(); t.store.notify = true;
+    t.run('notifyAction("Mode change")'); t.plugin.settings.defs.notificationMode.onChange();
+    assert.equal(t.run("noticeItems.length"), 0);
+    t.run('notifyAction("Disable")'); t.plugin.settings.defs.notify.onChange(false);
+    assert.equal(t.run("noticeItems.length"), 0);
+    t.run('notifyAction("Stop")'); t.plugin.stop(); assert.equal(t.run("noticeItems.length"), 0);
+});
+
+
+test("Activity renders as one live card and dismissing it clears all rows", () => {
+    const t = setup(); t.store.notify = true;
+    t.run('notifyAction("First", {userId:"2"}); notifyAction("Second", {userId:"3"})');
+    const view = t.run("GuardNotice()");
+    assert.equal(view.child.props.title, "MicSpamGuard");
+    assert.equal(view.child.props.permanent, true);
+    assert.equal(view.child.props.body, "First\nSecond");
+    view.child.props.onClose(); assert.equal(t.run("GuardNotice()"), null);
 });
