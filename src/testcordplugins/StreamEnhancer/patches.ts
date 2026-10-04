@@ -416,7 +416,7 @@ export const streamEnhancerPatches: Array<Omit<Patch, "plugin">> = [
         }
     },
     {
-        find: "this._sentVideo&&",
+        find: /sendVideo\(\i,\i,\i,\i\)\{let \i=this\._socket;/,
         replacement: {
             match: /this\._sentVideo&&(\i)\.video\((\i),(\i),(\i),(\i)\)/,
             replace: "this._sentVideo&&$1.video($2,$3,$4,$self.advertise(this,$5))"

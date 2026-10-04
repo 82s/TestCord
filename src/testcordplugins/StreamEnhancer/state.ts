@@ -7,9 +7,9 @@
 import * as DataStore from "@api/DataStore";
 import { disableStyle, enableStyle } from "@api/Styles";
 import { classNameFactory } from "@utils/css";
-import { proxyLazy } from "@utils/lazy";
+import { makeLazy, proxyLazy } from "@utils/lazy";
 import { classes, sleep } from "@utils/misc";
-import { findComponentByCodeLazy } from "@webpack";
+import { findComponentByCode } from "@webpack";
 import { ChannelStore, Flux, FluxDispatcher, React, SelectedChannelStore, UserStore, useStateFromStores } from "@webpack/common";
 import type { CSSProperties } from "react";
 
@@ -1272,10 +1272,13 @@ export const getRenderedFrameStyle = (streamKey: string | null | undefined) => {
     } satisfies CSSProperties;
 };
 
-const CameraVideo = findComponentByCodeLazy<ZoomableVideoProps>('location:"VideoStream"');
+const getCameraVideo = makeLazy(() => findComponentByCode('location:"VideoStream"'));
 
-export const renderZoomableCameraVideo = (props: ZoomableVideoProps, key: string | number | bigint | null | undefined) =>
-    React.createElement(CameraVideo, { ...props, key: key == null ? undefined : String(key) });
+export const renderZoomableCameraVideo = (props: ZoomableVideoProps, key: string | number | bigint | null | undefined) => {
+    const CameraVideo = getCameraVideo();
+    if (CameraVideo == null) return null;
+    return React.createElement(CameraVideo, { ...props, key: key == null ? undefined : String(key) });
+};
 
 // useStateFromStores compares results with reference equality by default, which would
 // re-render on every store change because the mapper builds a new object each call.

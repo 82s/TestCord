@@ -34,7 +34,7 @@ export function advertiseBadge(rtc: { context?: string; }, streams: unknown, con
         if (stream == null || typeof stream !== "object" || !("maxResolution" in stream || "maxFrameRate" in stream)) return stream;
         return {
             ...stream,
-            maxResolution: { type: "fixed", width: config.spoofBadgeWidth, height: config.spoofBadgeHeight },
+            maxResolution: { type: 0, width: config.spoofBadgeWidth, height: config.spoofBadgeHeight },
             maxPixelCount: config.spoofBadgeWidth * config.spoofBadgeHeight,
             maxFrameRate: config.spoofBadgeFps
         };

@@ -13,7 +13,7 @@ function load(file) {
 }
 const { normalizeBadgeConfig, advertiseBadge, badgeFps, badgeResolution } = load("badge.ts");
 const config = normalizeBadgeConfig({ spoofBadgeEnabled: true });
-const video = Object.freeze({ maxResolution: Object.freeze({ type: "fixed", width: 1920, height: 1080 }), maxFrameRate: 60, maxBitrate: 12000000 });
+const video = Object.freeze({ maxResolution: Object.freeze({ type: 0, width: 1920, height: 1080 }), maxFrameRate: 60, maxBitrate: 12000000 });
 const audio = Object.freeze({ type: "audio", maxBitrate: 192000 });
 const streams = Object.freeze([video, audio]);
 const out = advertiseBadge({ context: "stream" }, streams, config);
@@ -39,9 +39,9 @@ assert.equal(invalid.spoofBadgeHeight, 4320);
 assert.equal(invalid.spoofBadgeFps, 1);
 assert.equal(normalizeBadgeConfig({ spoofBadgeFps: 2000000 }).spoofBadgeFps, 1000);
 const state = fs.readFileSync(path.join(root, "state.ts"), "utf8");
-const cameraCode = state.slice(state.indexOf("const CameraVideo ="), state.indexOf("// useStateFromStores compares results"));
+const cameraCode = state.slice(state.indexOf("const getCameraVideo ="), state.indexOf("// useStateFromStores compares results"));
 const native = {};
-const sandbox = { module: { exports: {} }, findComponentByCodeLazy: query => { assert.equal(query, 'location:"VideoStream"'); return native; }, React: { createElement: (component, props) => ({ component, props }) } };
+const sandbox = { module: { exports: {} }, makeLazy: fn => fn, findComponentByCode: query => { assert.equal(query, 'location:"VideoStream"'); return native; }, React: { createElement: (component, props) => ({ component, props }) } };
 vm.runInNewContext(esbuild.transformSync(cameraCode, { loader: "ts", format: "cjs" }).code, sandbox);
 const render = sandbox.module.exports.renderZoomableCameraVideo;
 for (const mirror of [true, false]) {
@@ -52,15 +52,25 @@ for (const mirror of [true, false]) {
     assert.equal(result.props.key, "1");
 }
 assert.equal(render({}, null).props.key, undefined);
+sandbox.findComponentByCode = () => null;
+assert.equal(render({}, null), null);
+const sourceResolution = Object.freeze({ width: 0, height: 0, type: 1 });
+assert.equal(badgeResolution(sourceResolution, config).type, 0);
+assert.equal(advertiseBadge({ context: "stream" }, [{ maxResolution: sourceResolution }], config)[0].maxResolution.type, 0);
+assert.equal(out[0].maxResolution.type, video.maxResolution.type);
 const { streamEnhancerPatches } = load("patches.ts");
 if (process.env.STREAM_ENHANCER_MODULES) {
     const { modules } = JSON.parse(fs.readFileSync(process.env.STREAM_ENHANCER_MODULES, "utf8"));
     for (const find of ['REMOTE_VIDEO,paused:', '"useMaxQuality"', "this._sentVideo&&"]) {
-        const patch = streamEnhancerPatches.find(p => p.find === find);
+        const patch = streamEnhancerPatches.find(p => typeof p.find === "string" ? p.find === find : find === "this._sentVideo&&");
         const term = find.replaceAll('"', '');
         const found = modules[term];
         assert.equal(found.length, 1, `one live module for ${find}`);
         let code = found[0].code;
+        if (typeof patch.find !== "string") {
+            const anchor = new RegExp(patch.find.source.replaceAll("\\i", "(?:[A-Za-z_$][\\w$]*)"));
+            assert.ok(anchor.test(code), "specific sendVideo method anchor");
+        }
         for (const replacement of [].concat(patch.replacement)) {
             const match = new RegExp(replacement.match.source.replaceAll("\\i", "(?:[A-Za-z_$][\\w$]*)"), replacement.match.flags);
             assert.equal([...code.matchAll(new RegExp(match.source, "g"))].length, 1, `${find}: ${match}`);

@@ -299,7 +299,7 @@ function SliderField({
     onChange: (value: number) => void;
     formatter?: (value: number) => string;
 }) {
-    const choices = sliderChoices(markers, min, max);
+    const choices = sliderChoices([...markers, value], min, max);
     const format = (position: number) => formatter?.(choiceAt(position, choices)) ?? String(choiceAt(position, choices));
     return (
         <div className={cl("go-live-field")}>
@@ -308,6 +308,7 @@ function SliderField({
                 <span className={cl("go-live-slider-value")}>{formatter?.(value) ?? String(value)}</span>
             </div>
             <Slider
+                key={`${label}-${value}`}
                 minValue={0}
                 maxValue={choices.length - 1}
                 markers={choices.map((_, index) => index)}
