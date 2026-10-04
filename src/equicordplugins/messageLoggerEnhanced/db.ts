@@ -7,7 +7,7 @@
 import * as DataStore from "@api/DataStore";
 import { CACHED_MESSAGES_MAX } from "@utils/cacheLimits";
 import { Logger } from "@utils/Logger";
-import { ChannelStore, Toasts } from "@webpack/common";
+import { ChannelStore, showToast } from "@webpack/common";
 import { DBSchema, IDBPDatabase, openDB } from "idb";
 
 import { LoggedMessageJSON } from "./types";
@@ -310,7 +310,7 @@ export async function deleteMessagesBulkIDB(message_ids: string[]) {
     message_ids.forEach(id => cachedMessages.delete(id));
 }
 
-export async function clearMessagesIDB(showToast = true) {
+export async function clearMessagesIDB(toast = true) {
     cachedMessages.clear();
 
     const deleted = await new Promise<boolean>(resolve => {
@@ -325,13 +325,9 @@ export async function clearMessagesIDB(showToast = true) {
 
     cachedMessages.clear();
 
-    if (!showToast) return;
+    if (!toast) return;
 
-    Toasts.show({
-        type: Toasts.Type.MESSAGE,
-        message: "Cleared message log database and cache.",
-        id: Toasts.genId()
-    });
+    showToast("Cleared message log database and cache.", "message");
 }
 
 // faster than db.clear on large dbs

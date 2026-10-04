@@ -418,13 +418,13 @@ export interface EmojiUtils {
     applyPlatformToThemedEmojiColorPalette(colors: any): any;
 }
 
-export interface OpenUserSettingsOpts {
+export interface OpenUserSettingsOptions {
     /**
      * a *sub*section of settings to navigate to
      *
      * to navigate to a top-level section, use the navigationTarget parameter of {@link SettingsRouter.openUserSettings} instead
      *
-     * discord has an enum with all the possible values (go dig in the openUserSettings source)
+     * discord has an enum with all the possible values (go dig in the {@link SettingsRouter.openUserSettings} source)
      */
     path?: string;
     /**
@@ -435,10 +435,10 @@ export interface OpenUserSettingsOpts {
 }
 
 export interface SettingsRouter {
-    openUserSettings(navigationTarget?: string, opts?: OpenUserSettingsOpts, onOpen?: () => void): Promise<void>;
+    openUserSettings(navigationTarget?: string, opts?: OpenUserSettingsOptions, onOpen?: () => void): Promise<void>;
 }
 
-export interface OpenUserProfileModalOpts {
+export interface OpenUserProfileModalOptions {
     userId: string;
     guildId?: string | null;
     originGuildId?: string | null;
@@ -459,6 +459,4 @@ export interface OpenUserProfileModalOpts {
     onModalOpen?: unknown;
 }
 
-export interface UserProfileModalActionCreators {
-    openUserProfileModal(opts: OpenUserProfileModalOpts): Promise<void>;
-}
+export type OpenUserProfileModal = (opts: OpenUserProfileModalOptions) => Promise<void>;
