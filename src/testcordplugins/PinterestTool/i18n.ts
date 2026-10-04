@@ -1,4 +1,9 @@
-/* SPDX-License-Identifier: GPL-3.0-or-later */
+/*
+ * Vencord, a Discord client mod
+ * Copyright (c) 2026 Vendicated and contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 import { LocaleStore, useStateFromStores } from "@webpack/common";
 
 // The interface is always in English, whatever Discord's language is. Partial

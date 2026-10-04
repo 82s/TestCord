@@ -1,15 +1,14 @@
 /*
  * Vencord, a Discord client mod
  * Copyright (c) 2026 Vendicated and contributors
- * Pinterest Tool modifications Copyright (c) 2026 szcx404
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 import * as DataStore from "@api/DataStore";
 import { copyWithToast, openImageModal } from "@utils/discord";
-import { ModalCloseButton, ModalContent, ModalHeader, ModalProps, ModalRoot, ModalSize } from "@utils/modal";
 import { Logger } from "@utils/Logger";
 import { classes } from "@utils/misc";
+import { ModalCloseButton, ModalContent, ModalHeader, ModalProps, ModalRoot, ModalSize } from "@utils/modal";
 import { saveFile } from "@utils/web";
 import { findByPropsLazy } from "@webpack";
 import { FluxDispatcher, showToast, Toasts, useEffect, useLayoutEffect, useMemo, useRef, useState } from "@webpack/common";
@@ -22,13 +21,12 @@ import { FluxDispatcher, showToast, Toasts, useEffect, useLayoutEffect, useMemo,
 const ReactDOMPortal = findByPropsLazy("createPortal");
 import { Dispatch, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction } from "react";
 
-import { drawScene, FONT_STACKS, FX_DEFAULT, FX_PRESETS, type FontKey, type Fx, hitTestLayers, type ImageCache, type ImageLayer, isPristine, type Layer, type TextLayer } from "./effects";
-import { bytesToDataUrl, canDecodeAnimated, dataUrlToBytes, decodeGif, type DecodedGif, encodeFittedGif, fitUnderLimit, TARGET_BYTES } from "./gif";
-import { PLUGIN_ICON } from "./icon";
+import { drawScene, FONT_STACKS, type FontKey, type Fx, FX_DEFAULT, FX_PRESETS, hitTestLayers, type ImageCache, type ImageLayer, isPristine, type Layer, type TextLayer } from "./effects";
+import { bytesToDataUrl, canDecodeAnimated, dataUrlToBytes, type DecodedGif, decodeGif, encodeFittedGif, fitUnderLimit, TARGET_BYTES } from "./gif";
 import { direction, t, useLocale } from "./i18n";
+import { PLUGIN_ICON } from "./icon";
 import { imageKey, shapeDistance, visualKey } from "./searchRanking";
-import { AppearanceSetting, cl, getPinterestFullStyle, Native, NativeMediaResult, PINTEREST_THEMES, PinterestImageResult, PinterestSearchPayload, PinterestTheme, resolveAppearance, resolvePinterestTheme, ResolvedAppearance, SearchBucketState, SearchKind, SearchTarget, settings } from "./shared";
-
+import { AppearanceSetting, cl, getPinterestFullStyle, Native, NativeMediaResult, PINTEREST_THEMES, PinterestImageResult, PinterestSearchPayload, PinterestTheme, resolveAppearance, ResolvedAppearance, resolvePinterestTheme, SearchBucketState, SearchKind, SearchTarget, settings } from "./shared";
 
 const logger = new Logger("PinterestTool");
 
@@ -314,7 +312,6 @@ async function saveResult(result: PinterestImageResult) {
         showToast(t("saveFailed"), Toasts.Type.FAILURE);
     }
 }
-
 
 const FAVORITES_STORAGE_KEYS: Record<Extract<SearchKind, "AVATAR" | "BANNER">, string> = {
     AVATAR: "PinterestTool_favorites_avatar_v2",
@@ -1328,7 +1325,6 @@ function PinterestBrowser({
         return 25;
     }
 
-
     function currentFavoriteTarget(): SearchKind {
         return target === "ALL" ? "AVATAR" : target;
     }
@@ -1641,7 +1637,6 @@ function PinterestBrowser({
         if (kind === "IMAGE") return IMAGE_RESULTS_PER_PAGE;
         return AVATAR_RESULTS_PER_PAGE;
     }
-
 
     function selectResult(result: PinterestImageResult, kind: SearchKind) {
         setMenuId("");
@@ -2482,7 +2477,7 @@ export function PinterestProfileModal({ target, onEditFile, onApplied, ...props 
         const frame = requestAnimationFrame(() => {
             const element = effectsRequest
                 ? baseRef.current?.parentElement?.querySelector<HTMLButtonElement>(`.${cl("fx")} button`)
-                : baseRef.current?.querySelector<HTMLInputElement>(`input[type="search"]`);
+                : baseRef.current?.querySelector<HTMLInputElement>("input[type=\"search\"]");
             element?.focus({ preventScroll: true });
         });
         return () => cancelAnimationFrame(frame);

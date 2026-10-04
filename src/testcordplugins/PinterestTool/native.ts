@@ -5,6 +5,7 @@
  */
 
 import { createHash } from "crypto";
+
 import { hasBannerIntent, hasProfileIntent, normalizeQuery, rankResults, shapeFits } from "./searchRanking";
 
 const BASE_URL = "https://www.pinterest.com";
@@ -448,7 +449,6 @@ async function searchPinterest(
         bookmark: returnedBookmark
     };
 }
-
 
 // ---------------------------------------------------------------------------
 // Two Pinterest feeds per search, for variety

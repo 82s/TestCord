@@ -1,7 +1,7 @@
 /*
- * Pinterest Tool — TestCord user plugin
- * Based on the PinterestSearch browser/search implementation.
- * Adds Pinterest directly to Discord's "Select an Image" profile modal.
+ * Vencord, a Discord client mod
+ * Copyright (c) 2026 Vendicated and contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 import ErrorBoundary from "@components/ErrorBoundary";
@@ -11,10 +11,9 @@ import { openModal } from "@utils/modal";
 import definePlugin from "@utils/types";
 
 import { PinterestProfileModal } from "./components";
-import { PLUGIN_ICON } from "./icon";
 import { t } from "./i18n";
-import type { SearchKind } from "./shared";
-import { Native, settings } from "./shared";
+import { PLUGIN_ICON } from "./icon";
+import { Native, type SearchKind,settings } from "./shared";
 import managedStyle from "./style.css?managed";
 
 const WrappedPinterestProfileModal = ErrorBoundary.wrap(PinterestProfileModal, { noop: true });
@@ -237,7 +236,7 @@ function getReferencedFileInput(element: HTMLElement): HTMLInputElement | null {
 
     for (let depth = 0; current && depth < 6; depth++, current = current.parentElement) {
         if (current instanceof HTMLLabelElement) {
-            const control = current.control;
+            const { control } = current;
             if (control instanceof HTMLInputElement && isSafeProfileImageInput(control)) return control;
         }
 

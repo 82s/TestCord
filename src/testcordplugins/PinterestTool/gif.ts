@@ -1,7 +1,6 @@
 /*
  * Vencord, a Discord client mod
  * Copyright (c) 2026 Vendicated and contributors
- * Pinterest Tool modifications Copyright (c) 2026 szcx404
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
@@ -296,7 +295,7 @@ function writeLzw(out: ByteWriter, minCodeSize: number, indices: Uint8Array) {
 
 export interface EncodeFrame {
     data: Uint8ClampedArray; // RGBA, width*height*4
-    delay: number;           // ms
+    delay: number; // ms
 }
 
 /** Encodes RGBA frames into an animated GIF (global palette, looping forever). */

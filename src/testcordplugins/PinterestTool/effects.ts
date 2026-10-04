@@ -1,7 +1,6 @@
 /*
  * Vencord, a Discord client mod
  * Copyright (c) 2026 Vendicated and contributors
- * Pinterest Tool modifications Copyright (c) 2026 szcx404
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
@@ -66,9 +65,9 @@ export interface TextLayer {
     kind: "text";
     id: string;
     text: string;
-    x: number;          // centre, 0..1 of width
-    y: number;          // centre, 0..1 of height
-    size: number;       // font size as a fraction of image height
+    x: number; // centre, 0..1 of width
+    y: number; // centre, 0..1 of height
+    size: number; // font size as a fraction of image height
     color: string;
     font: FontKey;
     bold: boolean;
@@ -81,10 +80,10 @@ export interface TextLayer {
 export interface ImageLayer {
     kind: "image";
     id: string;
-    src: string;        // data URL (kept so a layer can be re-created)
+    src: string; // data URL (kept so a layer can be re-created)
     x: number;
     y: number;
-    scale: number;      // width as a fraction of image width
+    scale: number; // width as a fraction of image width
 }
 
 export type Layer = TextLayer | ImageLayer;

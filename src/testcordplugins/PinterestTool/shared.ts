@@ -1,7 +1,6 @@
 /*
  * Vencord, a Discord client mod
  * Copyright (c) 2026 Vendicated and contributors
- * Pinterest Tool modifications Copyright (c) 2026 szcx404
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
@@ -21,7 +20,6 @@ export type ResolvedAppearance = "dark" | "light";
 export interface SearchExtras {
     pinterestCookie?: string;
 }
-
 
 export const PINTEREST_THEMES = [
     { label: "Pinterest", value: "pinterest", accent: "#e60023", accentHover: "#ff2446", soft: "rgba(230, 0, 35, .16)" },

@@ -54,7 +54,7 @@ const unwatched = new Set<string>();
 function mentionId(mention: unknown): string | undefined {
     if (typeof mention === "string") return mention;
     if (mention && typeof mention === "object") {
-        const id = (mention as { id?: unknown; }).id;
+        const { id } = (mention as { id?: unknown; });
         if (typeof id === "string") return id;
     }
     return undefined;

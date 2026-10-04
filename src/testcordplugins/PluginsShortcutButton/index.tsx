@@ -1,11 +1,11 @@
 /*
- * TestCord - Plugins Shortcut Button
- * Copyright (c) 2026 szcx404
+ * Vencord, a Discord client mod
+ * Copyright (c) 2026 Vendicated and contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { PluginsIcon } from "@components/Icons";
 import { UserAreaButton, UserAreaRenderProps } from "@api/UserArea";
+import { PluginsIcon } from "@components/Icons";
 import { TestcordDevs } from "@utils/constants";
 import definePlugin from "@utils/types";
 import { findByPropsLazy } from "@webpack";
