@@ -7,15 +7,15 @@
 import * as DataStore from "@api/DataStore";
 import { disableStyle, enableStyle } from "@api/Styles";
 import { classNameFactory } from "@utils/css";
-import { proxyLazy } from "@utils/lazy";
+import { makeLazy, proxyLazy } from "@utils/lazy";
 import { classes, sleep } from "@utils/misc";
-import { findModuleId, wreq } from "@webpack";
+import { findComponentByCode } from "@webpack";
 import { ChannelStore, Flux, FluxDispatcher, React, SelectedChannelStore, UserStore, useStateFromStores } from "@webpack/common";
 import type { CSSProperties } from "react";
 
 import hiddenChannelListStyle from "./channelListHidden.css?managed";
 import { applicationStreamingStore, channelRtcActions, channelRtcStore, popoutActions, popoutWindowStore, streamUiConstants, watchStream } from "./runtime";
-import type { StoredAutoWatchPreferences, StreamDescriptor, StreamFitMode, StreamParticipant, StreamRtcConnectionStatePayload, StreamRtcConnectionVideoPayload, ZoomableVideoComponent, ZoomableVideoProps } from "./types";
+import type { StoredAutoWatchPreferences, StreamDescriptor, StreamFitMode, StreamParticipant, StreamRtcConnectionStatePayload, StreamRtcConnectionVideoPayload, ZoomableVideoProps } from "./types";
 
 const cl = classNameFactory("vc-stream-enhancer-");
 type RenderedVideoStyle = CSSProperties & {
@@ -1272,24 +1272,12 @@ export const getRenderedFrameStyle = (streamKey: string | null | undefined) => {
     } satisfies CSSProperties;
 };
 
-const getZoomableVideoComponent = () => {
-    if (wreq?.m == null) return null;
-
-    const zoomableVideoModuleId = findModuleId(
-        "--custom-zoom-scale",
-        "transform 0.15s ease-out"
-    );
-
-    if (zoomableVideoModuleId == null) return null;
-
-    return (wreq(zoomableVideoModuleId as number | string | symbol) as { A?: ZoomableVideoComponent | null; } | null)?.A ?? null;
-};
+const getCameraVideo = makeLazy(() => findComponentByCode('location:"VideoStream"'));
 
 export const renderZoomableCameraVideo = (props: ZoomableVideoProps, key: string | number | bigint | null | undefined) => {
-    const ZoomableVideo = getZoomableVideoComponent();
-    if (ZoomableVideo == null) return null;
-
-    return React.createElement(ZoomableVideo, { ...props, key: key == null ? undefined : String(key) });
+    const CameraVideo = getCameraVideo();
+    if (CameraVideo == null) return null;
+    return React.createElement(CameraVideo, { ...props, key: key == null ? undefined : String(key) });
 };
 
 // useStateFromStores compares results with reference equality by default, which would
