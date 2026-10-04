@@ -7,24 +7,17 @@
 import { PlainSettings } from "@api/Settings";
 import { Logger } from "@utils/Logger";
 import { chooseFile, saveFile } from "@utils/web";
-import { moment, Toasts } from "@webpack/common";
+import { moment, showToast, Toasts } from "@webpack/common";
 
 import { DataStore } from "..";
 
 type BackupType = "all" | "plugins" | "css" | "datastore";
 
-const toast = (type: string, message: string) =>
-    Toasts.show({
-        type,
-        message,
-        id: Toasts.genId()
-    });
-
 const toastSuccess = () =>
-    toast(Toasts.Type.SUCCESS, "Settings successfully imported. Restart to apply changes!");
+    showToast("Settings successfully imported. Restart to apply changes!", "success");
 
 const toastFailure = (err: any) =>
-    toast(Toasts.Type.FAILURE, `Failed to import settings: ${String(err)}`);
+    showToast(`Failed to import settings: ${String(err)}`, "failure");
 
 const logger = new Logger("SettingsSync:Offline", "#39b7e0");
 
@@ -243,7 +236,7 @@ export async function exportSettings({ syncDataStore = true, type = "all", minif
                 throw new Error(`DataStore export failed: ${err instanceof Error ? err.message : String(err)}`);
             }
             logger.warn("Skipping DataStore in backup due to size.");
-            toast(Toasts.Type.MESSAGE, "DataStore too large - exported without it.");
+            showToast("DataStore too large - exported without it.", Toasts.Type.MESSAGE);
         }
     }
 
@@ -265,7 +258,7 @@ export async function downloadSettingsBackup(type: BackupType = "all", { minify,
         }
     } catch (err) {
         logger.error("Failed to export settings:", err);
-        toast(Toasts.Type.FAILURE, "Failed to export settings, check console");
+        showToast("Failed to export settings, check console", "failure");
         throw err;
     }
 }

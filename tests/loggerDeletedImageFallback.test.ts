@@ -68,11 +68,26 @@ test("a failed read can never break the delete", () => {
     assert.match(helper[0], /\.catch\(\(\) => \{ \}\);/);
 });
 
-test("all three delete paths are wired up", () => {
-    const sites = [...index.matchAll(/repointDeletedAttachments\(/g)];
-    // Declaration plus handleStoreDelete, handleStoreDelete2 and reInjectDeletedLive.
-    assert.equal(sites.length, 4, `expected 4 references, found ${sites.length}`);
-    for (const site of ["reInjectDeletedLive", "handleStoreDelete(cache", "handleStoreDelete2(data"]) {
-        assert.ok(index.includes(site), `${site} disappeared`);
+test("every path that shows a deleted message repaints its attachments", () => {
+    // The helper is the single place that repaints, so what matters is that each path
+    // which puts a deleted message in front of the user still routes through it - not
+    // how many references exist, which changes as paths are added.
+    assert.equal(
+        [...index.matchAll(/function repointDeletedAttachments\(/g)].length,
+        1,
+        "the repaint must have exactly one implementation"
+    );
+
+    // One call per path, matched on its arguments so a path cannot silently stop
+    // repainting while its function name survives.
+    const sites = {
+        restoreLoggedAttachments: /repointDeletedAttachments\(record\.channel_id, record\.message_id, record\.message\.attachments\);/,
+        reInjectDeletedLive: /repointDeletedAttachments\(channelId, snapshot\.id, marked\.attachments\);/,
+        handleStoreDelete: /repointDeletedAttachments\(data\.channelId, id, next\.attachments\);/,
+        handleStoreDelete2: /repointDeletedAttachments\(channelId, id, next\.attachments\);/
+    };
+
+    for (const [site, pattern] of Object.entries(sites)) {
+        assert.match(index, pattern, `${site} no longer repaints deleted attachments`);
     }
 });

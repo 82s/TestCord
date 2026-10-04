@@ -51,7 +51,7 @@ interface OffTheRadarState {
 }
 let otrState: OffTheRadarState = { enabled: false };
 
-function notifyMic(msg: string, type: string) {
+function notifyMic(msg: string, type: Parameters<typeof showToast>[1]) {
     showToast(msg, type);
 }
 

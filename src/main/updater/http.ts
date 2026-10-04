@@ -42,7 +42,7 @@ async function githubGet<T = any>(endpoint: string) {
 }
 
 async function calculateGitChanges() {
-    const isOutdated = await fetchUpdates();
+    const isOutdated = await fetchUpdate();
     if (!isOutdated) return { changes: [], diverged: false };
 
     const data = await githubGet(`/compare/${gitHash}...HEAD`);
@@ -57,7 +57,7 @@ async function calculateGitChanges() {
     };
 }
 
-async function fetchUpdates() {
+async function fetchUpdate() {
     const data = await githubGet("/releases/latest");
 
     const hash = data.name.slice(data.name.lastIndexOf(" ") + 1);
@@ -70,7 +70,7 @@ async function fetchUpdates() {
     return true;
 }
 
-async function applyUpdates() {
+async function applyUpdate() {
     if (!PendingUpdate) return true;
 
     const data = await fetchBuffer(PendingUpdate);
@@ -84,6 +84,6 @@ async function applyUpdates() {
 ipcMain.handle(IpcEvents.GET_REPO, serializeErrors(() => `https://github.com/${gitRemote}`));
 ipcMain.handle(IpcEvents.GET_UPDATES, serializeErrors(calculateGitChanges));
 // there is no git tree to diverge from in standalone builds
-ipcMain.handle(IpcEvents.UPDATE, serializeErrors(async (): Promise<UpdateOutcome> => (await fetchUpdates() ? "updated" : "upToDate")));
-ipcMain.handle(IpcEvents.FORCE_UPDATE, serializeErrors(async (): Promise<UpdateOutcome> => (await fetchUpdates() ? "updated" : "upToDate")));
-ipcMain.handle(IpcEvents.BUILD, serializeErrors(applyUpdates));
+ipcMain.handle(IpcEvents.UPDATE, serializeErrors(async (): Promise<UpdateOutcome> => (await fetchUpdate() ? "updated" : "upToDate")));
+ipcMain.handle(IpcEvents.FORCE_UPDATE, serializeErrors(async (): Promise<UpdateOutcome> => (await fetchUpdate() ? "updated" : "upToDate")));
+ipcMain.handle(IpcEvents.BUILD, serializeErrors(applyUpdate));

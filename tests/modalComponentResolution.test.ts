@@ -73,15 +73,22 @@ test("the settings layer is not used as the Modal", () => {
 
 test("the module API lookups are left intact", () => {
     // openModal itself was never the problem - it was verified working. Don't let a future
-    // "fix" swap these out and break every modal a second way.
+    // "fix" swap these out and break every modal a second way. Extra disambiguating
+    // anchors are fine (closeAllModals gained one); losing the original token is not.
     assert.match(source, /openModal: filters\.byCode\(",instant:"\),/);
     assert.match(source, /closeModal: filters\.byCode\("\.onCloseCallback\(\)"\),/);
-    assert.match(source, /closeAllModals: filters\.byCode\("\.getState\(\);for"\)/);
+    assert.match(source, /closeAllModals: filters\.byCode\("\.getState\(\);for"/);
 });
 
 test("the failure mode this guards against is silent", () => {
-    // Documents why there is no runtime probe: an unresolved lazy component does not throw
-    // on access or on createElement, it just renders nothing.
-    assert.match(source, /no error anywhere to explain it/);
-    assert.match(source, /proxy that resolved to nothing/);
+    // Why there is no runtime probe: an unresolved lazy component does not throw on access
+    // or on createElement, it just renders nothing. Asserted structurally rather than
+    // against the file's prose, because modals.ts tracks upstream and its comments are
+    // not ours to depend on - a reworded comment must not read as a regression.
+    assert.match(source, /export const Modal: t\.Modal = findByCodeLazy\(/);
+    assert.match(source, /export const ConfirmModal: t\.ConfirmModal = findByCodeLazy\(/);
+    assert.match(source, /const ModalAPI: t\.ModalAPI = mapMangledModuleLazy\(/);
+    // No eager probe: anything that throws on a miss would turn the silent failure into a
+    // loud one, which is the opposite of what is wanted here.
+    assert.doesNotMatch(source, /findByCode\(|findByProps\(|findExportedComponent\(/);
 });

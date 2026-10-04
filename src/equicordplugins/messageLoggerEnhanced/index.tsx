@@ -46,8 +46,8 @@ const lastChannelFetch = new Map<string, number>();
 
 const cacheThing = findByPropsLazy("commit", "getOrCreate");
 
-export async function clearLogs(showToast = true) {
-    await idb.clearMessagesIDB(showToast);
+export async function clearLogs(toast = true) {
+    await idb.clearMessagesIDB(toast);
     cacheSentMessages.clear();
 }
 

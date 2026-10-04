@@ -38,13 +38,27 @@ interface SystemMessagePayload {
     message?: {
         type?: number;
         author?: { id?: string; };
-        mentions?: string[];
+        mentions?: unknown[];
     };
     channelId?: string;
     optimistic?: boolean;
 }
 
 const unwatched = new Set<string>();
+
+/**
+ * Group DM recipient mentions arrive as user objects, not ID strings, so pull
+ * the id out of whichever shape Discord sent and never compare an object
+ * against the roster lists.
+ */
+function mentionId(mention: unknown): string | undefined {
+    if (typeof mention === "string") return mention;
+    if (mention && typeof mention === "object") {
+        const { id } = (mention as { id?: unknown; });
+        if (typeof id === "string") return id;
+    }
+    return undefined;
+}
 
 /** Once per group, so a group missing from the dashboard explains itself */
 function logUnwatched(channelId: string): void {
@@ -189,7 +203,7 @@ export default definePlugin({
             unwatched.delete(channelId);
 
             const actor = message.author?.id;
-            const subject = message.mentions?.[0];
+            const subject = mentionId(message.mentions?.[0]);
             if (!actor || !subject) {
                 await syncGroup(group);
                 return;
