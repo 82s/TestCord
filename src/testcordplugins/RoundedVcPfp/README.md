@@ -1,7 +1,7 @@
-# RoundedVcPfp
+# RoundedVCPFP
 
-Rounded full-resolution avatars on call tiles.
+Adds full-resolution avatars with configurable rounded corners to TestCord call tiles. Disable FullVCPFP before enabling RoundedVCPFP in the plugin settings.
 
-Copy the source files in this folder to `src/testcordplugins/RoundedVcPfp` in a compatible TestCord checkout, then build the client. Preserve the original author metadata and license headers. This copy is published as part of the maintained collection. See the root README for installation and validation limits.
+Only call tile components receive the avatar background. Avatar lookup uses the guild avatar, global avatar and default avatar fallbacks when needed. The corner radius setting ranges from 0 to 24 pixels.
 
-License: GPL-3.0-or-later. See LICENSE.
+Adapted from Equicord FullVCPFP by mochienya, maintained by DavidHiFi. GPL-3.0-or-later. See LICENSE.

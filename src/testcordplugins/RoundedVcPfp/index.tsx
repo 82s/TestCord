@@ -39,11 +39,12 @@ export default definePlugin({
         },
     ],
 
-    getVoiceBackgroundStyles({ participantUserId }: { className?: string; participantUserId?: string; }) {
-        if (!participantUserId) return;
+    getVoiceBackgroundStyles({ className, participantUserId }: { className?: string; participantUserId?: string; }) {
+        if (!className?.includes("tile") || !participantUserId) return;
 
         const user = UserStore.getUser(participantUserId);
         if (!user) return;
+        const legacyUser: typeof user & { getDefaultAvatarURL?: () => string; } = user;
 
         const channelId = VoiceStateStore.getVoiceStateForUser(participantUserId)?.channelId;
         const guildId = channelId ? ChannelStore.getChannel(channelId)?.guild_id : undefined;
@@ -56,7 +57,7 @@ export default definePlugin({
         const avatarUrl = getUserAvatarUrl(user, guildId, isSpeaking, 1024)
             || user.getAvatarURL?.(guildId, 1024, isSpeaking)
             || user.getAvatarURL?.(undefined, 1024, isSpeaking)
-            || ("getDefaultAvatarURL" in user && typeof user.getDefaultAvatarURL === "function" ? user.getDefaultAvatarURL() : undefined)
+            || (typeof legacyUser.getDefaultAvatarURL === "function" ? legacyUser.getDefaultAvatarURL() : undefined)
             || "https://cdn.discordapp.com/embed/avatars/0.png";
 
         return {
