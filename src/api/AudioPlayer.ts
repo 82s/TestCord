@@ -4,11 +4,36 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { findByCodeLazy, findLazy } from "@webpack";
+import { cache, findByCodeLazy } from "@webpack";
 
 let defaultSounds: null | string[] = null;
-const findDefaultSounds = findLazy(module => module.resolve && module.id && module.keys().some(key => key.endsWith(".mp3")), false);
 const AudioPlayerConstructor = findByCodeLazy("could not play audio");
+
+/**
+ * Records the internal Discord sound names, from the sounds module the audio patch just
+ * required.
+ *
+ * This has to be driven from the patch rather than a search of the webpack cache. The player
+ * constructor calls identifyAudioType from inside Discord's own module factory during startup,
+ * before anything has required the sounds module, so a search finds nothing there - and a
+ * search that goes through a lazy finder is not merely wrong once: the lazy proxy spends five
+ * attempts and then caches its own failure, so every later call (every notification sound,
+ * every startup sound) is answered from a dead lookup, an internal name is typed as OTHER, and
+ * it resolves to a relative url that 404s. Reading the module by id cannot fail that way,
+ * because the patch requires it on the line above this call.
+ *
+ * @param id The webpack module id of the sounds context module, captured by the audio patch.
+ */
+export function registerSounds(id: number): void {
+    if (defaultSounds) return;
+
+    const sounds = cache?.[id]?.exports as { keys?: () => string[] } | undefined;
+    if (typeof sounds?.keys !== "function") return;
+
+    defaultSounds = sounds.keys()
+        .map(key => key.match(/((?:\w|-)+)\.mp3$/)?.[1] ?? null)
+        .filter(Boolean) as string[];
+}
 
 export type AudioProcessor = (data: PreprocessAudioData) => void;
 export type AudioCallback = (() => void);
@@ -46,6 +71,8 @@ export interface AudioPlayerInternal {
     preprocessDataPrevious: PreprocessAudioData | null;
     preprocessDataCurrent: PreprocessAudioData;
     audio: string;
+    /** The sound name the audio src is built from. The player patch reads this, so it has to be kept in step with `audio`. */
+    name: string;
     _audio: null | Promise<HTMLAudioElement>;
     _volume: number;
     _speed: number;
@@ -251,10 +278,5 @@ export function removeAudioProcessor(key: string): void {
 
 /** Returns an array of all internal Discord audio filenames. */
 export function defaultAudioNames(): string[] {
-    defaultSounds ??= (findDefaultSounds.keys() || []).map(key => {
-        const match = key.match(/((?:\w|-)+)\.mp3$/);
-        return match ? match[1] : null;
-    }).filter(Boolean) as string[];
-
-    return defaultSounds;
+    return defaultSounds ?? [];
 }

@@ -238,7 +238,9 @@ export default definePlugin({
             find: "could not play audio",
             group: true,
             replacement: [
-                { match: /(let \i=class.{0,1000}?new Audio;\i.src=)((\i\(\d+\))(?:\(`\.\/\$\{|.{0,50}concat\())this.name(\}\.mp3`\))/, replace: '$3;$1this.type!=="discord"?this.audio:$2this.audio$4' },
+                // `let \i=` must stay in the capture: dropping it leaves `n(696354);new Audio;`, which rebinds \i
+                // to the sounds module and leaves an anonymous element behind ("i.load is not a function").
+                { match: /(let \i=new Audio;\i.src=)((\i\(\d+\))(?:\(`\.\/\$\{|.{0,50}concat\())this.name(\}\.mp3`\))/, replace: '$3;$1this.type!=="discord"?this.audio:$2this.audio$4' },
                 { match: /(new Audio;)(\i)(\.src=)/, replace: '$1$2.crossOrigin="anonymous";$2$3' },
                 { match: /constructor\(((?:\i,){3}\i)([^)]*)\)\{[^}]+}/, replace: "constructor(options,$1$2){$self.buildPlayer(this,options,$1);}" },
                 { match: /(\i.pause\(\),(\i).src="".{0,20}?null)/, replace: "$self.cleanupBoost($2),$2.onerror=()=>{},$1" },

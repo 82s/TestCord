@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { AudioPlayerInternal, AudioPlayerOptions, audioProcessorFunctions, AudioType, identifyAudioType, playAudio } from "@api/AudioPlayer";
+import { AudioPlayerInternal, AudioPlayerOptions, audioProcessorFunctions, AudioType, identifyAudioType, playAudio, registerSounds } from "@api/AudioPlayer";
 import { EquicordDevs } from "@utils/constants";
 import definePlugin from "@utils/types";
 
@@ -14,6 +14,8 @@ export default definePlugin({
     authors: [EquicordDevs.Etorix],
     AudioType,
     playAudio,
+    identifyAudioType,
+    registerSounds,
 
     patches: [
         {
@@ -24,8 +26,16 @@ export default definePlugin({
                     // Uses the audio as-is if external, otherwise checks for an internal Discord sound.
                     // Also force loads the internal sounds module to account for the second patch group below,
                     // as well as accounting for not calling the module in this patch when this.type is not DISCORD.
-                    match: /(let \i=class.{0,1000}?new Audio;\i.src=)((\i\(\d+\))(?:\(`\.\/\$\{|.{0,50}concat\())this.name(\}\.mp3`\))/,
-                    replace: "$3;$1this.type!==$self.AudioType.DISCORD?this.audio:$2this.audio$4"
+                    // The `=class.{0,1000}?` became nothing: Discord dropped the class wrapper and builds the
+                    // element directly. `let \i=` must stay in the capture either way - dropping it yields
+                    // `n(696354);new Audio;`, which rebinds the element variable to the sounds module and leaves
+                    // an anonymous element behind ("i.load is not a function").
+                    // registerSounds($4) runs right after $3 required the module, so the id the pattern captured
+                    // is in webpack's cache and the internal sound list is known before the type is read. The
+                    // type is also recomputed here: a player built during startup was typed before anything had
+                    // loaded that module, and would otherwise keep that answer for the rest of its life.
+                    match: /(let \i=new Audio;\i.src=)((\i\((\d+)\))(?:\(`\.\/\$\{|.{0,50}concat\()this.name(\}\.mp3`\)))/,
+                    replace: "$3;$self.registerSounds($4);$1(this.type=$self.identifyAudioType(this.audio),this.type!==$self.AudioType.DISCORD?this.audio:$2)"
                 },
                 {
                     // Adds an optional persistent boolean as well as a callback and error handler to the
@@ -128,6 +138,7 @@ export default definePlugin({
 
         player.preprocessDataCurrent.volume /= 100;
         player.audio = player.preprocessDataCurrent.audio;
+        player.name = player.preprocessDataCurrent.audio;
         player.type = identifyAudioType(player.preprocessDataCurrent.audio);
         player._volume = Math.max(0, Math.min(1, player.preprocessDataCurrent.volume));
         player._speed = Math.max(0.0625, Math.min(16, player.preprocessDataCurrent.speed));
@@ -166,6 +177,7 @@ export default definePlugin({
         };
 
         player.audio = player.preprocessDataOriginal.audio;
+        player.name = player.preprocessDataOriginal.audio;
         player._audio = null;
         player._volume = player.preprocessDataOriginal.volume;
         player._speed = player.preprocessDataOriginal.speed;
