@@ -407,7 +407,7 @@ function sleep(ms: number) {
 function createProgressToast() {
     const id = Toasts.genId();
     return {
-        show(message: string, type = Toasts.Type.MESSAGE, duration = 3500) {
+        show(message: string, type: Parameters<typeof showToast>[1] = Toasts.Type.MESSAGE, duration = 3500) {
             Toasts.show({
                 id,
                 message,

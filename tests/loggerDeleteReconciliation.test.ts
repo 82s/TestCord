@@ -71,11 +71,23 @@ test("it persists the same way the flux path does", () => {
 });
 
 test("it runs on channel fetch, not only on a delete event", () => {
-    assert.match(index, /await reconcileDeletedInWindow\(/, "reconciliation must be wired into the fetch path");
+    assert.match(index, /void reconcileDeletedInWindow\(/, "reconciliation must be wired into the fetch path");
     // The present-id set must come from the live history, never from the injected rows.
     const call = index.match(/const presentIds = new Set<string>\(\);[\s\S]*?reconcileDeletedInWindow\(/);
     assert.ok(call, "presentIds construction not found");
     assert.doesNotMatch(call[0], /response\.body\.extra/, "must compare against live history, not our own injected rows");
+});
+
+test("the fetch path does not block on reconciliation", () => {
+    // This patch runs inside the fetch the channel is waiting on, so awaiting a catch-up
+    // pass over the DB is what turned a busy channel switch into a stall. Fire and forget
+    // is deliberate, but a rejection still has to be handled or it escapes as an
+    // unhandled rejection.
+    assert.doesNotMatch(index, /await reconcileDeletedInWindow\(/, "awaiting here stalls the channel paint");
+    const call = index.match(/void reconcileDeletedInWindow\([\s\S]*?\n\s*\}\);/);
+    assert.ok(call, "reconcileDeletedInWindow call site not found");
+    assert.match(call[0], /\.then\(/, "the result must be observed");
+    assert.match(call[0], /\.catch\(/, "a rejected pass must not escape unhandled");
 });
 
 test("a DB read failure is contained", () => {

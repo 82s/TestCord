@@ -1,8 +1,7 @@
-/* eslint-disable simple-header/header -- This standalone user plugin is MIT licensed. */
 /*
- * StaffTag User Plugin
- * Copyright (c) 2026 DavidHiFi
- * SPDX-License-Identifier: MIT
+ * Vencord, a Discord client mod
+ * Copyright (c) 2026 Vendicated and contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 import { definePluginSettings } from "@api/Settings";

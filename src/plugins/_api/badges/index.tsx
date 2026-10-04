@@ -30,7 +30,7 @@ import { shouldShowContributorBadge, shouldShowEquicordContributorBadge, shouldS
 import { isTestcordArtist, isTestcordDeveloper, isTestcordOwner } from "@utils/testcordAdmins";
 import { ZWSP } from "@utils/text";
 import definePlugin from "@utils/types";
-import { Constants, ContextMenuApi, Menu, RestAPI, Toasts, UserProfileStore, UserStore } from "@webpack/common";
+import { Constants, ContextMenuApi, Menu, RestAPI, showToast, UserProfileStore, UserStore } from "@webpack/common";
 import testcordArtistIconBase64 from "file://../../../../browser/TestcordArtist.png?base64";
 
 import Plugins, { PluginMeta } from "~plugins";
@@ -341,11 +341,7 @@ export default definePlugin({
     toolboxActions: {
         async "Refetch Badges"() {
             await loadAllBadges(true);
-            Toasts.show({
-                id: Toasts.genId(),
-                message: "Successfully refetched badges!",
-                type: Toasts.Type.SUCCESS
-            });
+            showToast("Successfully refetched badges!", "success");
         }
     },
 

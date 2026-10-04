@@ -41,7 +41,8 @@ import { isExperimentalPlugin, isLegacyPlugin } from "@utils/pluginWarnings";
 import { useAwaiter, useCleanupEffect, useIntersection } from "@utils/react";
 import { isTestcordModified } from "@utils/testcordIcons";
 import { Plugin, PluginTag, PluginTags } from "@utils/types";
-import { Alerts, ConfirmModal, openModal, Parser, React, SearchableSelect, Select, TextInput, Toasts, Tooltip, useCallback, useEffect, useMemo, useRef, useState } from "@webpack/common";
+import { ToastPosition } from "@vencord/discord-types/enums";
+import { Alerts, ConfirmModal, openModal, Parser, React, SearchableSelect, Select, showToast, TextInput, Tooltip, useCallback, useEffect, useMemo, useRef, useState } from "@webpack/common";
 
 import Plugins, { ExcludedPlugins, PluginMeta } from "~plugins";
 
@@ -70,14 +71,9 @@ const PluginSearchPrefixes: Array<{ prefix: string; folders: string[]; modifiedO
 const PluginLoadBatchSize = 36;
 
 function showErrorToast(message: string) {
-    Toasts.show({
-        message,
-        type: Toasts.Type.FAILURE,
-        id: Toasts.genId(),
-        options: {
-            position: Toasts.Position.BOTTOM
-        }
-    });
+    showToast(message, "failure", {
+            position: ToastPosition.BOTTOM
+        });
 }
 
 function ReloadRequiredCard({ required, enabledPlugins, openWarningModal, resetCheckAndDo }) {

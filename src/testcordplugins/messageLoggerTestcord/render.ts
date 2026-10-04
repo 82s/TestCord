@@ -9,6 +9,7 @@ import { findByCodeLazy, findLazy } from "@webpack";
 import { moment, UserStore } from "@webpack/common";
 
 import { LoggedMessage } from "./types";
+import { withValidEmbedTimestamps } from "./utils";
 
 const MessageClass: any = findLazy(m => m?.prototype?.isEdited);
 const AuthorClass: any = findLazy(m => m?.prototype?.getAvatarURL);
@@ -29,9 +30,15 @@ export const mapTimestamp = (m: any) => {
     if (m.editedTimestamp) m.editedTimestamp = getTimestamp(m.editedTimestamp, m.id);
     // Edit history entries carry embeds plus the id/channel_id of the message they
     // belong to, so their embeds sanitize exactly like the current ones do.
-    if (m.embeds && m.channel_id) m.embeds = m.embeds.map((e: any) => sanitizeEmbed(m.channel_id, m.id, e));
+    if (m.embeds && m.channel_id) {
+        m.embeds = sanitizeAll(m.embeds, m.channel_id, m.id);
+    }
     return m;
 };
+
+function sanitizeAll(embeds: any[], channelId: string, messageId: string) {
+    return withValidEmbedTimestamps(embeds).map((e: any) => sanitizeEmbed(channelId, messageId, e));
+}
 
 const messageClassCache = new Map<string, any>();
 
@@ -66,7 +73,7 @@ export function messageJsonToMessageClass(log: { message: LoggedMessage; }) {
     message.author = UserStore.getUser(message.author.id) ?? new AuthorClass(message.author);
     message.author.nick = message.author.globalName ?? message.author.username;
 
-    message.embeds = message.embeds.map((e: any) => sanitizeEmbed(message.channel_id, message.id, e));
+    message.embeds = sanitizeAll(message.embeds, message.channel_id, message.id);
 
     if (message.poll)
         message.poll.expiry = moment(message.poll.expiry);

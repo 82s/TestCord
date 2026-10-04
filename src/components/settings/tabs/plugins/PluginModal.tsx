@@ -36,8 +36,9 @@ import { getPluginWarning } from "@utils/pluginWarnings";
 import { isTestcordModified } from "@utils/testcordIcons";
 import { OptionType, Plugin, PluginTag } from "@utils/types";
 import { RenderModalProps, User } from "@vencord/discord-types";
+import { ToastPosition } from "@vencord/discord-types/enums";
 import { findComponentByCodeLazy, findCssClassesLazy } from "@webpack";
-import { Clickable, FluxDispatcher, Modal, openModal, React, Text, Toasts, Tooltip, useEffect, useMemo, UserStore, UserUtils, useState } from "@webpack/common";
+import { Clickable, FluxDispatcher, Modal, openModal, React, showToast, Text, Toasts, Tooltip, useEffect, useMemo, UserStore, UserUtils, useState } from "@webpack/common";
 import { Constructor } from "type-fest";
 
 import Plugins, { PluginMeta } from "~plugins";
@@ -435,14 +436,9 @@ function resetSettings(plugin: Plugin, onRestartNeeded?: (pluginName: string) =>
         onRestartNeeded?.(plugin.name);
     }
 
-    Toasts.show({
-        message: `Settings for ${pluginName} have been reset.`,
-        id: Toasts.genId(),
-        type: Toasts.Type.SUCCESS,
-        options: {
-            position: Toasts.Position.TOP
-        }
-    });
+    showToast(`Settings for ${pluginName} have been reset.`, "success", {
+            position: ToastPosition.TOP
+        });
 }
 
 export function openWarningModal(plugin?: Plugin | null, onRestartNeeded?: (pluginName: string) => void, isPlugin = true, enabledPlugins?: number | null, reset?: () => void) {

@@ -8,12 +8,13 @@ import { playAudio } from "@api/AudioPlayer";
 import { type NavContextMenuPatchCallback } from "@api/ContextMenu";
 import { Notifications } from "@api/index";
 import { definePluginSettings } from "@api/Settings";
+import { getUserSettingLazy } from "@api/UserSettings";
 import { Devs } from "@utils/constants";
 import { getCurrentChannel } from "@utils/discord";
 import { Logger } from "@utils/Logger";
 import definePlugin, { OptionType } from "@utils/types";
-import type { Message } from "@vencord/discord-types";
-import { ChannelActionCreators, ChannelStore, Menu, MessageStore, NavigationRouter, PresenceStore, UserStore, WindowStore } from "@webpack/common";
+import type { Channel, Message } from "@vencord/discord-types";
+import { ChannelActionCreators, ChannelStore, GuildMemberStore, Menu, MessageStore, NavigationRouter, PresenceStore, UserGuildSettingsStore, UserStore, WindowStore } from "@webpack/common";
 import { JSX } from "react";
 
 interface IMessageCreate {
@@ -22,7 +23,23 @@ interface IMessageCreate {
     message: Message;
 }
 
+interface MessageWithMentions extends Omit<Message, "mentionEveryone" | "mentionRoles" | "mentions"> {
+    mention_everyone: boolean;
+    mention_roles: string[];
+    mentions: Array<string | { id: string; }>;
+}
+
 const SILENT_PING_FLAG = 1 << 12;
+
+const StatusSetting = getUserSettingLazy<string>("status", "status")!;
+
+function getSelectedStatus(userId: string) {
+    try {
+        return StatusSetting.getSetting() || PresenceStore.getStatus(userId);
+    } catch {
+        return PresenceStore.getStatus(userId);
+    }
+}
 
 function DisabledIcon(): JSX.Element {
     return (
@@ -52,23 +69,38 @@ function processIds(value: string): string {
     return value.replace(/\s/g, "").split(",").filter(id => id.trim() !== "").join(", ");
 }
 
+function isMentioned(message: MessageWithMentions, channel: Channel | undefined, currentUserId: string) {
+    const storedMessage = MessageStore.getMessage(message.channel_id, message.id);
+    if (storedMessage?.mentioned === true) return true;
+    const directMention = message.mentions?.some((mention: string | { id: string; }) => (typeof mention === "string" ? mention : mention?.id) === currentUserId);
+    if (directMention) return true;
+
+    const guildId = channel?.guild_id;
+    if (guildId == null) return false;
+
+    const memberRoles = GuildMemberStore.getMember(guildId, currentUserId)?.roles ?? [];
+    if (!UserGuildSettingsStore.isSuppressRolesEnabled(guildId) && message.mention_roles?.some(roleId => memberRoles.includes(roleId))) return true;
+
+    return message.mention_everyone === true && !UserGuildSettingsStore.isSuppressEveryoneEnabled(guildId);
+}
+
 async function showNotification(message: Message, guildId: string | undefined): Promise<void> {
     try {
         const channel = ChannelStore.getChannel(message.channel_id);
-        const channelRegex = /<#(\d{19})>/g;
-        const userRegex = /<@(\d{18})>/g;
+        const channelRegex = /<#(\d{17,20})>/g;
+        const userRegex = /<@!?(\d{17,20})>/g;
 
-        message.content = message.content.replace(channelRegex, (match: any, channelId: string) => {
-            return `#${ChannelStore.getChannel(channelId)?.name}`;
-        });
-
-        message.content = message.content.replace(userRegex, (match: any, userId: string) => {
-            return `@${(UserStore.getUser(userId) as any).globalName}`;
-        });
+        const body = (message.content || "")
+            .replace(channelRegex, (_match, channelId: string) => `#${ChannelStore.getChannel(channelId)?.name ?? channelId}`)
+            .replace(userRegex, (_match, userId: string) => {
+                const user = UserStore.getUser(userId);
+                return `@${user?.globalName || user?.username || userId}`;
+            })
+            || (message.attachments?.length ? "Sent an attachment" : "Sent a message");
 
         await Notifications.showNotification({
             title: `${(message.author as any).globalName} ${guildId ? `(#${channel?.name}, ${ChannelStore.getChannel(channel?.parent_id)?.name})` : ""}`,
-            body: message.content,
+            body,
             icon: UserStore.getUser(message.author.id).getAvatarURL(undefined, undefined, false),
             onClick: function (): void {
                 NavigationRouter.transitionTo(`/channels/${guildId ?? "@me"}/${message.channel_id}/${message.id}`);
@@ -174,18 +206,19 @@ export default definePlugin({
     description: "Still get notifications from specific sources when in do not disturb mode. Right-click on users/channels/guilds to set them to bypass do not disturb mode.",
     tags: ["Activity", "Customisation", "Notifications", "Servers"],
     authors: [Devs.Inbestigator],
-    dependencies: ["AudioPlayerAPI"],
+    dependencies: ["AudioPlayerAPI", "UserSettingsAPI"],
     flux: {
         async MESSAGE_CREATE({ message, guildId, channelId }: IMessageCreate): Promise<void> {
             try {
                 const currentUser = UserStore.getCurrentUser();
-                const userStatus = await PresenceStore.getStatus(currentUser.id);
+                const userStatus = getSelectedStatus(currentUser.id);
                 const currentChannelId = getCurrentChannel()?.id ?? "0";
-                if (message.state === "SENDING" || message.content === "" || message.author.id === currentUser.id || (channelId === currentChannelId && WindowStore.isFocused()) || userStatus !== settings.store.statusToUse) {
+                if (message.state === "SENDING" || !message.author || message.author.id === currentUser.id || (channelId === currentChannelId && WindowStore.isFocused()) || userStatus !== settings.store.statusToUse) {
                     return;
                 }
                 if (settings.store.respectSilentPings && (message.flags & SILENT_PING_FLAG)) { return; }
-                const mentioned = MessageStore.getMessage(channelId, message.id)?.mentioned;
+                const channel = ChannelStore.getChannel(channelId);
+                const mentioned = isMentioned(message as unknown as MessageWithMentions, channel, currentUser.id);
                 if ((settings.store.guilds.split(", ").includes(guildId) || settings.store.channels.split(", ").includes(channelId)) && mentioned) {
                     await showNotification(message, guildId);
                 } else if (settings.store.users.split(", ").includes(message.author.id)) {

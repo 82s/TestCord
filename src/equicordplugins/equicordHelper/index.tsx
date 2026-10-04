@@ -378,7 +378,7 @@ export default definePlugin({
                 match: /case \i\.\i\.WINDOWS:/,
                 replace: 'case "WEB":'
             },
-            predicate: () => Settings.winNativeTitleBar,
+            predicate: () => Settings.nativeTitleBar,
         },
         {
             find: '"refresh-title-bar-small"',
@@ -392,7 +392,7 @@ export default definePlugin({
                     replace: "true"
                 }
             ],
-            predicate: () => Settings.winNativeTitleBar,
+            predicate: () => Settings.nativeTitleBar,
         },
         {
             find: "DirectMessage: getSpringConfigs()",
