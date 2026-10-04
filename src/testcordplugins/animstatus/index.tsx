@@ -29,6 +29,7 @@ type StatusType = typeof STATUS_OPTIONS[number]["value"];
 enum Tab { STATUSES = "statuses", PRESETS = "presets", SETTINGS = "settings", INFO = "info" }
 interface StatusStep { text: string; emojiName?: string; emojiId?: string; animated?: boolean; preset?: string; status?: StatusType; }
 interface Preset { id: string; name: string; emojiName?: string; emojiId?: string; animated?: boolean; }
+interface EditState { index: number; text: string; preset: string; status: StatusType; }
 
 const I = {
     Clock: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75 1.23-4.25-2.58V7z" /></svg>,
@@ -49,7 +50,6 @@ const parseEmoji = (input: string): Omit<StatusStep, "preset" | "status"> => {
     return match ? { text: input.replace(EMOJI_REGEX, "").trim(), emojiName: match[1], emojiId: match[2], animated: input.includes("<a:") } : { text: input };
 };
 const safeParse = <T,>(json: string, fallback: T): T => { try { return JSON.parse(json) || fallback; } catch { return fallback; } };
-const getPresets = (items: StatusStep[]) => [...new Set(items.map(x => x.preset).filter(Boolean) as string[])];
 const getEmojiUrl = (id: string, animated: boolean) => `https://cdn.discordapp.com/emojis/${id}.${animated ? "gif" : "png"}`;
 const getAvatarUrl = (userId: string, avatar: string | null): string => avatar ? `https://cdn.discordapp.com/avatars/${userId}/${avatar}.png?size=64` : `https://cdn.discordapp.com/embed/avatars/${Number(BigInt(userId) >> 22n) % 6}.png`;
 const formatInterval = (seconds: number): string => seconds < 60 ? `${seconds}s` : seconds % 60 === 0 ? `${Math.floor(seconds / 60)}m` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
@@ -89,7 +89,63 @@ function getParsedStatuses(): StatusStep[] {
     return _statusesCache;
 }
 
-const state = { currentIndex: 0, interval: null as NodeJS.Timeout | null, isRunning: false, _started: false };
+const state = {
+    currentIndex: 0,
+    interval: null as NodeJS.Timeout | null,
+    isRunning: false,
+    preset: null as string | null
+};
+
+const runningListeners = new Set<() => void>();
+
+interface RunningState { isRunning: boolean; preset: string | null; }
+
+function setRunningState(isRunning: boolean, preset: string | null) {
+    if (state.isRunning === isRunning && state.preset === preset) return;
+    state.isRunning = isRunning;
+    state.preset = isRunning ? preset : null;
+    for (const listener of [...runningListeners]) {
+        try { listener(); } catch { }
+    }
+}
+
+function useRunningState(): RunningState {
+    const [snapshot, setSnapshot] = useState<RunningState>(() => ({ isRunning: state.isRunning, preset: state.preset }));
+    useEffect(() => {
+        const listener = () => setSnapshot({ isRunning: state.isRunning, preset: state.preset });
+        listener();
+        runningListeners.add(listener);
+        return () => { runningListeners.delete(listener); };
+    }, []);
+    return snapshot;
+}
+
+let shuffleBag: number[] = [];
+let shuffleBagLength = -1;
+let lastShuffledIndex = -1;
+
+function refillShuffleBag(length: number) {
+    shuffleBagLength = length;
+    shuffleBag = Array.from({ length }, (_, i) => i);
+    for (let i = shuffleBag.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffleBag[i], shuffleBag[j]] = [shuffleBag[j], shuffleBag[i]];
+    }
+}
+
+function getNextIndex(length: number): number {
+    if (length <= 1) return 0;
+    if (!settings.store.randomize) return (state.currentIndex + 1) % length;
+    if (!shuffleBag.length || shuffleBagLength !== length) refillShuffleBag(length);
+    let index = shuffleBag.pop()!;
+    if (index === lastShuffledIndex && shuffleBag.length) {
+        const held = shuffleBag.pop()!;
+        shuffleBag.push(index);
+        index = held;
+    }
+    lastShuffledIndex = index;
+    return index;
+}
 
 function AnimatedStatusIcon({ color = "currentColor" }: { color?: string; }) {
     return (
@@ -100,7 +156,7 @@ function AnimatedStatusIcon({ color = "currentColor" }: { color?: string; }) {
 }
 
 function AnimatedStatusButton() {
-    const { isRunning } = state;
+    const { isRunning } = useRunningState();
 
     return (
         <HeaderBarButton
@@ -116,50 +172,61 @@ function AnimatedStatusButton() {
 export default definePlugin({
     name: "AnimatedStatus", description: "Cycle through status messages automatically",
     tags: ["Activity", "Customisation"], authors: [{ id: 705545572299571220n, name: "shxdes69" }], settings,
-    dependencies: ["HeaderBarAPI"],
+    dependencies: ["HeaderBarAPI", "UserSettingsAPI"],
     headerBarButton: {
         icon: AnimatedStatusIcon,
         render: AnimatedStatusButton,
         priority: 1337
     },
-    _lastSignal: 0,
     async setStatus(step: StatusStep): Promise<boolean> {
-        if (!CustomStatus) return false;
         try {
-            await (CustomStatus.updateSetting as any)({ text: step.text ?? "", emojiName: step.emojiName ?? "", emojiId: step.emojiId ?? "0", createdAtMs: Date.now().toString(), expiresAtMs: "0" });
-            if (step.status && StatusSetting) await StatusSetting.updateSetting(step.status);
+            const customStatus = CustomStatus;
+            if (!customStatus) return false;
+            await (customStatus.updateSetting as any)({ text: step.text ?? "", emojiName: step.emojiName ?? "", emojiId: step.emojiId ?? "0", createdAtMs: Date.now().toString(), expiresAtMs: "0" });
+            const statusSetting = StatusSetting;
+            if (step.status && statusSetting) await statusSetting.updateSetting(step.status);
             return true;
         } catch { return false; }
+    },
+    schedule(preset: string | null, intervalSeconds: number) {
+        if (state.interval) clearInterval(state.interval);
+        state.interval = setInterval(() => {
+            this.next(preset ?? undefined).catch(() => {
+                if (state.interval) { clearInterval(state.interval); state.interval = null; }
+                setRunningState(false, null);
+                Toasts.show({ message: "Animated status stopped after an error", type: Toasts.Type.FAILURE, id: Toasts.genId() });
+            });
+        }, Math.max(intervalSeconds * 1000, MIN_INTERVAL * 1000));
     },
     async begin(preset?: string) {
         const all = getParsedStatuses();
         if (!all.length) return Toasts.show({ message: "Add some statuses first!", type: Toasts.Type.FAILURE, id: Toasts.genId() });
         const items = preset ? all.filter(s => s.preset === preset) : all;
         if (!items.length) return Toasts.show({ message: `No "${preset}" statuses found`, type: Toasts.Type.FAILURE, id: Toasts.genId() });
-        if (state.interval) clearInterval(state.interval);
+        if (state.interval) { clearInterval(state.interval); state.interval = null; }
         state.currentIndex = 0;
-        await this.setStatus(items[0]);
-        state.interval = setInterval(() => this.next(preset).catch(() => { if (state.interval) { clearInterval(state.interval); state.interval = null; } state.isRunning = false; this.forceUpdate(); }), Math.max(settings.store.interval * 1000, MIN_INTERVAL * 1000));
-        state.isRunning = true; this.forceUpdate();
+        if (!await this.setStatus(items[0])) {
+            return Toasts.show({ message: "Couldn't apply the status. Is UserSettingsAPI enabled?", type: Toasts.Type.FAILURE, id: Toasts.genId() });
+        }
+        lastShuffledIndex = 0;
+        refillShuffleBag(items.length);
+        this.schedule(preset ?? null, settings.store.interval);
+        setRunningState(true, preset ?? null);
         Toasts.show({ message: "Animated status started!", type: Toasts.Type.SUCCESS, id: Toasts.genId() });
     },
     async next(preset?: string) {
         const all = getParsedStatuses();
         const items = preset ? all.filter(s => s.preset === preset) : all;
         if (!items.length) return this.stop();
-        state.currentIndex = settings.store.randomize ? Math.floor(Math.random() * items.length) : (state.currentIndex + 1) % items.length;
+        state.currentIndex = getNextIndex(items.length);
         await this.setStatus(items[state.currentIndex]);
     },
     updateInterval(newInterval: number) {
-        if (!state.interval) return;
-        clearInterval(state.interval);
-        state.interval = setInterval(() => this.next().catch(() => { }), Math.max(newInterval * 1000, MIN_INTERVAL * 1000));
+        if (!state.isRunning) return;
+        this.schedule(state.preset, newInterval);
     },
-    forceUpdate() { this.buttonUpdateSignal = Date.now(); },
-    buttonUpdateSignal: 0,
     _autoStartTimer: null as ReturnType<typeof setTimeout> | null,
     start() {
-        state._started = false;
         if (settings.store.autoStart) {
             this._autoStartTimer = setTimeout(() => {
                 this._autoStartTimer = null;
@@ -169,10 +236,15 @@ export default definePlugin({
     },
     stop() {
         if (this._autoStartTimer) { clearTimeout(this._autoStartTimer); this._autoStartTimer = null; }
-        if (state.interval) clearInterval(state.interval);
-        state.currentIndex = 0; state.isRunning = false; state._started = true; this.forceUpdate();
+        if (state.interval) { clearInterval(state.interval); state.interval = null; }
+        state.currentIndex = 0;
+        shuffleBag = [];
+        shuffleBagLength = -1;
+        lastShuffledIndex = -1;
+        setRunningState(false, null);
     },
     getIsRunning: () => state.isRunning,
+    getRunningPreset: () => state.preset,
 });
 
 function StatusPreview({ emojiId, emojiName, animated, text, statusType }: { emojiId?: string; emojiName?: string; animated?: boolean; text: string; statusType: StatusType; }) {
@@ -205,16 +277,14 @@ function SettingsModal({ onClose, transitionState }: { onClose: () => void; tran
     const [preset, setPreset] = useState("");
     const [selectedStatus, setSelectedStatus] = useState<StatusType>("online");
     const [filterPreset, setFilterPreset] = useState<string | null>(null);
-    const [editingIndex, setEditingIndex] = useState<number | null>(null);
-    const [running, setRunning] = useState(state.isRunning);
-    const [runningPreset, setRunningPreset] = useState<string | null>(null);
+    const [editing, setEditing] = useState<EditState | null>(null);
     const [presetListTrigger, setPresetListTrigger] = useState(0);
+    const { isRunning: running, preset: runningPreset } = useRunningState();
     const plugin = window.Vencord?.Plugins?.plugins?.AnimatedStatus as any;
     const presets = useMemo(() => safeParse<Preset[]>(settings.store.presets, []), [settings.store.presets, presetListTrigger]);
     const presetNames = useMemo(() => presets.map(p => p.name), [presets]);
     const filteredStatuses = useMemo(() => filterPreset ? statuses.filter(s => s.preset === filterPreset) : statuses, [statuses, filterPreset]);
-    const previewData = useMemo(() => editingIndex !== null && statuses[editingIndex] ? { ...statuses[editingIndex], status: statuses[editingIndex].status || "online" } : { ...parseEmoji(inputText), status: selectedStatus }, [inputText, selectedStatus, editingIndex, statuses]);
-    useEffect(() => { const check = () => setRunning(state.isRunning); const id = setInterval(check, 500); return () => clearInterval(id); }, []);
+    const previewData = useMemo(() => editing ? { ...parseEmoji(editing.text), status: editing.status } : { ...parseEmoji(inputText), status: selectedStatus }, [inputText, selectedStatus, editing]);
     const addStatus = () => {
         if (!inputText.trim()) return;
         const parsed = parseEmoji(inputText);
@@ -231,38 +301,33 @@ function SettingsModal({ onClose, transitionState }: { onClose: () => void; tran
         const updated = statuses.filter((_, i) => i !== index);
         setStatuses(updated);
         settings.store.statuses = JSON.stringify(updated);
-        if (editingIndex === index) setEditingIndex(null);
+        if (editing?.index === index) setEditing(null);
         Toasts.show({ message: "Status deleted", type: Toasts.Type.SUCCESS, id: Toasts.genId() });
     };
-    const saveEdit = (index: number) => {
-        const card = document.querySelector(`[data-status-index="${index}"]`);
-        if (!card) return;
-        const textInput = card.querySelector("[data-edit-input=\"text\"]") as HTMLInputElement;
-        const presetSelect = card.querySelector("[data-edit-input=\"preset\"]") as HTMLSelectElement;
-        const statusBtn = card.querySelector("[data-edit-input=\"status\"][data-selected=\"true\"]") as HTMLElement;
-        if (!textInput) return;
-        const parsed = parseEmoji(textInput.value);
+    const startEdit = (index: number) => {
+        const status = statuses[index];
+        if (!status) return;
+        setEditing({ index, text: status.text ?? "", preset: status.preset ?? "", status: status.status ?? "online" });
+    };
+    const updateEdit = (patch: Partial<EditState>) => setEditing(current => current ? { ...current, ...patch } : current);
+    const saveEdit = () => {
+        if (!editing) return;
+        const parsed = parseEmoji(editing.text);
         if (!parsed.text.trim().length && !(parsed.emojiId || parsed.emojiName)) return Toasts.show({ message: "Please enter some text or an emoji!", type: Toasts.Type.FAILURE, id: Toasts.genId() });
         const updated = [...statuses];
-        updated[index] = { ...parsed, preset: presetSelect?.value?.trim() || undefined, status: (statusBtn?.dataset?.value as StatusType) || "online" };
+        updated[editing.index] = { ...parsed, preset: editing.preset.trim() || undefined, status: editing.status };
         setStatuses(updated);
         settings.store.statuses = JSON.stringify(updated);
-        setEditingIndex(null);
+        setEditing(null);
         Toasts.show({ message: "Status saved!", type: Toasts.Type.SUCCESS, id: Toasts.genId() });
     };
-    const cancelEdit = () => setEditingIndex(null);
+    const cancelEdit = () => setEditing(null);
     const startAnimation = (preset: string | null) => {
         setFilterPreset(preset);
-        setRunningPreset(preset);
         plugin?.stop();
         setTimeout(() => plugin?.begin(preset ?? undefined), 100);
-        setRunning(true);
     };
-    const stopAnimation = () => {
-        plugin?.stop();
-        setRunning(false);
-        setRunningPreset(null);
-    };
+    const stopAnimation = () => plugin?.stop();
     return (
         <ErrorBoundary>
             <ModalRoot {...{ transitionState, onClose }} size={ModalSize.LARGE} className={cl("modal-root")}>
@@ -270,7 +335,7 @@ function SettingsModal({ onClose, transitionState }: { onClose: () => void; tran
                     <div className={cl("header-title")}><I.Clock /><Text variant="heading-lg/semibold">Animated Status</Text></div>
                     <ModalCloseButton onClick={onClose} />
                 </ModalHeader>
-                <TabBar className={cl("tab-bar")} type="top" selectedItem={currentTab} onItemSelect={tab => { setEditingIndex(null); setCurrentTab(tab); }}>
+                <TabBar className={cl("tab-bar")} type="top" selectedItem={currentTab} onItemSelect={tab => { setEditing(null); setCurrentTab(tab); }}>
                     <TabBar.Item className={cl("tab-item")} id={Tab.STATUSES}><span className={cl("tab-icon")}><I.List /></span><span>Statuses</span></TabBar.Item>
                     <TabBar.Item className={cl("tab-item")} id={Tab.PRESETS}><span className={cl("tab-icon")}><I.Folder /></span><span>Presets</span></TabBar.Item>
                     <TabBar.Item className={cl("tab-item")} id={Tab.SETTINGS}><span className={cl("tab-icon")}><I.Settings /></span><span>Settings</span></TabBar.Item>
@@ -278,7 +343,7 @@ function SettingsModal({ onClose, transitionState }: { onClose: () => void; tran
                 </TabBar>
                 <ModalContent scrollerRef={scrollerRef} className={cl("modal-content")}>
                     {currentTab === Tab.STATUSES && (
-                        <StatusesTab statuses={statuses} filteredStatuses={filteredStatuses} presetNames={presetNames} presets={presets} filterPreset={filterPreset} inputText={inputText} setInputText={setInputText} preset={preset} setPreset={setPreset} selectedStatus={selectedStatus} setSelectedStatus={setSelectedStatus} running={running} editingIndex={editingIndex} previewData={previewData} onAddStatus={addStatus} onDeleteStatus={deleteStatus} onEditStart={setEditingIndex} onEditSave={saveEdit} onEditCancel={cancelEdit} onStart={startAnimation} onStop={stopAnimation} onFilterChange={setFilterPreset} />
+                        <StatusesTab statuses={statuses} filteredStatuses={filteredStatuses} presetNames={presetNames} presets={presets} filterPreset={filterPreset} inputText={inputText} setInputText={setInputText} preset={preset} setPreset={setPreset} selectedStatus={selectedStatus} setSelectedStatus={setSelectedStatus} running={running} editing={editing} previewData={previewData} onAddStatus={addStatus} onDeleteStatus={deleteStatus} onEditStart={startEdit} onEditChange={updateEdit} onEditSave={saveEdit} onEditCancel={cancelEdit} onStart={startAnimation} onStop={stopAnimation} onFilterChange={setFilterPreset} />
                     )}
                     {currentTab === Tab.PRESETS && (
                         <PresetsTab statuses={statuses} setStatuses={setStatuses} presetNames={presetNames} running={running} runningPreset={runningPreset} onStart={startAnimation} onStop={stopAnimation} onPresetChange={() => setPresetListTrigger(t => t + 1)} />
@@ -296,12 +361,12 @@ function SettingsModal({ onClose, transitionState }: { onClose: () => void; tran
 interface StatusesTabProps {
     statuses: StatusStep[]; filteredStatuses: StatusStep[]; presetNames: string[]; presets: Preset[];
     filterPreset: string | null; inputText: string; setInputText: (v: string) => void; preset: string; setPreset: (v: string) => void;
-    selectedStatus: StatusType; setSelectedStatus: (v: StatusType) => void; running: boolean; editingIndex: number | null;
+    selectedStatus: StatusType; setSelectedStatus: (v: StatusType) => void; running: boolean; editing: EditState | null;
     previewData: Omit<StatusStep, "preset"> & { status: StatusType; }; onAddStatus: () => void; onDeleteStatus: (index: number) => void;
-    onEditStart: (index: number) => void; onEditSave: (index: number) => void; onEditCancel: () => void;
+    onEditStart: (index: number) => void; onEditChange: (patch: Partial<EditState>) => void; onEditSave: () => void; onEditCancel: () => void;
     onStart: (preset: string | null) => void; onStop: () => void; onFilterChange: (preset: string | null) => void;
 }
-function StatusesTab({ statuses, filteredStatuses, presetNames, presets, filterPreset, inputText, setInputText, preset, setPreset, selectedStatus, setSelectedStatus, running, editingIndex, previewData, onAddStatus, onDeleteStatus, onEditStart, onEditSave, onEditCancel, onStart, onStop, onFilterChange }: StatusesTabProps) {
+function StatusesTab({ statuses, filteredStatuses, presetNames, presets, filterPreset, inputText, setInputText, preset, setPreset, selectedStatus, setSelectedStatus, running, editing, previewData, onAddStatus, onDeleteStatus, onEditStart, onEditChange, onEditSave, onEditCancel, onStart, onStop, onFilterChange }: StatusesTabProps) {
     return (
         <div className={cl("tab-content")}>
             <StatusPreview emojiId={previewData.emojiId} emojiName={previewData.emojiName} animated={previewData.animated} text={previewData.text} statusType={previewData.status || "online"} />
@@ -321,7 +386,7 @@ function StatusesTab({ statuses, filteredStatuses, presetNames, presets, filterP
                 <div>
                     <Text className={cl("label")} variant="text-sm/semibold">Discord Status Type</Text>
                     <div className={cl("status-selector")}>{STATUS_OPTIONS.map(status => (
-                        <button key={status.value} className={cl("status-btn", { active: selectedStatus === status.value })} onClick={() => setSelectedStatus(status.value)}>
+                        <button key={status.value} type="button" className={cl("status-btn", { active: selectedStatus === status.value })} onClick={() => setSelectedStatus(status.value)}>
                             <span className={cl("status-dot")} style={{ background: status.color }} />{status.label}
                         </button>
                     ))}</div>
@@ -352,22 +417,22 @@ function StatusesTab({ statuses, filteredStatuses, presetNames, presets, filterP
                     <div className={cl("status-list")}>
                         {filteredStatuses.map(status => {
                             const actualIndex = statuses.indexOf(status);
-                            const isEditing = editingIndex === actualIndex;
+                            const isEditing = editing?.index === actualIndex;
                             return (
-                                <div key={actualIndex} className={cl("status-card", { editing: isEditing })} data-status-index={actualIndex}>
+                                <div key={actualIndex} className={cl("status-card", { editing: isEditing })}>
                                     {isEditing ? (
                                         <div className={cl("edit-mode")}>
                                             <div className={cl("edit-inputs")}>
-                                                <TextInput data-edit-input="text" defaultValue={status.text} placeholder="Status text..." className={cl("edit-input")} />
-                                                <select data-edit-input="preset" defaultValue={status.preset || ""} className={cl("native-select", "edit-input")}><option value="">None</option>{presetNames.map(c => <option key={c} value={c}>{c}</option>)}</select>
+                                                <TextInput value={editing.text} onChange={v => onEditChange({ text: v })} placeholder="Status text..." className={cl("edit-input")} />
+                                                <select value={editing.preset} onChange={e => onEditChange({ preset: e.target.value })} className={cl("native-select", "edit-input")}><option value="">None</option>{presetNames.map(c => <option key={c} value={c}>{c}</option>)}</select>
                                                 <div className={cl("status-selector")}>{STATUS_OPTIONS.map(s => (
-                                                    <button key={s.value} data-edit-input="status" data-value={s.value} data-selected={s.value === status.status} className={cl("status-btn", { active: s.value === status.status })} onClick={e => { const btn = e.currentTarget; btn.parentElement?.querySelectorAll('[data-edit-input="status"]').forEach(b => (b as HTMLElement).dataset.selected = "false"); btn.dataset.selected = "true"; }}>
+                                                    <button key={s.value} type="button" className={cl("status-btn", { active: s.value === editing.status })} onClick={() => onEditChange({ status: s.value })}>
                                                         <span className={cl("status-dot")} style={{ background: s.color }} />{s.label}
                                                     </button>
                                                 ))}</div>
                                             </div>
                                             <div className={cl("edit-actions")}>
-                                                <Button onClick={() => onEditSave(actualIndex)} color={Button.Colors.GREEN} size={Button.Sizes.SMALL}><I.Check />Save</Button>
+                                                <Button onClick={onEditSave} color={Button.Colors.GREEN} size={Button.Sizes.SMALL}><I.Check />Save</Button>
                                                 <Button onClick={onEditCancel} color={(Button.Colors as any).SECONDARY} size={Button.Sizes.SMALL}>Cancel</Button>
                                             </div>
                                         </div>

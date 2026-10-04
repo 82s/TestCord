@@ -78,7 +78,7 @@ export const discordCommands: PaletteCommand[] = [
                         label: `Set ${status.label}`,
                         run() {
                             StatusSetting?.updateSetting(status.value);
-                            showToast(`Status set to ${status.label}.`, Toasts.Type.SUCCESS);
+                            showToast(`Status set to ${status.label}.`, "success");
                         }
                     }]
                 }))

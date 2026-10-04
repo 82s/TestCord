@@ -7,6 +7,7 @@
 import "./ChatButton.css";
 import "./PluginIconColor.css";
 
+import { PluginHealth } from "@api/PluginHealth";
 import ErrorBoundary from "@components/ErrorBoundary";
 import { getTestcordIconColor } from "@testcordplugins/TestcordHelper/iconColors";
 import { Logger } from "@utils/Logger";
@@ -17,7 +18,7 @@ import { findCssClassesLazy } from "@webpack";
 import { Clickable, Menu, Tooltip, useEffect, useMemo, useState } from "@webpack/common";
 import { CSSProperties, HTMLProps, JSX, MouseEventHandler, ReactNode } from "react";
 
-import { addContextMenuPatch, findGroupChildrenByChildId } from "./ContextMenu";
+import { addContextMenuPatch, findGroupChildrenByChildId, refreshContextMenus } from "./ContextMenu";
 import { SettingsStore, useSettings } from "./Settings";
 
 const ButtonWrapperClasses = findCssClassesLazy("button", "buttonWrapper", "notificationDot");
@@ -98,6 +99,26 @@ export type ChatBarButtonData = {
 export const ChatBarButtonMap = new Map<string, ChatBarButtonData>();
 const logger = new Logger("ChatButtons");
 
+/** Buttons are shown unless the user turned them off. */
+export function isChatBarButtonEnabled(id: string): boolean {
+    return SettingsStore.store.uiElements.chatBarButtons[id]?.enabled !== false;
+}
+
+export function setChatBarButtonEnabled(id: string, enabled: boolean) {
+    const { chatBarButtons } = SettingsStore.store.uiElements;
+    if (isChatBarButtonEnabled(id) === enabled) return;
+
+    chatBarButtons[id] ??= {} as any;
+    chatBarButtons[id].enabled = enabled;
+    void PluginHealth.recordPluginChange(id, enabled);
+}
+
+// The checkboxes below render straight from settings, so an open menu has to be
+// re-patched when they change.
+SettingsStore.addGlobalChangeListener((_, path) => {
+    if (path === "" || path.startsWith("uiElements.chatBarButtons")) refreshContextMenus();
+});
+
 const chatBarButtonListeners = new Set<() => void>();
 function notifyChatBarButtonChange() { chatBarButtonListeners.forEach(l => l()); }
 
@@ -119,7 +140,7 @@ function getSortedChatBarButtons() {
 }
 
 function VencordChatBarButtons(props: ChatBarProps) {
-    const { chatBarButtons } = useSettings(["uiElements.chatBarButtons.*"]).uiElements;
+    useSettings(["uiElements.chatBarButtons.*"]);
     const [, forceUpdate] = useState(0);
 
     useEffect(() => {
@@ -142,7 +163,7 @@ function VencordChatBarButtons(props: ChatBarProps) {
     const isMainChat = analyticsName === "normal";
     const isAnyChat = isMainChat || analyticsName === "sidebar";
     const enabledKey = getSortedChatBarButtons()
-        .filter(({ key }) => chatBarButtons[key]?.enabled !== false)
+        .filter(({ key }) => isChatBarButtonEnabled(key))
         .map(({ key }) => key)
         .join(",");
 
@@ -154,7 +175,7 @@ function VencordChatBarButtons(props: ChatBarProps) {
     // attachments and isEmpty from props; everything live (draft, settings,
     // local state) flows through their own hooks, which still fire.
     const buttons = useMemo(() => getSortedChatBarButtons()
-        .filter(({ key }) => chatBarButtons[key]?.enabled !== false)
+        .filter(({ key }) => isChatBarButtonEnabled(key))
         .map(({ key, render: Button }) => (
             <ErrorBoundary noop key={key} onError={e => logger.error(`Failed to render ${key}`, e.error)}>
                 <Button {...props} isMainChat={isMainChat} isAnyChat={isAnyChat} />
@@ -227,10 +248,8 @@ export const ChatBarButton = ErrorBoundary.wrap((props: ChatBarButtonProps) => {
     );
 }, { noop: true });
 
-addContextMenuPatch("textarea-context", (children, args) => {
-    const { chatBarButtons } = SettingsStore.store.uiElements;
-
-    const buttons = Array.from(ChatBarButtonMap.entries());
+addContextMenuPatch("textarea-context", children => {
+    const buttons = Array.from(ChatBarButtonMap.keys());
     if (!buttons.length) return;
 
     const group = findGroupChildrenByChildId("submit-button", children);
@@ -241,17 +260,16 @@ addContextMenuPatch("textarea-context", (children, args) => {
 
     group.splice(idx, 0,
         <Menu.MenuItem id="vc-chat-buttons" key="vencord-chat-buttons" label="Vencord Buttons">
-            {buttons.map(([id]) => (
+            {buttons.map(id => (
                 <Menu.MenuCheckboxItem
                     label={id}
                     key={id}
                     id={`vc-chat-button-${id}`}
-                    checked={chatBarButtons[id]?.enabled !== false}
-                    action={() => {
-                        const wasEnabled = chatBarButtons[id]?.enabled !== false;
-
-                        chatBarButtons[id] ??= {} as any;
-                        chatBarButtons[id].enabled = !wasEnabled;
+                    checked={isChatBarButtonEnabled(id)}
+                    action={e => {
+                        // Keep the click from reaching the parent row, which closes the submenu.
+                        e?.stopPropagation();
+                        setChatBarButtonEnabled(id, !isChatBarButtonEnabled(id));
                     }}
                 />
             ))}

@@ -343,7 +343,7 @@ async function deleteFolder(folderId: string): Promise<boolean> {
 
 function notify(body: string, type: string = "info") {
     if (!settings.store.showNotifications) return;
-    var toastType = Toasts.Type.MESSAGE;
+    var toastType: Parameters<typeof showToast>[1] = Toasts.Type.MESSAGE;
     if (type === "success") toastType = Toasts.Type.SUCCESS;
     else if (type === "error") toastType = Toasts.Type.FAILURE;
     showToast(body, toastType);

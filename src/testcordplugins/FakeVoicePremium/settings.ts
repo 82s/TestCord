@@ -7,6 +7,8 @@
 import { definePluginSettings } from "@api/Settings";
 import { OptionType } from "@utils/types";
 
+import { type FakeVoicePreset,PresetSettings } from "./presets";
+
 export const settings = definePluginSettings({
     fakeMute: {
         description: "Make everyone believe you're muted (you can still speak)",
@@ -68,4 +70,9 @@ export const settings = definePluginSettings({
         type: OptionType.STRING,
         default: "ctrl+l",
     },
-});
+    presets: {
+        type: OptionType.COMPONENT,
+        description: "",
+        component: PresetSettings,
+    },
+}).withPrivateSettings<{ presets: FakeVoicePreset[] }>();
