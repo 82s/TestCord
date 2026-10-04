@@ -1,9 +1,7 @@
-/* eslint-disable simple-header/header -- This standalone user plugin is MIT licensed. */
 /*
- * StereoGuard
- * Copyright (c) 2026 Kurtzon Audio
- * Copyright (c) 2026 DavidHiFi
- * SPDX-License-Identifier: MIT
+ * Vencord, a Discord client mod
+ * Copyright (c) 2024 Vendicated and contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 import { DataStore } from "@api/index";
@@ -11,6 +9,7 @@ import { plugins } from "@api/PluginManager";
 import { definePluginSettings } from "@api/Settings";
 import { UserAreaButton, UserAreaRenderProps } from "@api/UserArea";
 import { openPluginModal } from "@components/settings";
+import { TestcordDevs } from "@utils/constants";
 import { Logger } from "@utils/Logger";
 import definePlugin, { makeRange, OptionType } from "@utils/types";
 import { findByPropsLazy } from "@webpack";
@@ -768,7 +767,7 @@ function StereoGuardButton({ iconForeground, hideTooltips, nameplate }: UserArea
 export default definePlugin({
     name: "StereoGuard",
     description: "Locally silences anyone whose audio is not fully mono: slight panning, stereo width, panning around, or reverb tails. Centered mono voice is never touched.",
-    authors: [{ name: "Kurtzon Audio", id: 1552878708732469258n }, { name: "DavidHiFi", id: 1553713171938938891n }],
+    authors: [TestcordDevs.Kurtzon, TestcordDevs.DavidHiFi],
     tags: ["Voice", "Utility"],
     enabledByDefault: false,
     settings,

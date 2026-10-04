@@ -1,5 +1,8 @@
-/* eslint-disable simple-header/header -- This standalone user plugin is MIT licensed. */
-/* Copyright (c) 2026 DavidHiFi. SPDX-License-Identifier: MIT */
+/*
+ * Vencord, a Discord client mod
+ * Copyright (c) 2024 Vendicated and contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
 
 // Safety decisions use fresh source samples. A timer alone never opens a held volume.
 export class VolumeHold {
