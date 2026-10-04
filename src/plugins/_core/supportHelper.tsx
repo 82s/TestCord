@@ -51,6 +51,8 @@ import SettingsPlugin from "./settings";
 
 const CodeBlockRe = /```snippet\n(.+?)```/s;
 
+const AsyncFunction = async function () { }.constructor;
+
 const TrustedRolesIds = [
     VC_CONTRIB_ROLE_ID, // Vencord Contributor
     VC_REGULAR_ROLE_ID, // Vencord Regular
@@ -60,8 +62,6 @@ const TrustedRolesIds = [
     CONTRIB_ROLE_ID, // Equicord Contributor
     VENCORD_CONTRIB_ROLE_ID, // Vencord Contributor
 ];
-
-const AsyncFunction = async function () { }.constructor;
 
 const ShowCurrentGame = getUserSettingLazy<boolean>("status", "showCurrentGame")!;
 const ShowEmbeds = getUserSettingLazy<boolean>("textAndImages", "renderEmbeds")!;
@@ -509,12 +509,12 @@ export default definePlugin({
                     onClick={async () => {
                         try {
                             if (await forceUpdate())
-                                showToast("Success! Restarting...", Toasts.Type.SUCCESS);
+                                showToast("Success! Restarting...", "success");
                             else
-                                showToast("Already up to date!", Toasts.Type.MESSAGE);
+                                showToast("Already up to date!");
                         } catch (e) {
                             new Logger(this.name).error("Error while updating:", e);
-                            showToast("Failed to update :(", Toasts.Type.FAILURE);
+                            showToast("Failed to update :(", "failure");
                         }
                     }}
                 >

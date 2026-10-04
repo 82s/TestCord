@@ -4,10 +4,12 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { lodash } from "@webpack/common";
 import { DBSchema, IDBPDatabase, openDB } from "idb";
 
 import { createSearchMatcher } from "./search";
-import { LogPage, LogRecord, LogStats, LogStatus, LogViewStatus } from "./types";
+import { EditRecord, LoggedMessage, LogPage, LogRecord, LogStats, LogStatus, LogViewStatus } from "./types";
+import { embedFingerprint } from "./utils";
 
 export const DB_NAME = "TestcordMessageLoggerIDB";
 const DB_VERSION = 1;
@@ -126,7 +128,7 @@ export async function applyBatch(records: LogRecord[], deletedIds: string[]) {
     const existingRecords = await Promise.all(records.map(record => transaction.store.get(record.message_id)));
     const updatedAt = new Date().toISOString();
     await Promise.all([
-        ...records.map((record, index) => transaction.store.put({
+        ...records.map((record, index) => putRecord(transaction.store, {
             ...record,
             protected: record.protected ?? existingRecords[index]?.protected,
             hidden: record.hidden ?? existingRecords[index]?.hidden,
@@ -234,9 +236,126 @@ export async function getAllHistoryForChannel(channelId: string) {
         || (Array.isArray(record.message.editHistory) && record.message.editHistory.length > 0));
 }
 
+/**
+ * Repair records written while embed fingerprints could not tell a new embed from a
+ * stripped one, which made every edit of a paginated bot append the previous page's
+ * embeds and log the state it was replacing as a revision of its own. Three symptoms,
+ * one cause:
+ *
+ * - the same embed repeated inside one message or revision,
+ * - consecutive revisions whose content and embeds are identical,
+ * - a trailing revision identical to the message's current state, i.e. a state that was
+ *   never edited away.
+ *
+ * Only records that actually changed are rewritten, so a healthy database costs one
+ * cursor pass and no writes. Safe to leave running: a repaired record no longer trips
+ * any of the three checks.
+ */
+export async function repairEditedRecords(): Promise<number> {
+    const database = await getDatabase();
+    const repaired: LogRecord[] = [];
+    let scanned = 0;
+    // Walk the edit index rather than the store: only these rows can be affected.
+    let cursor = await database.transaction("messages").store.index("by_status").openCursor(LogStatus.EDITED);
+    while (cursor && scanned < 50_000) {
+        scanned++;
+        const record = cursor.value;
+        const { editHistory } = record.message;
+        if (Array.isArray(editHistory) && editHistory.length) {
+            const current = stateKey(record.message.content, record.message.embeds);
+            const seen = new Set<string>();
+            const kept: EditRecord[] = [];
+            // Walk oldest to newest so a revision equal to the current state is dropped
+            // only after the ones before it have been compared against each other.
+            for (const revision of editHistory) {
+                const embeds = dedupeEmbeds(revision.embeds);
+                const key = stateKey(revision.content, embeds);
+                // A repeat of the state already logged, or the state the message is in now.
+                if (seen.has(key) || key === current) continue;
+                seen.add(key);
+                kept.push(embeds === revision.embeds ? revision : { ...revision, embeds });
+            }
+            const embeds = dedupeEmbeds(record.message.embeds);
+            const changed = kept.length !== editHistory.length || embeds !== record.message.embeds;
+            if (changed) {
+                const message: LoggedMessage = { ...record.message, editHistory: kept };
+                if (embeds) message.embeds = embeds;
+                repaired.push({ ...record, message, updatedAt: new Date().toISOString() });
+            }
+        }
+        cursor = await cursor.continue();
+    }
+    if (!repaired.length) return 0;
+    const transaction = database.transaction("messages", "readwrite");
+    await Promise.all([
+        ...repaired.map(record => transaction.store.put(record)),
+        transaction.done
+    ]);
+    invalidateStats();
+    return repaired.length;
+}
+
+/**
+ * One function anywhere in a record fails the whole transaction with DataCloneError, and
+ * a failed transaction takes every record batched with it, so a single stray value costs
+ * the entire batch. Retry once against a stripped deep copy: the record in hand shares
+ * objects with the in-memory caches and must not be mutated, but a copy is ours to
+ * clean. Without this a Discord helper function that slipped past the snapshot path
+ * silently ate logs.
+ */
+function putRecord(store: { put(value: unknown, key?: unknown): Promise<unknown>; }, record: LogRecord) {
+    return store.put(record).catch((error: { name?: string; }) => {
+        if (error?.name !== "DataCloneError") throw error;
+        const safe = lodash.cloneDeep(record);
+        stripUncloneable(safe, new WeakSet());
+        return store.put(safe);
+    });
+}
+
+function stateKey(content: unknown, embeds: unknown): string {
+    const parts = Array.isArray(embeds) ? embeds.map(embed => embedFingerprint(embed)) : [];
+    return `${content ?? ""} ${parts.join("")}`;
+}
+
+function dedupeEmbeds<T>(embeds: T[] | undefined): T[] | undefined {
+    if (!Array.isArray(embeds)) return embeds;
+    const seen = new Set<string>();
+    const out: T[] = [];
+    for (const embed of embeds) {
+        const key = embedFingerprint(embed);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(embed);
+    }
+    return out;
+}
+
 export async function getLogById(messageId: string) {
     const database = await getDatabase();
     return database.get("messages", messageId);
+}
+
+/**
+/**
+ * Every row logged from a server.
+ *
+ * There is no guild index, and the alternative - walking every channel of the guild
+ * through by_channel_id - only covers channels the guild store happens to know about,
+ * so a log whose channel has since been left or deleted would be missed. This walks the
+ * primary key once and keeps the guild's rows: measured at 463k rows in about two
+ * seconds, and it only runs when the user asks to clear a whole server.
+ */
+export async function getGuildLogs(guildId: string) {
+    const database = await getDatabase();
+    const store = database.transaction("messages", "readonly").objectStore("messages");
+    const records: LogRecord[] = [];
+    let cursor = await store.openCursor();
+    while (cursor) {
+        const { message } = cursor.value;
+        if (message?.guild_id === guildId || message?.guildId === guildId) records.push(cursor.value);
+        cursor = await cursor.continue();
+    }
+    return records;
 }
 
 export async function getChannelLogsLimit(channelId: string, limit: number, beforeTimestamp?: string): Promise<LogRecord[]> {

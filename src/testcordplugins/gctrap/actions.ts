@@ -56,6 +56,11 @@ export function forgetGroup(channelId: string): void {
     givenUp.delete(channelId);
 }
 
+/** Clear the given-up flag for a user so a manual re-add attempt can try again */
+export function forgive(channelId: string, userId: string): void {
+    givenUp.get(channelId)?.delete(userId);
+}
+
 export function forgetAll(): void {
     givenUp.clear();
 }
@@ -68,7 +73,8 @@ function giveUp(channelId: string, userId: string): void {
 
 export function nameOf(userId: string): string {
     const user = UserStore.getUser(userId);
-    return user?.globalName || user?.username || userId;
+    const name = user?.globalName ?? user?.username;
+    return typeof name === "string" && name ? name : String(userId ?? "");
 }
 
 /**
@@ -100,16 +106,28 @@ export async function readdTarget(group: GroupConfig, userId: string, reason: st
     if (group.mode === "kickonly" || group.mode === "off") return false;
     if (!isTarget(group, userId)) return false;
     if (isGivenUp(group.id, userId)) return false;
-    if (recipientIds(ChannelStore.getChannel(group.id)).includes(userId)) return false;
-
     if (group.readdDelay > 0) await sleep(group.readdDelay);
 
-    const current = GctrapStore.getState().getGroup(group.id);
-    if (!current || current.mode === "kickonly" || current.mode === "off") return false;
-    if (!isTarget(current, userId)) return false;
+    if (recipientIds(ChannelStore.getChannel(group.id)).includes(userId)) {
+        log(group, `${nameOf(userId)} ${reason}: still seen in the channel store, doing nothing`, "warn");
+        return false;
+    }
 
-    const { added } = await addMembers(group.id, [userId], settings.store.memberSize, settings.store.addDelay);
-    if (!added) return false;
+    const current = GctrapStore.getState().getGroup(group.id);
+    if (!current || current.mode === "kickonly" || current.mode === "off") {
+        log(group, `${nameOf(userId)} ${reason}: group config gone or mode is ${current?.mode}`, "warn");
+        return false;
+    }
+    if (!isTarget(current, userId)) {
+        log(group, `${nameOf(userId)} ${reason}: no longer on the target list`, "warn");
+        return false;
+    }
+
+    const { added, failed } = await addMembers(group.id, [userId], settings.store.memberSize, settings.store.addDelay);
+    if (!added) {
+        log(group, `${nameOf(userId)} ${reason}: add request failed${failed.length ? ` (${failed.join(", ")})` : ""}`, "error");
+        return false;
+    }
 
     const count = bumpReaddCount(current, userId);
     if (current.readdLimit > 0 && count > current.readdLimit) {
@@ -162,7 +180,10 @@ export function resetReaddCounts(group: GroupConfig, userIds?: readonly string[]
     }
 
     const readds = { ...group.readds };
-    for (const id of userIds) delete readds[id];
+    for (const id of userIds) {
+        delete readds[id];
+        forgive(group.id, id);
+    }
     GctrapStore.getState().upsertGroup({ ...group, readds });
 
     const list = givenUp.get(group.id);

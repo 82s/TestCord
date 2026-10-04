@@ -6,17 +6,20 @@
 
 import ErrorBoundary from "@components/ErrorBoundary";
 import { TestcordDevs } from "@utils/constants";
+import { getIntlMessage } from "@utils/discord";
 import { openModal } from "@utils/modal";
 import definePlugin from "@utils/types";
 
 import { PinterestProfileModal } from "./components";
-import { type SearchKind, settings } from "./shared";
+import { t } from "./i18n";
+import { PLUGIN_ICON } from "./icon";
+import { Native, type SearchKind,settings } from "./shared";
 import managedStyle from "./style.css?managed";
 
 const WrappedPinterestProfileModal = ErrorBoundary.wrap(PinterestProfileModal, { noop: true });
 
 let observer: MutationObserver | null = null;
-let scanQueued = false;
+let scanFrame = 0;
 let lastProfileImageTarget: Extract<SearchKind, "AVATAR" | "BANNER"> = "AVATAR";
 let lastProfileImageTargetAt = 0;
 
@@ -26,6 +29,15 @@ function exactText(root: ParentNode, text: string): HTMLElement | null {
         if (node.textContent?.trim() === text) return node;
     }
     return null;
+}
+
+function discordLabel(key: string, fallback: string) {
+    try {
+        const value = getIntlMessage(key);
+        return typeof value === "string" && value !== key ? value : fallback;
+    } catch {
+        return fallback;
+    }
 }
 
 function clickableRoot(element: HTMLElement, dialog: HTMLElement): HTMLElement {
@@ -73,10 +85,15 @@ function getTarget(dialog: HTMLElement): Extract<SearchKind, "AVATAR" | "BANNER"
 
     const text = dialog.textContent ?? "";
 
-    if (/Recent\s+Banners?/i.test(text)) return "BANNER";
-    if (/Recent\s+Avatars?/i.test(text)) return "AVATAR";
+    if (text.includes(discordLabel("RECENT_AVATARS", "Recent Avatars"))) return "AVATAR";
 
     return lastProfileImageTarget;
+}
+
+// Discord class names are camelCase with hashes ("bannerUploader_a1b2"), so
+// split them into words before matching "banner" / "avatar" on word boundaries.
+function splitIdentifierWords(value: string) {
+    return value.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ");
 }
 
 function rememberProfileImageTarget(event: Event) {
@@ -104,33 +121,33 @@ function rememberProfileImageTarget(event: Event) {
             .map(([key, value]) => `${key} ${value ?? ""}`)
             .join(" ");
 
-        const label = [
-            current.textContent,
+        // Visible text only counts on small elements: a container holding the
+        // whole profile editor mentions both "Avatar" and "Banner". The element
+        // count check also avoids reading the text of the entire app on every click.
+        const text = current.childElementCount <= 6 ? current.textContent ?? "" : "";
+        const label = splitIdentifierWords([
+            text.length <= 80 ? text : "",
             current.getAttribute("aria-label"),
             current.getAttribute("title"),
             current.getAttribute("alt"),
             current.id,
             typeof current.className === "string" ? current.className : "",
             datasetText
-        ].filter(Boolean).join(" ");
+        ].filter(Boolean).join(" "));
 
-        if (/\bbanner\b/i.test(label)) {
-            lastProfileImageTarget = "BANNER";
-            lastProfileImageTargetAt = Date.now();
-            return;
-        }
+        const banner = /\bbanner\b/i.test(label);
+        const avatar = /\b(avatar|profile\s*(?:image|picture|icon)|user\s*avatar)\b/i.test(label);
+        // Ambiguous element: keep walking up instead of guessing.
+        if (banner === avatar) continue;
 
-        if (/\b(avatar|profile\s*(?:image|picture|icon)|user\s*avatar)\b/i.test(label)) {
-            lastProfileImageTarget = "AVATAR";
-            lastProfileImageTargetAt = Date.now();
-            return;
-        }
+        lastProfileImageTarget = banner ? "BANNER" : "AVATAR";
+        lastProfileImageTargetAt = Date.now();
+        return;
     }
 
-    // Locale-independent fallback: inspect the composed path from the clicked
-    // element outward and classify the *nearest* profile-sized control. Doing both
-    // shapes in one pass prevents a wide outer profile container from overriding
-    // the avatar circle that was actually clicked.
+    // Discord's current profile preview may expose the banner only as a large
+    // clickable image/div. Use its geometry as a fallback: banners are wide,
+    // while avatars are approximately square/circular.
     for (const current of elements.slice(0, 6)) {
         const rect = current.getBoundingClientRect();
         if (!rect.width || !rect.height) continue;
@@ -138,14 +155,35 @@ function rememberProfileImageTarget(event: Event) {
         const ratio = rect.width / rect.height;
         const area = rect.width * rect.height;
 
-        const avatarSized = rect.width >= 42
+        // Ignore tiny icons and page-sized containers. A Discord profile banner
+        // normally lands comfortably inside this range.
+        if (
+            rect.width >= 170
+            && rect.height >= 55
+            && ratio >= 1.7
+            && area <= 220_000
+        ) {
+            lastProfileImageTarget = "BANNER";
+            lastProfileImageTargetAt = Date.now();
+            return;
+        }
+    }
+
+    // Square/circular clickable controls are safe to classify as avatars only
+    // when they are reasonably avatar-sized. Otherwise preserve the last target.
+    for (const current of elements.slice(0, 5)) {
+        const rect = current.getBoundingClientRect();
+        if (!rect.width || !rect.height) continue;
+
+        const ratio = rect.width / rect.height;
+        if (
+            rect.width >= 42
             && rect.width <= 180
             && rect.height >= 42
             && rect.height <= 180
             && ratio >= 0.78
-            && ratio <= 1.28;
-
-        if (avatarSized) {
+            && ratio <= 1.28
+        ) {
             const radius = getComputedStyle(current).borderRadius;
             if (radius.includes("%") || parseFloat(radius) >= rect.width * 0.22) {
                 lastProfileImageTarget = "AVATAR";
@@ -153,72 +191,20 @@ function rememberProfileImageTarget(event: Event) {
                 return;
             }
         }
-
-        const bannerSized = rect.width >= 170
-            && rect.height >= 55
-            && ratio >= 1.7
-            && area <= 220_000;
-
-        if (bannerSized) {
-            lastProfileImageTarget = "BANNER";
-            lastProfileImageTargetAt = Date.now();
-            return;
-        }
     }
 }
 
-function isElementVisible(element: HTMLElement) {
-    if (!element.isConnected) return false;
-    if (element.getAttribute("aria-hidden") === "true") return false;
-
-    const style = getComputedStyle(element);
-    if (style.display === "none" || style.visibility === "hidden") return false;
-
-    const rect = element.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0;
-}
-
 function closeDiscordImageModal(dialog: HTMLElement) {
-    const candidates = Array.from(dialog.querySelectorAll<HTMLElement>("button, [role='button']"))
-        .filter(isElementVisible);
-
-    // Keep the old English/Spanish labels as a fast compatibility path, but do
-    // not depend on them. Pinterest Tool itself stays in English while Discord
-    // is free to use any locale.
+    const close = discordLabel("CLOSE", "Close").toLocaleLowerCase();
+    const candidates = dialog.querySelectorAll<HTMLElement>("button, [role='button']");
     for (const candidate of candidates) {
         const label = candidate.getAttribute("aria-label")?.trim().toLowerCase();
         const title = candidate.getAttribute("title")?.trim().toLowerCase();
-        if (label === "close" || title === "close" || label === "cerrar" || title === "cerrar") {
+        if (label === close || title === close) {
             candidate.click();
             return;
         }
     }
-
-    // Locale-independent fallback: Discord's modal close control is an icon-only
-    // button placed at a top corner. Prefer that geometry instead of maintaining
-    // a translation table for every language Discord supports.
-    const dialogRect = dialog.getBoundingClientRect();
-    const iconButtons = candidates
-        .filter(candidate => {
-            const rect = candidate.getBoundingClientRect();
-            const text = (candidate.textContent ?? "").trim();
-            const nearTop = rect.top <= dialogRect.top + Math.min(88, dialogRect.height * 0.22);
-            const nearEdge = rect.left <= dialogRect.left + 72 || rect.right >= dialogRect.right - 72;
-            return nearTop
-                && nearEdge
-                && rect.width <= 52
-                && rect.height <= 52
-                && text.length <= 2
-                && candidate.querySelector("svg") !== null;
-        })
-        .sort((a, b) => {
-            const aRect = a.getBoundingClientRect();
-            const bRect = b.getBoundingClientRect();
-            return aRect.top - bRect.top || Math.min(aRect.left - dialogRect.left, dialogRect.right - aRect.right)
-                - Math.min(bRect.left - dialogRect.left, dialogRect.right - bRect.right);
-        });
-
-    iconButtons[0]?.click();
 }
 
 function isImageInput(input: HTMLInputElement) {
@@ -308,143 +294,29 @@ function setInputFile(input: HTMLInputElement, file: File) {
     input.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
-function getControlSearchText(node: HTMLElement) {
-    return [
-        node.textContent,
-        node.getAttribute("aria-label"),
-        node.getAttribute("title")
-    ].filter(Boolean).join(" ").trim();
-}
-
-function findGifTile(dialog: HTMLElement): HTMLElement | null {
-    // "GIF" is a media-format name rather than a translated action label. It is
-    // therefore a much safer structural landmark than strings such as
-    // "Choose GIF" / "Elegir GIF" / etc.
-    const nodes = Array.from(dialog.querySelectorAll<HTMLElement>(
-        "button, [role='button'], [tabindex='0'], label, div, span"
-    ));
-
-    const candidates = nodes
-        .filter(node => {
-            const label = getControlSearchText(node);
-            // Ignore large parent containers whose text happens to include the GIF
-            // tile somewhere deep inside; we want the tile/label nearest to GIF.
-            return label.length <= 96 && /\bgifs?\b/i.test(label);
-        })
-        .map(node => clickableRoot(node, dialog))
-        .filter((root, index, roots) => root !== dialog && roots.indexOf(root) === index)
-        .filter(isElementVisible)
-        .map(root => ({ root, rect: root.getBoundingClientRect() }))
-        .filter(({ rect }) => rect.width >= 70 && rect.height >= 44)
-        .sort((a, b) => a.rect.width * a.rect.height - b.rect.width * b.rect.height);
-
-    return candidates[0]?.root ?? null;
-}
-
-function getClickableCandidate(container: HTMLElement, dialog: HTMLElement): HTMLElement {
-    if (container.matches("button, [role='button'], [tabindex='0'], label")) return container;
-
-    const nested = container.querySelector<HTMLElement>("button, [role='button'], [tabindex='0'], label");
-    if (nested) return nested;
-
-    // Discord occasionally puts the React onClick directly on an otherwise
-    // unannotated tile wrapper. Returning the wrapper is intentional: the input
-    // capture probe can still dispatch Discord's native click handler on it.
-    return container;
-}
-
-function findUploadTileNextToGif(dialog: HTMLElement, gifTile: HTMLElement): HTMLElement | null {
-    const gifRect = gifTile.getBoundingClientRect();
-    let branch: HTMLElement = gifTile;
-    let ancestor = gifTile.parentElement;
-
-    // Walk from the GIF tile outwards until we reach the row that owns both large
-    // picker tiles. The sibling with matching geometry is the Upload Image tile,
-    // regardless of the language of its visible label.
-    while (ancestor && ancestor !== dialog) {
-        const siblings = Array.from(ancestor.children)
-            .filter((child): child is HTMLElement => child instanceof HTMLElement && child !== branch)
-            .filter(isElementVisible)
-            .map(sibling => ({ sibling, rect: sibling.getBoundingClientRect() }))
-            .filter(({ rect }) => {
-                const sameRow = Math.abs(rect.top - gifRect.top) <= Math.max(30, gifRect.height * 0.35);
-                const similarHeight = rect.height >= gifRect.height * 0.55 && rect.height <= gifRect.height * 1.7;
-                const tileSized = rect.width >= 70 && rect.height >= 44;
-                return sameRow && similarHeight && tileSized;
-            })
-            .sort((a, b) => {
-                const aDistance = Math.abs(a.rect.left - gifRect.left);
-                const bDistance = Math.abs(b.rect.left - gifRect.left);
-                return aDistance - bDistance;
-            });
-
-        if (siblings.length) {
-            const candidate = getClickableCandidate(siblings[0].sibling, dialog);
-            if (candidate !== gifTile && !candidate.contains(gifTile) && !gifTile.contains(candidate)) {
-                return candidate;
-            }
-        }
-
-        branch = ancestor;
-        ancestor = ancestor.parentElement;
-    }
-
-    return null;
-}
-
-function findUploadTileFromLocalInput(dialog: HTMLElement): HTMLElement | null {
-    const inputs = Array.from(dialog.querySelectorAll<HTMLInputElement>("input[type='file']"))
-        .filter(isSafeProfileImageInput);
-    if (inputs.length !== 1) return null;
-
-    const input = inputs[0];
-    if (input.id) {
-        const escapedId = typeof CSS !== "undefined" && typeof CSS.escape === "function"
-            ? CSS.escape(input.id)
-            : input.id.replace(/["\\]/g, "\\$&");
-        const label = dialog.querySelector<HTMLElement>(`label[for="${escapedId}"]`);
-        if (label) return clickableRoot(label, dialog);
-    }
-
-    const parentLabel = input.closest<HTMLElement>("label");
-    if (parentLabel && dialog.contains(parentLabel)) return clickableRoot(parentLabel, dialog);
-
-    let current = input.parentElement;
-    for (let depth = 0; current && current !== dialog && depth < 6; depth++, current = current.parentElement) {
-        if (current.matches("button, [role='button'], [tabindex='0'], label")) return current;
-    }
-
-    return null;
-}
-
-function findLegacyUploadTile(dialog: HTMLElement): HTMLElement | null {
-    // Last-resort compatibility only. New locale support must not rely on this list.
-    const labels = ["Upload Image", "Subir imagen", "Cargar imagen", "Upload", "Subir"];
+function findUploadTile(dialog: HTMLElement): HTMLElement | null {
+    const labels = [
+        discordLabel("SELECT_IMAGE_MODAL_UPLOAD_FILE", "Upload Image"),
+        discordLabel("UPLOAD_IMAGE", "Upload Image"),
+        "Upload Image",
+        "Subir imagen",
+        "Cargar imagen",
+        "Upload",
+        "Subir"
+    ];
 
     for (const label of labels) {
         const match = exactText(dialog, label);
         if (match) return clickableRoot(match, dialog);
     }
 
-    return null;
-}
-
-function findUploadTile(dialog: HTMLElement): HTMLElement | null {
-    // Current Discord profile pickers expose a GIF companion tile. Pairing its
-    // sibling by layout makes Upload Image detection independent of Discord locale.
-    const gifTile = findGifTile(dialog);
-    if (gifTile) {
-        const fromPair = findUploadTileNextToGif(dialog, gifTile);
-        if (fromPair) return fromPair;
-    }
-
-    // Some Discord variants expose the actual input in the picker DOM. This is
-    // also language-independent, but comes second so unrelated upload dialogs do
-    // not outrank the characteristic profile-picker GIF pair.
-    const fromInput = findUploadTileFromLocalInput(dialog);
-    if (fromInput) return fromInput;
-
-    return findLegacyUploadTile(dialog);
+    const candidates = Array.from(dialog.querySelectorAll<HTMLElement>("button, [role='button'], label, div"));
+    return candidates.find(node => {
+        const text = (node.textContent ?? "").trim().toLowerCase();
+        const aria = (node.getAttribute("aria-label") ?? "").trim().toLowerCase();
+        const title = (node.getAttribute("title") ?? "").trim().toLowerCase();
+        return /upload|subir|cargar/.test(`${text} ${aria} ${title}`);
+    }) ?? null;
 }
 
 function logProfileInputDiagnostics(dialog: HTMLElement) {
@@ -469,10 +341,6 @@ function findDiscordImageEditorDialog(originalDialog: HTMLElement): HTMLElement 
     const candidates = Array.from(document.querySelectorAll<HTMLElement>("[role='dialog']"));
 
     return candidates.find(candidate => {
-        // Discord may keep a finished editor mounted but hidden for reuse. Treat
-        // hidden dialogs as closed so Cancel works in every locale even when the
-        // button label itself is unknown to Pinterest Tool.
-        if (!isElementVisible(candidate)) return false;
         // Ignore the original "Select an Image" dialog itself — it can still
         // contain matching words mid-transition, which previously caused a
         // false positive: we'd close the Pinterest modal thinking the real
@@ -481,10 +349,10 @@ function findDiscordImageEditorDialog(originalDialog: HTMLElement): HTMLElement 
         if (candidate === originalDialog || originalDialog.contains(candidate)) return false;
 
         const text = candidate.textContent ?? "";
-        const hasEditorText =
-            /Edit\s+Image|Editar\s+imagen/i.test(text)
-            || (/\bReset\b/i.test(text) && /\bApply\b/i.test(text) && /\bCancel\b/i.test(text))
-            || (/\bRestablecer\b/i.test(text) && /\bAplicar\b/i.test(text) && /\bCancelar\b/i.test(text));
+        const editImage = discordLabel("EDIT_IMAGE", "Edit Image");
+        const hasEditorText = text.includes(editImage)
+            && text.includes(discordLabel("APPLY", "Apply"))
+            && text.includes(discordLabel("CANCEL", "Cancel"));
 
         // Some Discord builds (and the banner editor specifically) may not use
         // this exact wording. Fall back to detecting the actual crop/zoom
@@ -512,109 +380,6 @@ async function hasDiscordImageEditor(originalDialog: HTMLElement, settleMs = 220
 
 type DiscordImageEditorOutcome = "APPLIED" | "CANCELLED";
 
-function getEditorControlLabel(element: HTMLElement) {
-    return [
-        element.textContent,
-        element.getAttribute("aria-label"),
-        element.getAttribute("title")
-    ].filter(Boolean).join(" ").trim();
-}
-
-function getBackgroundAlpha(element: HTMLElement) {
-    const color = getComputedStyle(element).backgroundColor.trim();
-    if (!color || color === "transparent") return 0;
-
-    const rgba = /^rgba?\(([^)]+)\)$/i.exec(color);
-    if (!rgba) return 1;
-
-    const parts = rgba[1].split(",").map(part => part.trim());
-    return parts.length >= 4 ? Number(parts[3]) || 0 : 1;
-}
-
-function isControlInsideEditor(control: HTMLElement, editor: HTMLElement) {
-    if (editor.contains(control)) return true;
-
-    // Some Discord builds portal footer controls. Geometry keeps this association
-    // locale-independent without accepting unrelated buttons elsewhere on screen.
-    const editorRect = editor.getBoundingClientRect();
-    const controlRect = control.getBoundingClientRect();
-    const x = controlRect.left + controlRect.width / 2;
-    const y = controlRect.top + controlRect.height / 2;
-    return x >= editorRect.left - 16
-        && x <= editorRect.right + 16
-        && y >= editorRect.top - 16
-        && y <= editorRect.bottom + 32;
-}
-
-function getEditorFooterButtons(editor: HTMLElement, clicked: HTMLElement) {
-    const editorRect = editor.getBoundingClientRect();
-    const clickedRect = clicked.getBoundingClientRect();
-    const clickedCenterY = clickedRect.top + clickedRect.height / 2;
-
-    return Array.from(document.querySelectorAll<HTMLElement>("button, [role='button']"))
-        .filter(isElementVisible)
-        .filter(button => isControlInsideEditor(button, editor))
-        .filter(button => {
-            const rect = button.getBoundingClientRect();
-            const centerY = rect.top + rect.height / 2;
-            const inFooter = centerY >= editorRect.top + editorRect.height * 0.55;
-            const sameRow = Math.abs(centerY - clickedCenterY) <= Math.max(18, clickedRect.height * 0.7);
-            return inFooter && sameRow && rect.width >= 48 && rect.height >= 24 && rect.height <= 64;
-        });
-}
-
-function classifyEditorControl(control: HTMLElement, editor: HTMLElement): DiscordImageEditorOutcome | null {
-    const label = getEditorControlLabel(control);
-
-    // Preserve the known labels as a compatibility fast path.
-    if (/^(?:Apply|Aplicar)$/i.test(label)) return "APPLIED";
-    if (/^(?:Cancel|Cancelar)$/i.test(label)) return "CANCELLED";
-
-    if (!isControlInsideEditor(control, editor)) return null;
-
-    // Native form semantics are language-independent and are the strongest Apply signal.
-    const type = control instanceof HTMLButtonElement ? control.type : control.getAttribute("type");
-    if (type?.toLowerCase() === "submit") return "APPLIED";
-
-    const buttons = getEditorFooterButtons(editor, control);
-    if (buttons.length < 2) return null;
-
-    const primaryScore = (button: HTMLElement) => {
-        const classText = typeof button.className === "string" ? button.className : "";
-        const buttonType = button instanceof HTMLButtonElement ? button.type : button.getAttribute("type");
-        let score = 0;
-
-        if (buttonType?.toLowerCase() === "submit") score += 100;
-        // Discord class names are hashed, but semantic fragments such as lookFilled
-        // and colorBrand have historically remained useful hints. They are only a
-        // fallback signal; locale text is never required.
-        if (/lookFilled|colorBrand|buttonColor/i.test(classText)) score += 30;
-        if (/lookLink|lookBlank/i.test(classText)) score -= 15;
-        score += getBackgroundAlpha(button) * 10;
-        return score;
-    };
-
-    const ranked = buttons
-        .map(button => ({ button, score: primaryScore(button) }))
-        .sort((a, b) => b.score - a.score);
-
-    const primary = ranked[0];
-    const second = ranked[1];
-    if (primary && primary.score >= 4.5 && (!second || primary.score - second.score >= 2.5)) {
-        if (primary.button === control) return "APPLIED";
-
-        const primaryRect = primary.button.getBoundingClientRect();
-        const controlRect = control.getBoundingClientRect();
-        const gap = Math.max(
-            0,
-            Math.max(primaryRect.left, controlRect.left) - Math.min(primaryRect.right, controlRect.right)
-        );
-        if (gap <= 220) return "CANCELLED";
-    }
-
-    return null;
-}
-
 async function waitForDiscordImageEditorOutcome(
     originalDialog: HTMLElement,
     onApplyStart?: () => void
@@ -625,122 +390,54 @@ async function waitForDiscordImageEditorOutcome(
     console.info("[PinterestTool] Edit lifecycle: editor opened; keeping Pinterest underneath until Apply/Cancel.");
 
     return await new Promise(resolve => {
+        const apply = discordLabel("APPLY", "Apply");
+        const cancel = discordLabel("CANCEL", "Cancel");
         let pendingAction: DiscordImageEditorOutcome | null = null;
         let settled = false;
-
-        const cleanup = () => {
-            document.removeEventListener("click", onDocumentClick, true);
-            document.removeEventListener("keydown", onDocumentKeyDown, true);
-            document.removeEventListener("submit", onDocumentSubmit, true);
-            observer.disconnect();
-        };
 
         const finish = (outcome: DiscordImageEditorOutcome) => {
             if (settled) return;
             settled = true;
-            cleanup();
+            editor.removeEventListener("click", onEditorClick, true);
+            observer.disconnect();
             resolve(outcome);
         };
 
-        const onDocumentClick = (event: Event) => {
-            // Listen at document capture level rather than on the editor element.
-            // Discord can portal/re-parent the editor footer controls and can also
-            // unmount/reuse the dialog during the same click. In either case an
-            // editor-local listener may never observe Apply/Cancel, leaving the
-            // Pinterest selection lock active forever.
+        const onEditorClick = (event: Event) => {
             const target = event.target instanceof Element
                 ? event.target.closest<HTMLElement>("button, [role='button']")
                 : null;
-            if (!target) return;
+            if (!target || !editor.contains(target)) return;
 
-            const activeEditor = findDiscordImageEditorDialog(originalDialog);
-            if (!activeEditor && !editor.isConnected) return;
-
-            const action = activeEditor ? classifyEditorControl(target, activeEditor) : null;
-
-            if (action === "APPLIED") {
+            const labels = [target.textContent, target.getAttribute("aria-label"), target.getAttribute("title")]
+                .map(value => value?.trim().toLocaleLowerCase());
+            if (labels.includes(apply.toLocaleLowerCase())) {
                 pendingAction = "APPLIED";
-
-                // Close Pinterest while Discord's editor is still above it, then
-                // resolve immediately. Do not wait for Discord to physically remove
-                // the editor node because current builds may reuse/hide that node.
+                // Remove the Pinterest layer before Discord removes Edit Image. This
+                // prevents the brief Pinterest flash that otherwise appears on Apply.
                 onApplyStart?.();
-                console.info("[PinterestTool] Edit lifecycle: Apply selected.");
-                finish("APPLIED");
-                return;
-            }
-
-            if (action === "CANCELLED") {
+                console.info("[PinterestTool] Edit lifecycle: Apply selected; Pinterest closed before editor transition.");
+            } else if (labels.includes(cancel.toLocaleLowerCase())) {
                 pendingAction = "CANCELLED";
-
-                // Cancel should immediately release Pinterest's selection lock so
-                // another result can be chosen as soon as the picker is revealed.
-                console.info("[PinterestTool] Edit lifecycle: Cancel selected.");
-                finish("CANCELLED");
-                return;
+                console.info("[PinterestTool] Edit lifecycle: Cancel selected; Pinterest will remain open.");
             }
-
-            const ariaLabel = target.getAttribute("aria-label")?.trim() ?? "";
-            const title = target.getAttribute("title")?.trim() ?? "";
-            if (/^(?:Close|Cerrar)$/i.test(ariaLabel) || /^(?:Close|Cerrar)$/i.test(title)) {
-                finish("CANCELLED");
-                return;
-            }
-
-            // Unknown localized footer labels are still safe: after Discord handles
-            // the click, the visibility-aware observer below sees a hidden/replaced
-            // editor and releases the lock as Cancel unless an Apply signal occurred.
-        };
-
-        const onDocumentSubmit = (event: Event) => {
-            if (settled) return;
-
-            const activeEditor = findDiscordImageEditorDialog(originalDialog);
-            if (!activeEditor) return;
-
-            const form = event.target instanceof HTMLFormElement ? event.target : null;
-            if (!form) return;
-            if (!activeEditor.contains(form) && !form.contains(activeEditor)) return;
-
-            pendingAction = "APPLIED";
-            onApplyStart?.();
-            console.info("[PinterestTool] Edit lifecycle: Apply submitted.");
-            finish("APPLIED");
-        };
-
-        const onDocumentKeyDown = (event: KeyboardEvent) => {
-            if (event.key === "Escape") finish("CANCELLED");
         };
 
         const observer = new MutationObserver(() => {
-            if (settled) return;
+            if (editor.isConnected) return;
 
-            // If Discord really removes the editor, preserve the old fallback.
-            if (!editor.isConnected) {
-                finish(pendingAction ?? "CANCELLED");
-                return;
-            }
-
-            // Some Discord builds keep the same dialog node mounted but remove the
-            // editor contents / replace it with another dialog. Treat that as closed.
-            const currentEditor = findDiscordImageEditorDialog(originalDialog);
-            if (!currentEditor) {
-                finish(pendingAction ?? "CANCELLED");
-            }
+            // Closing with Escape/X/no explicit action is equivalent to Cancel:
+            // keep the Pinterest picker and its current search state available.
+            const outcome = pendingAction ?? "CANCELLED";
+            console.info(`[PinterestTool] Edit lifecycle: editor closed with ${outcome.toLowerCase()} outcome.`);
+            finish(outcome);
         });
 
-        document.addEventListener("click", onDocumentClick, true);
-        document.addEventListener("keydown", onDocumentKeyDown, true);
-        document.addEventListener("submit", onDocumentSubmit, true);
-        observer.observe(document.body, {
-            childList: true,
-            subtree: true,
-            attributes: true,
-            attributeFilter: ["class", "style", "aria-hidden", "data-state"]
-        });
+        editor.addEventListener("click", onEditorClick, true);
+        observer.observe(document.body, { childList: true, subtree: true });
 
-        // Handle the race where Discord closes/replaces the editor before the
-        // listeners/observer finish attaching.
+        // The editor can disappear between detection and observer setup. Handle
+        // that race as a cancellation instead of falling through to direct apply.
         if (!editor.isConnected) finish("CANCELLED");
     });
 }
@@ -758,10 +455,7 @@ async function captureDiscordProfileInput(dialog: HTMLElement): Promise<HTMLInpu
     const originalClick = inputPrototype.click;
     const originalShowPicker = (inputPrototype as any).showPicker as ((this: HTMLInputElement) => void) | undefined;
 
-    const probe = {
-        captured: null as HTMLInputElement | null,
-        rejected: null as HTMLInputElement | null
-    };
+    const probe: { captured: HTMLInputElement | null; rejected: HTMLInputElement | null; } = { captured: null, rejected: null };
 
     const capture = (input: HTMLInputElement) => {
         if (input.type !== "file") return false;
@@ -812,24 +506,23 @@ async function captureDiscordProfileInput(dialog: HTMLElement): Promise<HTMLInpu
         if (originalShowPicker) (inputPrototype as any).showPicker = originalShowPicker;
     }
 
-    const { captured, rejected } = probe;
-    if (captured) {
+    if (probe.captured) {
         console.info("[PinterestTool] Edit handoff: captured Discord's profile upload input without opening the OS picker.", {
-            insideDialog: dialog.contains(captured),
-            accept: captured.accept,
-            multiple: captured.multiple,
-            id: captured.id || null,
-            name: captured.name || null
+            insideDialog: dialog.contains(probe.captured),
+            accept: probe.captured.accept,
+            multiple: probe.captured.multiple,
+            id: probe.captured.id || null,
+            name: probe.captured.name || null
         });
-        return captured;
+        return probe.captured;
     }
 
-    if (rejected) {
+    if (probe.rejected) {
         console.warn("[PinterestTool] Edit handoff: Discord requested a non-profile/multi-file input; refusing it.", {
-            accept: rejected.accept,
-            multiple: rejected.multiple,
-            id: rejected.id || null,
-            name: rejected.name || null
+            accept: probe.rejected.accept,
+            multiple: probe.rejected.multiple,
+            id: probe.rejected.id || null,
+            name: probe.rejected.name || null
         });
     }
 
@@ -884,20 +577,12 @@ function PinterestMark() {
     mark.className = "vc-pinterest-tool-mark";
     mark.setAttribute("aria-hidden", "true");
 
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.setAttribute("viewBox", "0 0 24 24");
-    svg.setAttribute("width", "15");
-    svg.setAttribute("height", "15");
-    svg.setAttribute("fill", "currentColor");
-
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute(
-        "d",
-        "M12 0C5.4 0 0 5.4 0 12c0 5.1 3.2 9.4 7.6 11.1-.1-.9-.2-2.3 0-3.3.2-.9 1.3-5.6 1.3-5.6s-.3-.7-.3-1.6c0-1.5.9-2.7 2-2.7.9 0 1.4.7 1.4 1.6 0 1-.6 2.4-1 3.7-.3 1.1.5 2 1.6 2 1.9 0 3.4-2 3.4-5 0-2.6-1.9-4.5-4.6-4.5-3.1 0-5 2.3-5 4.8 0 .9.3 1.8.8 2.4.1.1.1.2 0 .3l-.3 1.2c-.1.2-.2.3-.4.2-1.5-.7-2.4-2.8-2.4-4.6 0-3.7 2.7-7.2 7.8-7.2 4.1 0 7.3 2.9 7.3 6.8 0 4.1-2.6 7.3-6.1 7.3-1.2 0-2.3-.6-2.7-1.4l-.7 2.8c-.3 1-1 2.3-1.4 3.1.1 0 .2.1.3.1 1.1.4 2.2.6 3.4.6 6.6 0 12-5.4 12-12S18.6 0 12 0z"
-    );
-
-    svg.append(path);
-    mark.append(svg);
+    const icon = document.createElement("img");
+    icon.src = PLUGIN_ICON;
+    icon.alt = "";
+    icon.draggable = false;
+    icon.className = "vc-pinterest-tool-mark-icon";
+    mark.append(icon);
     return mark;
 }
 
@@ -910,7 +595,8 @@ function buildPinterestEntry(
     const entry = document.createElement("button");
     entry.className = "vc-pinterest-tool-profile-entry";
     entry.setAttribute("data-vc-pinterest-tool", "true");
-    entry.setAttribute("aria-label", target === "BANNER" ? "Find a banner on Pinterest" : "Find an icon on Pinterest");
+    const label = `Pinterest Tool · ${t(target === "BANNER" ? "banner" : "avatar")}`;
+    entry.setAttribute("aria-label", label);
     entry.setAttribute("tabindex", "0");
     if (!entry.hasAttribute("role")) entry.setAttribute("role", "button");
     entry.type = "button";
@@ -919,7 +605,7 @@ function buildPinterestEntry(
 
     const text = document.createElement("div");
     text.className = "vc-pinterest-tool-profile-entry-text";
-    text.textContent = target === "BANNER" ? "Find a banner on Pinterest" : "Find an icon on Pinterest";
+    text.textContent = label;
     entry.append(text);
 
     const activate = (event: Event) => {
@@ -931,6 +617,7 @@ function buildPinterestEntry(
         openModal(props => (
             <WrappedPinterestProfileModal
                 {...props}
+                title="Pinterest Tool"
                 target={liveTarget}
                 onEditFile={(file, onApplyStart) => handoffToDiscordImageEditor(dialog, file, onApplyStart)}
                 onApplied={() => closeDiscordImageModal(dialog)}
@@ -947,43 +634,51 @@ function buildPinterestEntry(
 }
 
 function enhanceImageDialog(dialog: HTMLElement) {
-    if (dialog.querySelector("[data-vc-pinterest-tool='true']")) return;
-    if (!isElementVisible(dialog)) return;
+    const existing = dialog.querySelector<HTMLElement>("[data-vc-pinterest-tool='true']");
+    if (existing) {
+        const label = `Pinterest Tool · ${t(getTarget(dialog) === "BANNER" ? "banner" : "avatar")}`;
+        if (existing.getAttribute("aria-label") !== label) {
+            existing.setAttribute("aria-label", label);
+            const text = existing.querySelector(".vc-pinterest-tool-profile-entry-text");
+            if (text) text.textContent = label;
+        }
+        return;
+    }
 
-    // The crop/zoom editor is a different Discord modal and must never receive a
-    // Pinterest entry even if a future build happens to expose a file input there.
-    if (dialog.querySelector("canvas, input[type='range']")) return;
+    const uploadText = exactText(dialog, discordLabel("SELECT_IMAGE_MODAL_UPLOAD_FILE", "Upload Image"))
+        ?? exactText(dialog, discordLabel("UPLOAD_IMAGE", "Upload Image"))
+        ?? exactText(dialog, "Upload Image");
+    const gifText = exactText(dialog, discordLabel("SELECT_IMAGE_MODAL_CHOOSE_GIF", "Choose GIF"))
+        ?? exactText(dialog, "Choose GIF");
+    if (!uploadText || !gifText) return;
 
-    // Never key Pinterest Tool activation to Discord's translated copy. Locate the
-    // profile image picker from its real controls/geometry instead; Pinterest Tool's
-    // own UI intentionally remains English for every Discord locale.
-    const uploadTile = findUploadTile(dialog);
-    if (!uploadTile) return;
-
-    const gifTile = findGifTile(dialog);
-    const row = gifTile ? commonAncestor(uploadTile, gifTile, dialog) : null;
-    const anchor = row ?? uploadTile;
+    const uploadTile = clickableRoot(uploadText, dialog);
+    const gifTile = clickableRoot(gifText, dialog);
+    const row = commonAncestor(uploadTile, gifTile, dialog);
+    if (!row) return;
 
     const target = getTarget(dialog);
     const entry = buildPinterestEntry(dialog, target);
 
-    // Keep Discord's native tiles untouched and place the compact Pinterest button
-    // underneath the picker row. GIF is optional so a Discord UI variant without a
-    // GIF tile can still expose Pinterest through an explicit profile image input.
-    anchor.insertAdjacentElement("afterend", entry);
+    // Keep Discord's original two large tiles untouched and place a compact Pinterest
+    // button immediately underneath them. This avoids stretching the image picker.
+    row.insertAdjacentElement("afterend", entry);
+
+    // Open the Pinterest session now, while the user is still looking at the
+    // picker, so the first search does not wait for it.
+    void Native.warmUp();
 }
 
 function scanForImageDialogs() {
-    scanQueued = false;
-
     const dialogs = document.querySelectorAll<HTMLElement>("[role='dialog']");
-    for (const dialog of dialogs) enhanceImageDialog(dialog);
+    for (const dialog of dialogs) {
+        if (!dialog.classList.contains("vc-pinterest-tool-profile-modal")) enhanceImageDialog(dialog);
+    }
 }
 
 function queueScan() {
-    if (scanQueued) return;
-    scanQueued = true;
-    requestAnimationFrame(scanForImageDialogs);
+    if (scanFrame) return;
+    scanFrame = requestAnimationFrame(() => { scanFrame = 0; scanForImageDialogs(); });
 }
 
 function removeInjectedEntries() {
@@ -992,7 +687,7 @@ function removeInjectedEntries() {
 
 export default definePlugin({
     name: "Pinterest Tool",
-    description: "Adds Pinterest search to Discord's avatar and banner picker, with GIFs, favorites, themes and image editing—no manual downloads.",
+    description: "Find profile icons and banners on Pinterest, then edit them before applying.",
     tags: ["Utility", "Customisation"],
     authors: [TestcordDevs.szcx404],
     settings,
@@ -1001,11 +696,22 @@ export default definePlugin({
     start() {
         document.addEventListener("pointerdown", rememberProfileImageTarget, true);
         queueScan();
-        observer = new MutationObserver(queueScan);
+        observer = new MutationObserver(records => {
+            const relevant = records.some(record => {
+                const parent = record.target instanceof Element ? record.target : record.target.parentElement;
+                if (parent?.closest(".vc-pinterest-tool-profile-modal")) return false;
+                if (parent?.closest("[role='dialog']")) return true;
+                return Array.from(record.addedNodes).some(node => node instanceof Element
+                    && (node.matches("[role='dialog']") || node.querySelector("[role='dialog']")));
+            });
+            if (relevant) queueScan();
+        });
         observer.observe(document.body, { childList: true, subtree: true });
     },
 
     stop() {
+        if (scanFrame) cancelAnimationFrame(scanFrame);
+        scanFrame = 0;
         document.removeEventListener("pointerdown", rememberProfileImageTarget, true);
         observer?.disconnect();
         observer = null;

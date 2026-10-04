@@ -18,7 +18,7 @@
 
 import type { MessageObject } from "@api/MessageEvents";
 import type { BasicGuild, Channel, CloudUpload, Guild, GuildFeatures, GuildProfile, MediaModalItem, MediaModalProps, Message, User } from "@vencord/discord-types";
-import { ChannelActionCreators, ChannelStore, ComponentDispatch, Constants, FluxDispatcher, GuildStore, i18n, InviteActions, MessageActions, openMediaModal, RestAPI, SelectedChannelStore, SelectedGuildStore, Toasts, UserProfileActions, UserProfileStore, UserSettingsActionCreators, UserUtils } from "@webpack/common";
+import { ChannelActionCreators, ChannelStore, ComponentDispatch, Constants, FluxDispatcher, GuildStore, i18n, InviteActions, MessageActions, openMediaModal, openUserProfileModal, RestAPI, SelectedChannelStore, SelectedGuildStore, Toasts, UserProfileStore, UserSettingsActionCreators, UserUtils } from "@webpack/common";
 import { Except } from "type-fest";
 
 import { copyToClipboard } from "./clipboard";
@@ -196,10 +196,14 @@ export async function openUserProfile(id: string) {
     if (!user) throw new Error("No such user: " + id);
 
     const guildId = SelectedGuildStore.getGuildId();
-    UserProfileActions.openUserProfileModal({
+    openUserProfileModal({
         userId: id,
         guildId,
         channelId: SelectedChannelStore.getChannelId(),
+        sourceAnalyticsLocations: [
+            "username",
+            "user profile popout",
+        ]
     });
 }
 

@@ -94,11 +94,18 @@ test("the implementation matches the model: settings, verification and outcome m
     assert.match(source, /default: 3,/, "deleteRetries should default to 3");
     assert.match(source, /verifyAfterFailure: \{/, "verifyAfterFailure setting must exist");
 
-    // Only a 404 proves the message is gone; anything else stays inconclusive.
-    assert.match(source, /const statusCode = error\?\.status \|\| error\?\.statusCode;\s*\n\s*return statusCode === 404;/);
+    // Only a 404 proves the message is gone; anything else stays inconclusive. The status
+    // is read through the asRestError helper so a thrown string or plain object is handled.
+    const gone = source.match(/async function isMessageGone[\s\S]*?\n\}/);
+    assert.ok(gone, "isMessageGone not found");
+    assert.match(gone[0], /errorStatus\(error\) === 404;/, "only a 404 may count as gone");
+    assert.match(source, /function errorStatus\(error: unknown\): number \| undefined \{\s*\n\s*return asRestError\(error\)\.status;/);
 
-    // Retries must be paced, not fired back to back.
-    assert.match(source, /await waitCleaningDelay\(settings\.store\.delayBetweenDeletes\);/);
+    // Retries must be paced, not fired back to back, and a server supplied retry_after
+    // takes precedence over the configured delay.
+    assert.match(source, /function retryDelayFor\(error: unknown, fallback: number\): number \{/);
+    assert.match(source, /const wait = retryDelayFor\(lastError, settings\.store\.delayBetweenDeletes\);/);
+    assert.match(source, /await waitCleaningDelay\(wait\);/);
 
     // Cancellation is checked before each request and after each await.
     assert.match(source, /if \(isCancelled\(\)\) return "failed";/);

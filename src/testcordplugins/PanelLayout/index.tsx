@@ -17,8 +17,10 @@ import { AppsIcon, ScreenshareIcon, VideoIcon } from "@components/Icons";
 import { Paragraph } from "@components/Paragraph";
 import { getTestcordIconColor, ICON_COLOR_FALLBACK } from "@testcordplugins/TestcordHelper/iconColors";
 import { TestcordDevs } from "@utils/constants";
+import { classNameToSelector } from "@utils/css";
 import definePlugin, { makeRange, OptionType } from "@utils/types";
 import type { RenderModalProps } from "@vencord/discord-types";
+import { findCssClassesLazy } from "@webpack";
 import { Modal, openModalLazy, React, Select, Slider } from "@webpack/common";
 
 import {
@@ -436,6 +438,7 @@ function stopObserver() {
 
 const STYLE_ID = "deracul-panel-layout";
 const CUSTOM_STYLE_ID = "deracul-panel-custom";
+const VoicePanelClasses = findCssClassesLazy("wrapper", "container", "actionButtons");
 
 function gridCSS(selector: string, cols: number, gap: number) {
     return `
@@ -936,9 +939,8 @@ function buildCustomCSS(): string {
 
             if (item.type === "voice-connected") {
                 lines.push(`
-                    section[class*="panels_"] > ${S.callContainer},
-                    section[class*="panels_"] > [class*="container_e131a9"],
-                    section[class*="panels_"] > div:has(${S.callControls}) {
+                    section[class*="panels_"] > ${classNameToSelector(VoicePanelClasses.wrapper)},
+                    section[class*="panels_"] > ${classNameToSelector(VoicePanelClasses.container)} {
                         order: ${orderVal} !important;
                         ${hiddenStyle}
                     }

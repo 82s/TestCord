@@ -1,10 +1,10 @@
-/* eslint-disable simple-header/header -- This standalone user plugin is MIT licensed. */
 /*
- * VoiceVUMeters
- * Copyright (c) 2026 DavidHiFi
- * Copyright (c) 2026 Kurtzon Audio
- * SPDX-License-Identifier: MIT
- *
+ * Vencord, a Discord client mod
+ * Copyright (c) 2026 Vendicated and contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+/*
  * Based on Kurtzon Audio's VoiceVUMeters as shipped in Kurtcord 2.7.5. Adds a level
  * source for Discord Desktop using participant PCM from the native stereo bridge,
  * and re-targets the voice list patch at the current client.

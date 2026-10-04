@@ -28,37 +28,37 @@ function togglePlugin(plugin: Plugin) {
     if (!wasEnabled) {
         const { restartNeeded, failures } = startDependenciesRecursive(plugin);
         if (failures.length) {
-            showToast(`Failed to start dependencies: ${failures.join(", ")}`, Toasts.Type.FAILURE);
+            showToast(`Failed to start dependencies: ${failures.join(", ")}`, "failure");
             return;
         }
         if (restartNeeded) {
             pluginSettings.enabled = true;
-            showToast(`${plugin.name} enabled. Restart to apply.`, Toasts.Type.MESSAGE);
+            showToast(`${plugin.name} enabled. Restart to apply.`, "message");
             return;
         }
     }
 
     if (pluginRequiresRestart(plugin)) {
         pluginSettings.enabled = !wasEnabled;
-        showToast(`${plugin.name} ${wasEnabled ? "disabled" : "enabled"}. Restart to apply.`, Toasts.Type.MESSAGE);
+        showToast(`${plugin.name} ${wasEnabled ? "disabled" : "enabled"}. Restart to apply.`, "message");
         return;
     }
 
     if (wasEnabled && !plugin.started) {
         pluginSettings.enabled = false;
-        showToast(`${plugin.name} disabled.`, Toasts.Type.SUCCESS);
+        showToast(`${plugin.name} disabled.`, "success");
         return;
     }
 
     const result = wasEnabled ? stopPlugin(plugin) : startPlugin(plugin);
     if (!result) {
         pluginSettings.enabled = false;
-        showToast(`Error while ${wasEnabled ? "stopping" : "starting"} ${plugin.name}.`, Toasts.Type.FAILURE);
+        showToast(`Error while ${wasEnabled ? "stopping" : "starting"} ${plugin.name}.`, "failure");
         return;
     }
 
     pluginSettings.enabled = !wasEnabled;
-    showToast(`${plugin.name} ${wasEnabled ? "disabled" : "enabled"}.`, Toasts.Type.SUCCESS);
+    showToast(`${plugin.name} ${wasEnabled ? "disabled" : "enabled"}.`, "success");
 }
 
 function pluginItems(): PaletteListItem[] {
