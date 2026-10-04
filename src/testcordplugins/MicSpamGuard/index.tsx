@@ -1,13 +1,7 @@
-/* eslint-disable simple-header/header -- This standalone user plugin is MIT licensed. */
 /*
- * MicSpamGuard
- * Copyright (c) 2026 Kurtzon Audio
- * Copyright (c) 2026 DavidHiFi
- * SPDX-License-Identifier: MIT
- *
- * Rebuilt on the media engine stats the desktop client actually provides,
- * with snap settings, a user area button, a dynamic user volume mode and
- * a live panel that follows voice channel membership.
+ * Vencord, a Discord client mod
+ * Copyright (c) 2024 Vendicated and contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 import { DataStore } from "@api/index";

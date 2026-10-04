@@ -1,6 +1,6 @@
 # MicSpamGuard
 
-Fork of Kurtzon Audio's plugin, maintained by DavidHiFi. Smoothly balances incoming voice levels and holds sustained extreme loudness at local volume zero. MIT licensed; original author credit retained.
+Fork of Kurtzon Audio's plugin, maintained by DavidHiFi. Smoothly balances incoming voice levels and holds sustained extreme loudness at local volume zero. TestCord source uses the required GPL-3.0-or-later Vencord header; the original MIT grant remains in LICENSE; original author credit retained.
 
 ## Recovery
 

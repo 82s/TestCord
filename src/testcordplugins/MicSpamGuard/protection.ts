@@ -1,5 +1,8 @@
-/* eslint-disable simple-header/header -- This standalone user plugin is MIT licensed. */
-/* Copyright (c) 2026 DavidHiFi. SPDX-License-Identifier: MIT */
+/*
+ * Vencord, a Discord client mod
+ * Copyright (c) 2024 Vendicated and contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
 
 // MicSpamGuard can recover after inactivity; other guards require fresh safe evidence.
 export class VolumeHold {
