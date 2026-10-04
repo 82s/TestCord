@@ -192,6 +192,7 @@ static napi_value read(napi_env env, napi_callback_info) {
         number(env, obj, "channels", static_cast<double>(level.channels));
         number(env, obj, "sampleFrames", static_cast<double>(level.frames));
         number(env, obj, "rmsLeft", level.rms[0]); number(env, obj, "rmsRight", level.rms[1]);
+        number(env, obj, "rmsMid", level.mid); number(env, obj, "rmsSide", level.side);
         number(env, obj, "peakLeft", level.peak[0]); number(env, obj, "peakRight", level.peak[1]);
         p_napi_set_element(env, array, index++, obj);
     }
