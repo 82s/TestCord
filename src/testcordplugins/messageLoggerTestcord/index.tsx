@@ -21,15 +21,20 @@ import { removeLoggerContextMenus, setupLoggerContextMenus } from "./contextMenu
 import { getAllHistoryForChannel, getChannelLogsAfter, getChannelLogsLimit, getDatabase } from "./db";
 import {
     cacheChannelMessages,
+    channelAllDeleted,
+    channelAllEdited,
+    channelSnapshotVersions,
     clearAllLogs,
     clearTempClearedEdits,
     flushQueuedLogs,
+    forgetChannelSnapshots,
     getCachedLoggedMessage,
     handleMessageCreate,
     handleMessageDelete,
     handleMessageDeleteBulk,
     handleMessageUpdate,
     invalidateChannelCache,
+    isCurrentSnapshot,
     isEditHistoryNewer,
     isEditHistoryTempCleared,
     isHistoryNewer,
@@ -42,8 +47,10 @@ import {
     rememberLiveMessages,
     runMaintenanceNow,
     shouldIgnore,
+    snapshotVersion,
     startEngine,
-    stopEngine
+    stopEngine,
+    touchChannelSnapshot
 } from "./engine";
 import { importMleLogs, importMleSettings } from "./io";
 import { openLogs } from "./LogsModal";
@@ -51,7 +58,7 @@ import { osintScanLoggedMessages } from "./osintBridge";
 import { ensureDefaultDir, restoreAttachmentBlobs } from "./saveImage";
 import { settings } from "./settings";
 import type { EditRecord, FetchMessagesResponse, LoadMessagesPayload, LoggedMessage, LogRecord, MessageCreatePayload, MessageDeleteBulkPayload, MessageDeletePayload, MessageUpdatePayload } from "./types";
-import { cl } from "./utils";
+import { cl, embedFingerprint, embedHasBody, withValidEmbedTimestamps } from "./utils";
 
 const log = new Logger("MessageLoggerTestcord");
 const HEADER_SETTINGS = ["showLogsButton"] as const;
@@ -153,11 +160,7 @@ async function processMessageFetch(response: FetchMessagesResponse) {
             const visible = visibleDeletedRecords(channelId);
             if (visible.length) {
                 try { cacheChannelMessages(visible); } catch { }
-                for (const rec of visible) {
-                    if (rec.message.attachments?.length) {
-                        try { await restoreAttachmentBlobs(rec.message.attachments); } catch { }
-                    }
-                }
+                restoreLoggedAttachments(visible);
                 // Skip rows whose stored message is not a usable object: those are
                 // what used to reach Discord as a bare id and break the channel.
                 response.body.extra = visible.map(record => record.message).filter(isValidMessage);
@@ -193,11 +196,7 @@ async function processMessageFetch(response: FetchMessagesResponse) {
         }
         if (combined.length) {
             try { cacheChannelMessages(combined); } catch { }
-            for (const rec of combined) {
-                if (rec.message.attachments?.length) {
-                    try { await restoreAttachmentBlobs(rec.message.attachments); } catch { }
-                }
-            }
+            restoreLoggedAttachments(combined);
             response.body.extra = combined.map(record => record.message).filter(isValidMessage);
         }
         const history = channelAllEdited.get(channelId) ?? await getAllHistoryForChannel(channelId);
@@ -208,23 +207,22 @@ async function processMessageFetch(response: FetchMessagesResponse) {
         // A MESSAGE_DELETE only reaches us for channels this client is subscribed to, so a
         // deletion elsewhere (another server) is never recorded. Now that we hold an
         // authoritative window of this channel's history, use it to catch up.
-        try {
-            const presentIds = new Set<string>();
-            for (const message of response.body) {
-                if (message && typeof message.id === "string") presentIds.add(message.id);
-            }
-            const marked = await reconcileDeletedInWindow(
-                channelId,
-                presentIds,
-                Date.parse(String(oldestMessage.timestamp)),
-                Date.parse(newestTs)
-            );
-            if (marked.length) {
-                log.info(`Reconciled ${marked.length} deleted message(s) missing from ${channelId}`);
-            }
-        } catch (error) {
-            log.error("Failed to reconcile deleted messages", error);
+        //
+        // Not awaited: this patch runs inside the fetch the channel is waiting on, and
+        // reconciliation is a catch-up pass over the DB. Blocking the paint on it is what
+        // turned a busy channel switch into a stall.
+        const presentIds = new Set<string>();
+        for (const message of response.body) {
+            if (message && typeof message.id === "string") presentIds.add(message.id);
         }
+        void reconcileDeletedInWindow(
+            channelId,
+            presentIds,
+            Date.parse(String(oldestMessage.timestamp)),
+            Date.parse(newestTs)
+        ).then(marked => {
+            if (marked.length) log.info(`Reconciled ${marked.length} deleted message(s) missing from ${channelId}`);
+        }).catch(error => log.error("Failed to reconcile deleted messages", error));
         const historyMap = new Map<string, LogRecord>();
         for (const record of history) {
             if (!isEditHistoryTempCleared(record.message_id)) historyMap.set(record.message_id, record);
@@ -311,9 +309,18 @@ function mergeLoadedMessages(messages: LoggedMessage[] & { extra?: LoggedMessage
     dropNonObjectMentions(extra);
     delete messages.extra;
 
+    // The channel this load is for. processMessageFetch attaches the rows it picked
+    // without re-checking the fetch's own channel: an empty fetch resolves with
+    // nothing in the body to identify it, so it reads SelectedChannelStore instead,
+    // which by then can name a different channel. Anything fetched at the same time
+    // as a channel switch is enough to land another channel's logs in this one, so
+    // the rows are dropped unless they belong to the channel being loaded.
+    const targetChannelId = payload.channelId ?? messages[0]?.channel_id ?? SelectedChannelStore.getChannelId();
+    const ownChannel = extra.filter(message => !message.channel_id || message.channel_id === targetChannelId);
+
     if (messages.length === 0) {
         // Empty channel (e.g. #pending after all accepted) — show all deleted logs for it
-        const sorted = [...extra].sort((a, b) => Date.parse(String(b.timestamp)) - Date.parse(String(a.timestamp)));
+        const sorted = [...ownChannel].sort((a, b) => Date.parse(String(b.timestamp)) - Date.parse(String(a.timestamp)));
         messages.push(...sorted);
         mergedPayloads.add(messages);
         return messages;
@@ -328,7 +335,7 @@ function mergeLoadedMessages(messages: LoggedMessage[] & { extra?: LoggedMessage
     const includeNewer = !payload.hasMoreAfter && !payload.isBefore;
     const includeOlder = !payload.hasMoreBefore && !payload.isAfter;
     const knownIds = new Set(messages.map(message => message.id));
-    const toMerge = extra.filter(message => {
+    const toMerge = ownChannel.filter(message => {
         if (knownIds.has(message.id)) return false;
         const tsMs = toMs(String(message.timestamp));
         if (!includeNewer && tsMs > newestMs) return false;
@@ -349,9 +356,6 @@ function mergeLoadedMessages(messages: LoggedMessage[] & { extra?: LoggedMessage
 }
 
 const lastChannelFetch = new Map<string, number>();
-const channelAllDeleted = new Map<string, LogRecord[]>();
-const channelAllEdited = new Map<string, LogRecord[]>();
-const channelSnapshotVersions = new Map<string, number>();
 const channelFetchInFlight = new Map<string, Promise<unknown>>();
 const channelReloadInFlight = new Map<string, Promise<void>>();
 const channelCacheTimeout = new Map<string, ReturnType<typeof setTimeout>>();
@@ -360,18 +364,8 @@ const channelWebhookLimit = new Map<string, number>();
 const FETCH_RANGE_WINDOW = 200;
 let lastSelectedChannelId: string | null = null;
 
-function snapshotVersion(channelId: string) {
-    return channelSnapshotVersions.get(channelId) ?? 0;
-}
-
-function isCurrentSnapshot(channelId: string, version: number) {
-    return snapshotVersion(channelId) === version;
-}
-
 function invalidateChannelSnapshots(channelId: string, resetLimits = false, cancelUnload = false, clearCaches = false) {
-    channelSnapshotVersions.set(channelId, snapshotVersion(channelId) + 1);
-    channelAllDeleted.delete(channelId);
-    channelAllEdited.delete(channelId);
+    forgetChannelSnapshots(channelId);
     if (resetLimits) {
         channelDeleteLimit.delete(channelId);
         channelWebhookLimit.delete(channelId);
@@ -547,11 +541,7 @@ async function hydrateChannel(channelId: string) {
     channelAllEdited.set(channelId, history);
     const visible = visibleDeletedRecords(channelId);
     try { cacheChannelMessages(visible); } catch { }
-    for (const record of visible) {
-        if (record.message.attachments?.length) {
-            try { await restoreAttachmentBlobs(record.message.attachments); } catch { }
-        }
-    }
+    restoreLoggedAttachments(visible);
     injectDeletedRecords(channelId, visible);
     cacheHistoryRecords(channelId, history);
 }
@@ -582,11 +572,7 @@ async function loadMoreDeletedLogs() {
         return;
     }
     try { cacheChannelMessages(fresh); } catch { }
-    for (const rec of fresh) {
-        if (rec.message.attachments?.length) {
-            try { await restoreAttachmentBlobs(rec.message.attachments as any); } catch { }
-        }
-    }
+    restoreLoggedAttachments(fresh);
     injectDeletedRecords(channelId, fresh);
     showToast(`Loaded ${fresh.length} more deleted logs.`, Toasts.Type.SUCCESS);
 }
@@ -621,6 +607,28 @@ async function reloadCurrentChannelLogs() {
     } finally {
         if (channelReloadInFlight.get(channelId) === reload) channelReloadInFlight.delete(channelId);
     }
+}
+
+/**
+ * Repoint logged attachments at their on-disk copies without holding up the fetch.
+ *
+ * This used to be a sequential `await` per record inside the patched fetch, so a
+ * channel whose visible logs carried attachments spent the whole of Discord's
+ * channel load waiting on one disk read at a time before any of it could paint.
+ * The reads are independent and cached per attachment, so let the channel load
+ * finish first and repaint the affected messages once they land.
+ */
+function restoreLoggedAttachments(records: LogRecord[]) {
+    const withAttachments = records.filter(record => record.message?.attachments?.length);
+    if (!withAttachments.length) return;
+
+    void restoreAttachmentBlobs(withAttachments.flatMap(record => record.message.attachments))
+        .then(() => {
+            for (const record of withAttachments) {
+                repointDeletedAttachments(record.channel_id, record.message_id, record.message.attachments);
+            }
+        })
+        .catch(() => { });
 }
 
 function scheduleChannelUnload(channelId: string) {
@@ -789,7 +797,13 @@ function snapshotForDelete(channelId: string | undefined, messageId: string | un
 
 function onFluxMessageCreate(payload: MessageCreatePayload) {
     const channelId = payload.message?.channel_id ?? payload.channelId;
-    if (channelId) invalidateChannelSnapshots(channelId);
+    // A create adds a row only on the fast-delete race, and never edits or removes
+    // an existing one, so the DB mirrors stay valid. Dropping them here instead was
+    // what made an active channel re-read its entire logged history on every single
+    // fetch: processMessageFetch runs per fetch, found the mirrors gone, paid a
+    // full-channel cursor walk, and then usually threw the result away anyway
+    // because the create had bumped the version out from under it.
+    if (channelId) touchChannelSnapshot(channelId);
     handleMessageCreate(payload);
 }
 
@@ -1331,17 +1345,6 @@ export default definePlugin({
                     if (settings.store.preserveRemovedEmbeds && isEditedForEmbeds && Array.isArray(loggedMessage.embeds) && (loggedMessage.embeds as any[]).length) {
                         const latestEmbeds: any[] = latestMessage.embeds ?? [];
                         const oldEmbeds: any[] = loggedMessage.embeds as any[];
-                        const stableFp = (e: any) => {
-                            if (!e || typeof e !== "object") return String(e);
-                            try {
-                                return JSON.stringify({
-                                    url: e.url, type: e.type, title: e.title, description: e.description,
-                                    author: e.author?.name ?? e.author?.url, provider: e.provider?.name,
-                                    fields: Array.isArray(e.fields) ? e.fields.map((f: any) => ({ name: f.name, value: f.value, inline: f.inline })) : undefined,
-                                    footer: e.footer?.text, image: e.image?.url, thumbnail: e.thumbnail?.url, video: e.video?.url
-                                });
-                            } catch { return `${e?.type ?? ""}|${e?.url ?? ""}|${e?.title ?? ""}|${e?.description ?? ""}`; }
-                        };
                         {
                             // If same URL but middle content (description/fields) stripped, restore it into latest embed instead of duplicating
                             const latestByUrl = new Map<string, any>();
@@ -1351,6 +1354,13 @@ export default definePlugin({
                                 if (!old?.url) continue;
                                 const match: any = latestByUrl.get(old.url);
                                 if (!match) continue;
+                                // Same rule as the live path: a bot that paginates or switches
+                                // tabs sends a whole new embed under a reused url, and filling
+                                // it from the previous page pins the old footer over the new one.
+                                // Same rule as the live path: a bot that paginates or switches
+                        // tabs sends a whole new embed under a reused url, and filling
+                        // it from the previous page pins the old footer over the new one.
+                        if (embedHasBody(match)) continue;
                                 if (old.description && !match.description) { match.description = old.description; hasMergedMiddle = true; }
                                 if (old.title && !match.title) { match.title = old.title; hasMergedMiddle = true; }
                                 if (Array.isArray(old.fields) && old.fields.length && (!Array.isArray(match.fields) || !match.fields.length)) { match.fields = old.fields; hasMergedMiddle = true; }
@@ -1358,15 +1368,20 @@ export default definePlugin({
                                 if (old.footer?.text && !match.footer?.text) { match.footer = old.footer; hasMergedMiddle = true; }
                                 if (old.provider && !match.provider) { match.provider = old.provider; hasMergedMiddle = true; }
                             }
-                            const seen = new Set(latestEmbeds.map(stableFp));
+                            const seen = new Set(latestEmbeds.map(embedFingerprint));
                             // Same rule as the live path: resurrect only on pure removal. A fresh
                             // embed set is a legitimate replacement, not a strip.
-                            const loggedSeen = new Set(oldEmbeds.map(stableFp));
-                            const hasNewEmbeds = latestEmbeds.some((e: any) => !loggedSeen.has(stableFp(e)));
-                            const missing = hasNewEmbeds ? [] : oldEmbeds.filter((e: any) => !seen.has(stableFp(e)));
-                            if (missing.length) merged.embeds = latestEmbeds.length ? [...latestEmbeds, ...missing] : [...oldEmbeds];
-                            else if (!latestMessage.embeds) merged.embeds = [...oldEmbeds];
-                            else if (hasMergedMiddle) merged.embeds = [...latestEmbeds];
+                            const loggedSeen = new Set(oldEmbeds.map(embedFingerprint));
+                            const hasNewEmbeds = latestEmbeds.some((e: any) => !loggedSeen.has(embedFingerprint(e)));
+                            const missing = hasNewEmbeds ? [] : oldEmbeds.filter((e: any) => !seen.has(embedFingerprint(e)));
+                            // A resurrected embed can carry a timestamp that came back
+                            // invalid from the database. Discord formats it with Intl,
+                            // which throws "RangeError: Invalid time value" and takes the
+                            // whole channel render down, so it is validated here rather
+                            // than trusted.
+                            if (missing.length) merged.embeds = withValidEmbedTimestamps(latestEmbeds.length ? [...latestEmbeds, ...missing] : [...oldEmbeds]);
+                            else if (!latestMessage.embeds) merged.embeds = withValidEmbedTimestamps([...oldEmbeds]);
+                            else if (hasMergedMiddle) merged.embeds = withValidEmbedTimestamps([...latestEmbeds]);
                         }
                         const SUPPRESS = 1 << 2;
                         const oldFlags = (loggedMessage as any).flags ?? 0;

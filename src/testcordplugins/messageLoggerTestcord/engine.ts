@@ -6,14 +6,15 @@
 
 import { showNotification } from "@api/Notifications";
 import { Logger } from "@utils/Logger";
-import type { Message, MessageJSON } from "@vencord/discord-types";
+import type { Channel, Message, MessageJSON } from "@vencord/discord-types";
 import { ChannelStore, FluxDispatcher, lodash, MessageStore, SelectedChannelStore, UserGuildSettingsStore, UserStore } from "@webpack/common";
 
-import { applyBatch, clearLogs, clearUnprotectedLogs, getChannelLogsAfter, getDatabase, getLogById, runMaintenance, stripUncloneable } from "./db";
+import { applyBatch, clearLogs, clearUnprotectedLogs, getAllHistoryForChannel, getChannelLogsAfter, getDatabase, getGuildLogs, getLogById, repairEditedRecords, runMaintenance, stripUncloneable } from "./db";
 import { invalidateMessageClassCache } from "./render";
 import { ensureAttachmentSaved } from "./saveImage";
 import { settings } from "./settings";
-import { LoggedMessage, LogRecord, LogStatus, MessageCreatePayload, MessageDeleteBulkPayload, MessageDeletePayload, MessageUpdatePayload } from "./types";
+import { EditRecord, LoggedMessage, LogRecord, LogStatus, MessageCreatePayload, MessageDeleteBulkPayload, MessageDeletePayload, MessageUpdatePayload } from "./types";
+import { embedFingerprint, embedHasBody, withValidEmbedTimestamps } from "./utils";
 
 const log = new Logger("MessageLoggerTestcord");
 const recentMessages = new Map<string, LoggedMessage>();
@@ -79,6 +80,44 @@ function snapshotMessage(message: SnapshotMessage): LoggedMessage {
     // see stripUncloneable for why it must not run anywhere shared.
     stripUncloneable(copy, new WeakSet());
     return copy;
+}
+
+/**
+ * Flatten a payload's media into plain, prototype-less data.
+ *
+ * A stored copy of a message is plain JSON, but an update payload carries Discord's own
+ * embed/attachment/component objects. Comparing the two directly never matches, so every
+ * update looked like a change and a paginated bot filled its history with revisions that
+ * differ from nothing. Storing the payload as it arrives is the other half: those objects
+ * hold their data behind a prototype that IndexedDB drops on write, so the embed comes
+ * back out with none of its fields left and every revision after the first reads as an
+ * empty husk. Copying own enumerable data into bare objects makes what is compared and
+ * what is logged the same plain shape the rest of the record is stored in. Cycles and
+ * functions are dropped because structured clone rejects them.
+ */
+function toPlainMedia<T>(value: T, seen = new WeakSet<object>()): T {
+    if (value == null || typeof value !== "object") return typeof value === "function" ? undefined as never : value;
+    if (value instanceof Date) return value;
+    if (seen.has(value)) return undefined as never;
+    seen.add(value);
+    try {
+        if (Array.isArray(value)) {
+            const out: unknown[] = [];
+            for (const item of value) {
+                const mapped = toPlainMedia(item, seen);
+                if (mapped !== undefined) out.push(mapped);
+            }
+            return out as never;
+        }
+        const out: Record<string, unknown> = {};
+        for (const key of Object.keys(value)) {
+            const mapped = toPlainMedia((value as Record<string, unknown>)[key], seen);
+            if (mapped !== undefined) out[key] = mapped;
+        }
+        return out as never;
+    } finally {
+        seen.delete(value);
+    }
 }
 
 function remember(message: LoggedMessage) {
@@ -182,6 +221,37 @@ export function cacheChannelMessages(records: LogRecord[]) {
     }
 }
 
+// Per-channel mirror of two DB queries: every logged row of the channel that is
+// not an edit, and every row carrying an edit history. They exist so a channel
+// switch does not have to re-read the channel's whole log, which is why they have
+// to be dropped whenever something actually changes those rows - a clear, an
+// edit, a delete. They live here rather than in index.tsx so the functions that
+// mutate the DB can invalidate them too; a stale copy is not a stale cache, it
+// re-injects rows that no longer exist.
+export const channelAllDeleted = new Map<string, LogRecord[]>();
+export const channelAllEdited = new Map<string, LogRecord[]>();
+export const channelSnapshotVersions = new Map<string, number>();
+
+export function snapshotVersion(channelId: string) {
+    return channelSnapshotVersions.get(channelId) ?? 0;
+}
+
+export function isCurrentSnapshot(channelId: string, version: number) {
+    return snapshotVersion(channelId) === version;
+}
+
+/** Bump only. For events that cannot change any already-logged row. */
+export function touchChannelSnapshot(channelId: string) {
+    channelSnapshotVersions.set(channelId, snapshotVersion(channelId) + 1);
+}
+
+/** Bump and drop the mirrors, so the next read comes back from the DB. */
+export function forgetChannelSnapshots(channelId: string) {
+    touchChannelSnapshot(channelId);
+    channelAllDeleted.delete(channelId);
+    channelAllEdited.delete(channelId);
+}
+
 export function invalidateChannelCache(channelId: string) {
     for (const [id, message] of [...recentMessages.entries()]) {
         if (message.channel_id !== channelId) continue;
@@ -242,6 +312,11 @@ export function clearEditHistoryCache(id: string) {
 // ── Anti-antilog: merged from AntiAntilog ──
 const SUPPRESS_EMBEDS = 1 << 2;
 const mediaPreservedMessages = new WeakSet<object>();
+// MessageStore already holds the edited copy by the time the flux handler runs, so a
+// message missing from the logger caches can only be read back in its new state. The
+// store patch calls preserveRemovedMedia before that happens and parks the pre-edit
+// copy here, which is what gives webhook and embed-only edits a real previous version.
+const preEditMessages = new WeakMap<object, SnapshotMessage>();
 
 function isLegitimateOptimisticConfirmation(payload: MessageCreatePayload): boolean {
     const action: any = payload as any;
@@ -316,6 +391,7 @@ export function preserveRemovedMedia(payload: MessageUpdatePayload) {
 
         const old: any = MessageStore.getMessage(newMsg.channel_id, newMsg.id);
         if (!old) return;
+        preEditMessages.set(newMsg, old);
         mediaPreservedMessages.add(newMsg);
 
         let updated: any = null;
@@ -338,29 +414,6 @@ export function preserveRemovedMedia(payload: MessageUpdatePayload) {
                 let removed: any[] = [];
                 let baseEmbeds: any[] = incomingEmbeds ?? oldEmbeds;
 
-                // Stable fingerprint: only content-defining fields, ignores volatile proxy_url/width/height/id/color/timestamp
-                // This prevents duplicates when Discord re-fetches same website embed with new proxy URL
-                const stableFp = (e: any) => {
-                    if (!e || typeof e !== "object") return String(e);
-                    try {
-                        return JSON.stringify({
-                            url: e.url,
-                            type: e.type,
-                            title: e.title,
-                            description: e.description,
-                            author: e.author?.name ?? e.author?.url,
-                            provider: e.provider?.name,
-                            fields: Array.isArray(e.fields) ? e.fields.map((f: any) => ({ name: f.name, value: f.value, inline: f.inline })) : undefined,
-                            footer: e.footer?.text,
-                            image: e.image?.url,
-                            thumbnail: e.thumbnail?.url,
-                            video: e.video?.url
-                        });
-                    } catch {
-                        return `${e?.type ?? ""}|${e?.url ?? ""}|${e?.title ?? ""}|${e?.description ?? ""}`;
-                    }
-                };
-
                 if (!wasSuppressed && nowSuppressed) {
                     removed = oldEmbeds;
                     baseEmbeds = incomingEmbeds ?? [];
@@ -373,6 +426,12 @@ export function preserveRemovedMedia(payload: MessageUpdatePayload) {
                         if (!old?.url) continue;
                         const match: any = incomingByUrl.get(old.url);
                         if (!match) continue;
+                        // Only fill an embed that came back as a husk. A paginated or
+                        // tabbed bot reuses one url for every page and sends a whole new
+                        // embed on each click, so merging here restores the previous
+                        // page's footer onto the new one and the page number stops
+                        // matching the rows.
+                        if (embedHasBody(match)) continue;
                         if (old.description && !match.description) { match.description = old.description; hasMergedMiddle = true; }
                         if (old.title && !match.title) { match.title = old.title; hasMergedMiddle = true; }
                         if (Array.isArray(old.fields) && old.fields.length && (!Array.isArray(match.fields) || !match.fields.length)) { match.fields = lodash.cloneDeep(old.fields); hasMergedMiddle = true; }
@@ -382,13 +441,13 @@ export function preserveRemovedMedia(payload: MessageUpdatePayload) {
                         if (old.image?.url && !match.image?.url) { match.image = lodash.cloneDeep(old.image); hasMergedMiddle = true; }
                         if (old.thumbnail?.url && !match.thumbnail?.url) { match.thumbnail = lodash.cloneDeep(old.thumbnail); hasMergedMiddle = true; }
                     }
-                    const seen = new Set(incomingEmbeds.map(stableFp));
+                    const seen = new Set(incomingEmbeds.map(embedFingerprint));
                     // Pure removal (e.g. stripped preview) restores the missing embeds. A fresh
                     // embed set (e.g. a bot advancing to the next step) is a legitimate replacement:
                     // resurrecting the old ones here piles stale embeds onto every edit.
-                    const oldSeen = new Set(oldEmbeds.map(stableFp));
-                    const hasNewEmbeds = incomingEmbeds.some((e: any) => !oldSeen.has(stableFp(e)));
-                    removed = hasNewEmbeds ? [] : oldEmbeds.filter((e: any) => !seen.has(stableFp(e)));
+                    const oldSeen = new Set(oldEmbeds.map(embedFingerprint));
+                    const hasNewEmbeds = incomingEmbeds.some((e: any) => !oldSeen.has(embedFingerprint(e)));
+                    removed = hasNewEmbeds ? [] : oldEmbeds.filter((e: any) => !seen.has(embedFingerprint(e)));
                     baseEmbeds = incomingEmbeds;
                     if (hasMergedMiddle && removed.length === 0) {
                         const target = ensureClone();
@@ -402,7 +461,7 @@ export function preserveRemovedMedia(payload: MessageUpdatePayload) {
                 if (removed.length > 0) {
                     const target = ensureClone();
                     // Save all of the original embed, including website title/description/fields/author/footer, not just image
-                    target.embeds = [...baseEmbeds, ...removed];
+                    target.embeds = withValidEmbedTimestamps([...baseEmbeds, ...removed]);
                     if (nowSuppressed) {
                         target.flags = incomingFlags & ~SUPPRESS_EMBEDS;
                     }
@@ -440,6 +499,7 @@ export function preserveRemovedMedia(payload: MessageUpdatePayload) {
             // Mark the clone as well: the store patch replaces payload.message
             // with it, so the flux-side call sees this object, not newMsg.
             mediaPreservedMessages.add(updated);
+            preEditMessages.set(updated, old);
             (payload as any).message = updated;
             // Ensure anti-antilogg'd attachments are saved to disk immediately so they survive CDN expiry
             if (restoredAttachments.length > 0 && settings.store.saveImages && !IS_WEB) {
@@ -465,6 +525,13 @@ export function preserveRemovedMedia(payload: MessageUpdatePayload) {
 function hasCurrentUserMention(message: LoggedMessage) {
     const currentUserId = UserStore.getCurrentUser().id;
     return message.mention_everyone || message.mentions.some(mention => mention.id === currentUserId);
+}
+
+function sameEmbeds(next: unknown, prev: unknown): boolean {
+    if (next === prev) return true;
+    if (!Array.isArray(next) || !Array.isArray(prev)) return false;
+    if (next.length !== prev.length) return false;
+    return next.every((embed, i) => embedFingerprint(embed) === embedFingerprint(prev[i]));
 }
 
 function jsonChanged(next: unknown, prev: unknown): boolean {
@@ -688,6 +755,34 @@ export function handleMessageCreate(payload: MessageCreatePayload) {
     }
 }
 
+function toEditRecord(previous: LoggedMessage): EditRecord {
+    const source = previous as unknown as {
+        components?: unknown[];
+        stickerItems?: unknown[];
+        poll?: unknown;
+        flags?: number;
+        webhookId?: string | null;
+        webhook_id?: string | null;
+    };
+    const record: EditRecord = {
+        content: previous.content,
+        timestamp: new Date().toISOString()
+    };
+    // Webhook and embed-only messages put everything but the text outside content, so a
+    // revision that stored text alone read back as the same empty stub every time.
+    if (previous.embeds?.length) record.embeds = lodash.cloneDeep(previous.embeds);
+    if (previous.attachments?.length) record.attachments = lodash.cloneDeep(previous.attachments);
+    if (source.components?.length) record.components = lodash.cloneDeep(source.components);
+    if (source.stickerItems?.length) record.stickerItems = lodash.cloneDeep(source.stickerItems);
+    if (source.poll) record.poll = lodash.cloneDeep(source.poll);
+    if (source.flags != null) record.flags = source.flags;
+    const webhookId = source.webhookId ?? source.webhook_id;
+    if (webhookId != null) record.webhookId = webhookId;
+    record.id = previous.id;
+    if (previous.channel_id) record.channel_id = previous.channel_id;
+    return record;
+}
+
 export async function handleMessageUpdate(payload: MessageUpdatePayload) {
     if (!active) return;
 
@@ -719,6 +814,18 @@ export async function handleMessageUpdate(payload: MessageUpdatePayload) {
 
     let previous: LoggedMessage | undefined = recentMessages.get(payload.message.id) ?? channelMessageCache.get(payload.message.id);
     if (!previous) {
+        // A cache miss is the normal case for webhook and bot messages the logger never
+        // saw created (after a restart, or outside the whitelisted ids). Reading
+        // MessageStore here yields the copy the update already replaced, so the store
+        // patch parked the pre-edit state for us instead.
+        const preEdit = preEditMessages.get(payload.message as object);
+        if (preEdit) {
+            try {
+                previous = snapshotMessage(preEdit);
+            } catch { }
+        }
+    }
+    if (!previous) {
         const storedMessage = MessageStore.getMessage(payload.message.channel_id, payload.message.id);
         if (storedMessage) {
             previous = snapshotMessage(storedMessage);
@@ -736,9 +843,19 @@ export async function handleMessageUpdate(payload: MessageUpdatePayload) {
     }
     if (!previous) return;
 
-    const embedsChanged = hasEmbeds && jsonChanged((payload.message as any).embeds, (previous as any).embeds);
-    const attachmentsChanged = hasAttachments && jsonChanged((payload.message as any).attachments, (previous as any).attachments);
-    const componentsChanged = hasComponents && jsonChanged((payload.message as any).components, (previous as any).components);
+    const payloadAny = payload.message as any;
+    // One shape for both the comparison and the stored copy, so jsonChanged is never
+    // comparing a payload object against the snapshot it is stored as.
+    const incomingEmbeds = hasEmbeds ? withValidEmbedTimestamps(toPlainMedia(payloadAny.embeds)) : undefined;
+    const incomingAttachments = hasAttachments ? toPlainMedia(payloadAny.attachments) : undefined;
+    const incomingComponents = hasComponents ? toPlainMedia(payloadAny.components) : undefined;
+
+    // Fingerprints, not stringified payloads. An incoming embed and a stored snapshot of
+    // the same embed are different shapes, so a byte comparison reported a change on
+    // every update and logged the state that was already there as a fresh revision.
+    const embedsChanged = hasEmbeds && !sameEmbeds(incomingEmbeds, (previous as any).embeds);
+    const attachmentsChanged = hasAttachments && jsonChanged(incomingAttachments, (previous as any).attachments);
+    const componentsChanged = hasComponents && jsonChanged(incomingComponents, (previous as any).components);
     const contentChanged = hasContent && previous.content !== payload.message.content;
     const hasEditedTimestamp = (payload.message as any).edited_timestamp != null;
 
@@ -751,9 +868,9 @@ export async function handleMessageUpdate(payload: MessageUpdatePayload) {
         // No real edit: either nothing changed, or just an auto embed (link unfurl) without edited_timestamp
         if (embedsChanged || attachmentsChanged || componentsChanged) {
             const updated = lodash.cloneDeep(previous);
-            if (hasEmbeds) (updated as any).embeds = (payload.message as any).embeds;
-            if (hasAttachments) (updated as any).attachments = (payload.message as any).attachments;
-            if (hasComponents) (updated as any).components = (payload.message as any).components;
+            if (incomingEmbeds) (updated as any).embeds = incomingEmbeds;
+            if (incomingAttachments) (updated as any).attachments = incomingAttachments;
+            if (incomingComponents) (updated as any).components = incomingComponents;
             // If this message's history was temp-hidden, drop the old history on the updated copy
             if (isEditHistoryTempCleared(updated.id)) updated.editHistory = [];
             remember(updated);
@@ -773,18 +890,22 @@ export async function handleMessageUpdate(payload: MessageUpdatePayload) {
     }
 
     const message = lodash.cloneDeep(previous);
-    const payloadAny = payload.message as any;
-    // Assign payload fields but don't clobber content/embeds/attachments when payload didn't include them
+    // Assign payload fields but don't clobber content/embeds/attachments when payload didn't include them.
+    // Every value is taken as a plain copy: Discord hangs helper functions off messages
+    // and their media, structured clone rejects a single one of them, and one rejects the
+    // whole transaction - so an edit record built from the raw payload never lands at
+    // all, which is why embed edits went missing while ordinary ones did.
     for (const [k, v] of Object.entries(payloadAny)) {
         if (k === "content" && !hasContent) continue;
         if (k === "embeds" && !hasEmbeds) continue;
         if (k === "attachments" && !hasAttachments) continue;
         if (k === "components" && !hasComponents) continue;
-        if (v !== undefined) (message as any)[k] = v;
+        if (v === undefined || typeof v === "function") continue;
+        (message as any)[k] = typeof v === "object" ? toPlainMedia(v) : v;
     }
-    if (hasEmbeds) (message as any).embeds = payloadAny.embeds;
-    if (hasAttachments) (message as any).attachments = payloadAny.attachments;
-    if (hasComponents) (message as any).components = payloadAny.components;
+    if (hasEmbeds) (message as any).embeds = incomingEmbeds;
+    if (hasAttachments) (message as any).attachments = incomingAttachments;
+    if (hasComponents) (message as any).components = incomingComponents;
     if (hasContent) (message as any).content = payloadAny.content;
     else (message as any).content = previous.content;
     if (!hasEmbeds) (message as any).embeds = previous.embeds;
@@ -793,11 +914,7 @@ export async function handleMessageUpdate(payload: MessageUpdatePayload) {
     message.guildId = payload.guildId ?? previous.guildId;
     message.editHistory = [
         ...(previous.editHistory ?? []),
-        {
-            content: previous.content,
-            embeds: previous.embeds?.length ? lodash.cloneDeep(previous.embeds) : undefined,
-            timestamp: new Date().toISOString()
-        }
+        toEditRecord(previous)
     ];
     if (settings.store.maxEditHistory > 0) {
         message.editHistory = message.editHistory.slice(-settings.store.maxEditHistory);
@@ -807,6 +924,11 @@ export async function handleMessageUpdate(payload: MessageUpdatePayload) {
     if (isEditHistoryTempCleared(message.id)) {
         message.editHistory = message.editHistory.slice(-1);
     }
+    // Belt and braces for a message that was cached before this path took plain copies:
+    // cloneDeep copies nested functions by reference, so a revision inherited from the
+    // cache can still carry one. Safe to strip here because everything in `message` is
+    // ours alone, which is the same condition snapshotMessage relies on.
+    stripUncloneable(message, new WeakSet());
     remember(message);
     invalidateLoggedCaches(message.id);
     // Ensure anti-antilogg'd and edited attachments are saved to disk before the record is flushed
@@ -1057,6 +1179,91 @@ export async function deleteManyLogs(ids: string[]) {
     await flushQueuedLogs();
 }
 
+/**
+ * Drop every logged row of a channel, mirroring the per-message context menu items.
+ * Deleted messages leave chat through the same mlDeleted dispatch `localRemoveLoggedMessage`
+ * uses; edit histories go through `clearEditHistoryCache` so the in-memory copy matches.
+ * Temporary clears only touch session state, so the rows come back after a restart,
+ * while permanent clears queue every id for a single batched delete.
+ */
+export async function removeChannelLogs(channelId: string, permanent: boolean) {
+    const [deleted, history] = await Promise.all([
+        getChannelLogsAfter(channelId, new Date(0).toISOString()),
+        getAllHistoryForChannel(channelId)
+    ]);
+
+    // The rows are about to stop existing, so the channel's DB mirrors have to go
+    // with them. Without this they survived the clear, and the next channel switch
+    // injected every "deleted" message back out of the stale copy - so only the
+    // rows the MESSAGE_DELETE dispatches below had actually been in chat ever
+    // looked cleared, and everything else came straight back.
+    forgetChannelSnapshots(channelId);
+
+    const handled = new Set<string>();
+    for (const record of deleted) {
+        const id = record.message_id;
+        handled.add(id);
+        recentMessages.delete(id);
+        channelMessageCache.delete(id);
+        invalidateLoggedCaches(id);
+        tempHiddenMessageIds.delete(id);
+        if (permanent) {
+            queueDelete(id);
+        } else {
+            // A still-pending write must flush unhidden, or the restart would lose the row.
+            pendingDeletes.delete(id);
+            tempHiddenMessageIds.add(id);
+        }
+        FluxDispatcher.dispatch({ type: "MESSAGE_DELETE", channelId, id, mlDeleted: true });
+    }
+
+    for (const record of history) {
+        const id = record.message_id;
+        // A row can be both deleted and edited; the delete above already removed it.
+        if (handled.has(id)) continue;
+        handled.add(id);
+        clearEditHistoryCache(id);
+        if (permanent) queueDelete(id);
+        FluxDispatcher.dispatch({
+            type: "MESSAGE_UPDATE",
+            message: { id, channel_id: channelId, editHistory: [] }
+        });
+    }
+
+    if (permanent) await flushQueuedLogs();
+    return handled.size;
+}
+
+/**
+ * Clear the logs of every channel in a server.
+ *
+ * Walks the by_guild index rather than each channel's own mirror: the per-channel
+ * queries only know about channels that have been visited, so a server-wide clear built
+ * on them would leave behind everything logged in channels the user has not opened.
+ */
+export async function removeGuildLogs(guildId: string, permanent: boolean) {
+    const channelIds = new Set<string>();
+    const { getChannels } = ChannelStore as { getChannels?: (guildId: string) => Channel[] };
+    for (const channel of getChannels?.(guildId) ?? []) {
+        if (channel?.id) channelIds.add(channel.id);
+    }
+
+    const records = await getGuildLogs(guildId);
+    for (const record of records) {
+        const channelId = record.channel_id ?? record.message?.channel_id;
+        if (channelId) channelIds.add(channelId);
+    }
+
+    for (const channelId of channelIds) {
+        removeChannelLogs(channelId, permanent);
+        forgetChannelSnapshots(channelId);
+        invalidateChannelCache(channelId);
+    }
+
+    if (permanent) await flushQueuedLogs();
+    return records.length;
+}
+
 export async function clearAllLogs(includeProtected = false) {
     if (flushTimer !== undefined) {
         clearTimeout(flushTimer);
@@ -1114,6 +1321,10 @@ export function startEngine() {
     // Defer DB/prime work so Discord can paint first; chunking inside primeLoggedCache keeps it off the main thread.
     const scheduleStart = () => {
         void getDatabase()
+            .then(repairEditedRecords)
+            .then(repaired => {
+                if (repaired) log.info(`Repaired ${repaired} edited record(s) with duplicate embed state.`);
+            })
             .then(performMaintenance)
             .then(primeLoggedCache)
             .catch(error => log.error("Failed to initialize the log database.", error));

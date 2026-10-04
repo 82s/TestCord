@@ -691,6 +691,10 @@ export const Devs = /* #__PURE__*/ Object.freeze({
         name: "yuna0x0",
         id: 213656926414831616n
     },
+    scattagain: {
+        name: "Amelia",
+        id: 1098234477626544180n
+    },
     Davri: {
         name: "Davri",
         id: 457579346282938368n
@@ -698,6 +702,10 @@ export const Devs = /* #__PURE__*/ Object.freeze({
     Kaede: {
         name: "Kaede",
         id: 1492642701320126504n
+    },
+    c0nnorgg: {
+        name: "c0nnorgg",
+        id: 1088882977985003620n,
     }
 } satisfies Record<string, Dev>);
 
@@ -1463,6 +1471,11 @@ export const TestcordDevs = /* #__PURE__*/ Object.freeze({
         id: 1553713171938938891n,
         github: "DavidHiFi"
     },
+    Kurtzon: {
+        name: "Kurtzon",
+        id: 1253545207488839784n,
+        github: "kurtzonaudio"
+    },
     sirphantom89: {
         name: "SirPhantom89",
         id: 1464279455844274188n,
@@ -1633,6 +1646,11 @@ export const TestcordDevs = /* #__PURE__*/ Object.freeze({
     irritably: {
         name: "irritably",
         id: 928787166916640838n
+    },
+    szcx404: {
+        name: "szcx404",
+        id: 1554284154009682032n,
+        github: "szcx404"
     }
 } satisfies Record<string, Dev>);
 

@@ -71,6 +71,9 @@ waitFor("parseTopic", m => Parser = m);
 export let Alerts: t.Alerts;
 waitFor(["show", "close"], m => Alerts = m);
 
+// `as const` keeps `Toasts.Type.SUCCESS` a literal type, so it stays assignable to the
+// `ToastType` union that `showToast` takes. Without it these widen to `string` and every
+// call site errors.
 const ToastType = {
     MESSAGE: "message",
     SUCCESS: "success",
@@ -81,12 +84,12 @@ const ToastType = {
     FORWARD: "forward",
     BOOKMARK: "bookmark",
     CLOCK: "clock"
-};
+} as const;
 
 const ToastPosition = {
     TOP: 0,
     BOTTOM: 1
-};
+} as const;
 
 export interface ToastData {
     message: string,
@@ -112,9 +115,17 @@ interface ToastsExports {
     popToast(): void;
 }
 
-const ToastsExports = mapMangledModuleLazy(".currentToastMap.has(", {
-    showToast: filters.byCode(".currentToastMap.has("),
-    popToast: filters.byCode(".delete(")
+// Anchor on Discord's own toast entry point, not on the store. Discord now ships two
+// stores holding a `currentToastMap`, and both contain `.currentToastMap.has(`, so that
+// anchor resolved to whichever has the lower module id — the new one. It wants an
+// already normalised entry (`text`/`variant`/`icon`) and renders anything else as an
+// empty grey pill: `message`, `type` and `id` are simply ignored and the icon lookup
+// misses, which is what turned every toast into a blank dot. This module takes the
+// legacy `{message, type, options}` shape, normalises it and routes it to whichever
+// store is live, and its pop clears both.
+const ToastsExports = mapMangledModuleLazy('("showToast")', {
+    showToast: filters.byCode('("showToast")'),
+    popToast: filters.byCode("arguments.length>0")
 });
 
 export function createToast(message: string, type: string, options?: ToastOptions): ToastData {
@@ -126,6 +137,12 @@ export function createToast(message: string, type: string, options?: ToastOption
     };
 }
 
+/**
+ * Testcord keeps the legacy `{message, type, options}` toast surface on top of Discord's
+ * normalised entry point. Upstream replaced this with the newer store shape, but
+ * `Toasts.genId()` is used pervasively across the plugin and settings code and has no
+ * equivalent there, so both shapes stay exported.
+ */
 export const Toasts = {
     Type: ToastType,
     Position: ToastPosition,
@@ -133,13 +150,13 @@ export const Toasts = {
 
     show: ToastsExports.showToast,
     pop: ToastsExports.popToast,
-    create: createToast,
+    create: createToast
 };
 
 /**
  * Show a simple toast. If you need more options, use Toasts.show manually
  */
-export function showToast(message: string, type = ToastType.MESSAGE, options?: ToastOptions) {
+export function showToast(message: string, type: t.ToastType = "message", options?: ToastOptions) {
     Toasts.show(Toasts.create(message, type, options));
 }
 
@@ -170,8 +187,9 @@ export const ChannelRouter: t.ChannelRouter = mapMangledModuleLazy('"Thread must
     transitionToThread: filters.byCode('"Thread must have a parent ID."')
 });
 
-export let SettingsRouter: any;
-waitFor(["openUserSettings", "USER_SETTINGS_MODAL_KEY"], m => SettingsRouter = m);
+export const SettingsRouter: t.SettingsRouter = mapMangledModuleLazy('type:"USER_SETTINGS_MODAL_OPEN"', {
+    openUserSettings: filters.byCode('type:"USER_SETTINGS_MODAL_OPEN"')
+});
 
 export const PermissionsBits: t.PermissionsBits = findLazy(m => typeof m.ADMINISTRATOR === "bigint");
 
@@ -185,7 +203,12 @@ export const { zustandPersist } = mapMangledModuleLazy(".onRehydrateStorage)?", 
 
 export const MessageActions = findByPropsLazy("editMessage", "sendMessage");
 export const MessageCache = findByPropsLazy("clearCache", "_channelMessages");
-export const UserProfileActions = findByPropsLazy("openUserProfileModal", "closeUserProfileModal");
+export const openUserProfileModal: t.OpenUserProfileModal = findByCodeLazy('type:"USER_PROFILE_MODAL_OPEN"');
+// Testcord keeps the mangled-module form alongside the byCode lookup above, because
+// plugins reach for `UserProfileActions.openUserProfileModal`.
+export const UserProfileActions: { openUserProfileModal: t.OpenUserProfileModal } = mapMangledModuleLazy(".log(`Failed to fetch profile for $", {
+    openUserProfileModal: filters.byCode('type:"USER_PROFILE_MODAL_OPEN"')
+});
 export const InviteActions = findByPropsLazy("resolveInvite");
 export const ChannelActionCreators = findByPropsLazy("openPrivateChannel");
 

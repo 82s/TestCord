@@ -46,8 +46,8 @@ const lastChannelFetch = new Map<string, number>();
 
 const cacheThing = findByPropsLazy("commit", "getOrCreate");
 
-export async function clearLogs(showToast = true) {
-    await idb.clearMessagesIDB(showToast);
+export async function clearLogs(toast = true) {
+    await idb.clearMessagesIDB(toast);
     cacheSentMessages.clear();
 }
 
@@ -412,10 +412,7 @@ export default definePlugin({
     },
 
     getEdited(m1, m2) {
-        const editHistory = m2?.editHistory;
-        if (editHistory == null && m1?.editHistory != null && m1.editHistory.length > 0)
-            return m1.editHistory.map(mapTimestamp);
-        return editHistory;
+        return m2?.editHistory ?? m1?.editHistory?.map(mapTimestamp) ?? [];
     },
 
     flux: {

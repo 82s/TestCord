@@ -399,8 +399,8 @@
 }
 
 .vc-plugins-warning-badge {
-    height: 30px;
-    width: 30px;
+    height: 34px;
+    width: 34px;
     display: grid;
     place-items: center;
     border-radius: 8px;
@@ -410,8 +410,8 @@
 }
 
 .vc-plugins-warning-icon {
-    width: 22px;
-    height: 22px;
+    width: 26px;
+    height: 26px;
     object-fit: contain;
     display: block;
     image-rendering: -webkit-optimize-contrast;
@@ -419,7 +419,7 @@
 
 .vc-plugins-card-warning {
     flex: 0 0 auto;
-    height: 20px;
+    height: 22px;
     box-sizing: border-box;
     display: inline-flex;
     align-items: center;
@@ -460,11 +460,12 @@
 }
 
 .vc-plugins-warning-icon-small {
-    width: 14px;
-    height: 14px;
+    width: 20px;
+    height: 20px;
     object-fit: contain;
     display: inline-block;
     image-rendering: -webkit-optimize-contrast;
+    flex-shrink: 0;
 }
 
 @media (width <= 720px) {

@@ -8,10 +8,10 @@ import * as DataStore from "@api/DataStore";
 import { copyWithToast, openImageModal } from "@utils/discord";
 import { Logger } from "@utils/Logger";
 import { classes } from "@utils/misc";
-import { ModalCloseButton, ModalContent, ModalHeader, ModalRoot, ModalSize, RenderModalProps } from "@utils/modal";
+import { ModalCloseButton, ModalContent, ModalHeader, ModalProps, ModalRoot, ModalSize } from "@utils/modal";
 import { saveFile } from "@utils/web";
-import { findByPropsLazy, findComponentByCodeLazy } from "@webpack";
-import { ExpressionPickerStore, FluxDispatcher, showToast, Toasts, useEffect, useMemo, useRef, useState } from "@webpack/common";
+import { findByPropsLazy } from "@webpack";
+import { FluxDispatcher, showToast, Toasts, useEffect, useLayoutEffect, useMemo, useRef, useState } from "@webpack/common";
 
 // @webpack/common's "ReactDOM" export is not guaranteed to exist across
 // Vencord/Equicord/Testcord versions (it was removed in some recent builds
@@ -21,9 +21,13 @@ import { ExpressionPickerStore, FluxDispatcher, showToast, Toasts, useEffect, us
 const ReactDOMPortal = findByPropsLazy("createPortal");
 import { Dispatch, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction } from "react";
 
-import { cl, getPinterestThemeStyle, ManaSearchBarProps, Native, NativeMediaResult, PINTEREST_THEMES, PinterestImageResult, PinterestPickerProps, PinterestSearchPayload, PinterestTheme, SearchBucketState, SearchKind, SearchTarget, settings } from "./shared";
+import { drawScene, FONT_STACKS, type FontKey, type Fx, FX_DEFAULT, FX_PRESETS, hitTestLayers, type ImageCache, type ImageLayer, isPristine, type Layer, type TextLayer } from "./effects";
+import { bytesToDataUrl, canDecodeAnimated, dataUrlToBytes, type DecodedGif, decodeGif, encodeFittedGif, fitUnderLimit, TARGET_BYTES } from "./gif";
+import { direction, t, useLocale } from "./i18n";
+import { PLUGIN_ICON } from "./icon";
+import { imageKey, shapeDistance, visualKey } from "./searchRanking";
+import { AppearanceSetting, cl, getPinterestFullStyle, Native, NativeMediaResult, PINTEREST_THEMES, PinterestImageResult, PinterestSearchPayload, PinterestTheme, resolveAppearance, ResolvedAppearance, resolvePinterestTheme, SearchBucketState, SearchKind, SearchTarget, settings } from "./shared";
 
-const ManaSearchBar = findComponentByCodeLazy<ManaSearchBarProps>("MagnifyingGlassIcon", "clearable");
 const logger = new Logger("PinterestTool");
 
 // Fixed page sizes keep the profile picker layout predictable across installs.
@@ -62,35 +66,152 @@ function getPrimaryKind(target: SearchTarget): SearchKind {
     return target;
 }
 
-function targetLabel(target: SearchKind) {
-    if (target === "IMAGE") return "image";
-    return target === "AVATAR" ? "avatar" : "banner";
-}
-
 function getResultLabel(result: PinterestImageResult) {
     if (result.title.trim()) return result.title;
 
     try {
         const { pathname } = new URL(result.url);
         const filename = pathname.split("/").pop()?.trim();
-        if (!filename) return "Pinterest image";
+        if (!filename) return t("image");
         return decodeURIComponent(filename);
     } catch {
-        return "Pinterest image";
+        return t("image");
     }
+}
+
+// Errors thrown on the native side arrive wrapped by Electron's IPC.
+function errorText(error: unknown) {
+    const message = error instanceof Error ? error.message : String(error ?? "");
+    return message.replace(/^Error invoking remote method '[^']*':\s*/, "").replace(/^Error:\s*/, "");
+}
+
+// ---------------------------------------------------------------------------
+// Light / dark appearance
+// ---------------------------------------------------------------------------
+
+function detectDiscordIsDark(): boolean {
+    try {
+        const roots = [document.documentElement, document.body];
+        for (const el of roots) {
+            if (el?.classList.contains("theme-light")) return false;
+            if (el?.classList.contains("theme-dark") || el?.classList.contains("theme-darker") || el?.classList.contains("theme-midnight")) return true;
+        }
+
+        // No theme class: measure the real luminance of Discord's base background.
+        const raw = getComputedStyle(document.documentElement).getPropertyValue("--background-base-lower").trim();
+        if (raw) {
+            const canvas = document.createElement("canvas");
+            canvas.width = canvas.height = 1;
+            const ctx = canvas.getContext("2d");
+            if (ctx) {
+                ctx.fillStyle = "#000";
+                ctx.fillStyle = raw;
+                ctx.fillRect(0, 0, 1, 1);
+                const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+                return (r * 299 + g * 587 + b * 114) / 1000 < 140;
+            }
+        }
+    } catch {
+        // fall through to the OS preference
+    }
+
+    return window.matchMedia?.("(prefers-color-scheme: light)").matches === false;
+}
+
+/** Follows Discord's own theme live (Auto) or the user's forced Dark/Light choice. */
+function useResolvedAppearance(setting: AppearanceSetting): ResolvedAppearance {
+    const [discordIsDark, setDiscordIsDark] = useState(detectDiscordIsDark);
+
+    useEffect(() => {
+        const update = () => setDiscordIsDark(detectDiscordIsDark());
+        const observer = new MutationObserver(update);
+        observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style"] });
+        if (document.body) observer.observe(document.body, { attributes: true, attributeFilter: ["class"] });
+        const media = window.matchMedia?.("(prefers-color-scheme: light)");
+        media?.addEventListener?.("change", update);
+        return () => {
+            observer.disconnect();
+            media?.removeEventListener?.("change", update);
+        };
+    }, []);
+
+    return resolveAppearance(setting, discordIsDark);
+}
+
+function AppearanceToggle({ setting, resolved }: { setting: AppearanceSetting; resolved: ResolvedAppearance; }) {
+    const order: AppearanceSetting[] = ["AUTO", "DARK", "LIGHT"];
+    const next = order[(order.indexOf(setting) + 1) % order.length];
+    const icon = setting === "AUTO" ? "◐" : setting === "DARK" ? "☾" : "☀";
+    const label = t(setting === "AUTO" ? "auto" : setting === "DARK" ? "dark" : "light");
+
+    return (
+        <button
+            type="button"
+            className={cl("appearance-toggle")}
+            title={`${t("customize")}: ${label}`}
+            aria-label={`${t("customize")}: ${label}`}
+            onClick={() => { settings.store.appearance = next; }}
+        >
+            <span aria-hidden="true">{icon}</span>
+            {label}
+        </button>
+    );
+}
+
+// Grid cards use the light preview when there is one. Animated GIFs must keep
+// their animation, so those keep the full-size media.
+function getCardImage(result: PinterestImageResult) {
+    if (result.isGif) return result.url;
+    return result.thumbUrl ?? result.url;
+}
+
+const RECENT_SEARCHES_KEY = "PinterestTool_recent_searches_v1";
+
+function useRecentSearches() {
+    const [recent, setRecent] = useState<string[]>([]);
+    useEffect(() => {
+        DataStore.get(RECENT_SEARCHES_KEY).then(value => {
+            if (Array.isArray(value)) setRecent(value.filter((item): item is string => typeof item === "string").slice(0, 10));
+        }).catch(() => { /* first run */ });
+    }, []);
+
+    function remember(query: string) {
+        const clean = query.trim();
+        if (!clean || clean.length > 80) return;
+        setRecent(current => {
+            const next = [clean, ...current.filter(item => item.toLowerCase() !== clean.toLowerCase())].slice(0, 10);
+            void DataStore.set(RECENT_SEARCHES_KEY, next);
+            return next;
+        });
+    }
+
+    function clear() {
+        setRecent([]);
+        void DataStore.set(RECENT_SEARCHES_KEY, []);
+    }
+
+    return { recent, remember, clear };
 }
 
 function mergeUniqueResults(
     current: PinterestImageResult[],
     incoming: PinterestImageResult[]
 ): PinterestImageResult[] {
-    const seenIds = new Set(current.map(result => result.id));
+    // Ids are only unique inside one source, so key them with the source.
+    const idKey = (result: PinterestImageResult) => `${result.source ?? "PINTEREST"}:${result.id}`;
+    const fileKey = (result: PinterestImageResult) => imageKey(result.url);
+    const looks = new Set(current.map(visualKey).filter(Boolean));
+    const seenFiles = new Set(current.map(fileKey));
+    const seenIds = new Set(current.map(idKey));
     const seenUrls = new Set(current.map(result => result.url));
     const merged = [...current];
 
     for (const result of incoming) {
-        if (seenIds.has(result.id) || seenUrls.has(result.url)) continue;
-        seenIds.add(result.id);
+        const look = visualKey(result);
+        if (seenIds.has(idKey(result)) || seenUrls.has(result.url) || seenFiles.has(fileKey(result)) || (look && looks.has(look))) continue;
+        if (look) looks.add(look);
+        seenIds.add(idKey(result));
+        seenFiles.add(fileKey(result));
         seenUrls.add(result.url);
         merged.push(result);
     }
@@ -140,47 +261,33 @@ function applyImageData(image: string, target: SearchKind, filename: string, gui
     setPendingProfileChanges(payload, guildId);
 }
 
-async function cropStaticBanner(dataUrl: string): Promise<string> {
-    return await new Promise((resolve, reject) => {
-        const image = new Image();
-
-        image.onload = () => {
-            try {
-                const width = 1200;
-                const height = 480;
-                const canvas = document.createElement("canvas");
-                canvas.width = width;
-                canvas.height = height;
-
-                const context = canvas.getContext("2d");
-                if (!context) throw new Error("Could not create banner canvas.");
-
-                const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight);
-                const drawWidth = image.naturalWidth * scale;
-                const drawHeight = image.naturalHeight * scale;
-                const x = (width - drawWidth) / 2;
-                const y = (height - drawHeight) / 2;
-
-                context.drawImage(image, x, y, drawWidth, drawHeight);
-                resolve(canvas.toDataURL("image/png"));
-            } catch (error) {
-                reject(error);
-            }
-        };
-
-        image.onerror = () => reject(new Error("Could not prepare the Pinterest banner."));
-        image.src = dataUrl;
-    });
+// Pinterest does not keep a downloadable original for every pin, so try the
+// original, then the stored fallback, then the 736 px and 474 px copies
+// (favorites saved by older versions have no stored fallback).
+async function fetchResultMedia(result: PinterestImageResult): Promise<NativeMediaResult> {
+    const candidates = [result.url, result.fallbackUrl];
+    if (/\/originals\//.test(result.url)) {
+        candidates.push(result.url.replace("/originals/", "/736x/"), result.url.replace("/originals/", "/474x/"));
+    }
+    let lastError: unknown;
+    for (const url of [...new Set(candidates.filter((value): value is string => Boolean(value)))]) {
+        try {
+            return await Native.fetchMedia(url) as NativeMediaResult;
+        } catch (error) {
+            lastError = error;
+        }
+    }
+    throw lastError ?? new Error("Could not download this image.");
 }
 
-async function fetchProfileFile(result: PinterestImageResult): Promise<File> {
-    const media = await Native.fetchMedia(result.url) as NativeMediaResult;
-    return new File([media.data], media.filename, { type: media.type });
-}
-
-async function applyProfileResult(result: PinterestImageResult, target: SearchKind, guildId?: string): Promise<boolean> {
+async function applyProfileResult(result: PinterestImageResult, target: SearchKind, guildId?: string, override?: { dataUrl: string; filename: string; }): Promise<boolean> {
     try {
-        const media = await Native.fetchMedia(result.url) as NativeMediaResult;
+        if (override) {
+            applyImageData(override.dataUrl, target, override.filename, guildId);
+            return true;
+        }
+
+        const media = await fetchResultMedia(result);
 
         // Do not redraw profile banners through canvas here. Some Pinterest media
         // formats/color profiles can turn into a black frame when re-encoded in
@@ -190,19 +297,19 @@ async function applyProfileResult(result: PinterestImageResult, target: SearchKi
         return true;
     } catch (error) {
         logger.error("Failed to apply Pinterest result", error);
-        copyWithToast(result.url, "Media URL copied to clipboard.");
-        showToast("Could not apply that media. The URL was copied instead.", Toasts.Type.FAILURE);
+        copyWithToast(result.url, t("copied"));
+        showToast(t("applyFailed"), Toasts.Type.FAILURE);
         return false;
     }
 }
 
 async function saveResult(result: PinterestImageResult) {
     try {
-        const media = await Native.fetchMedia(result.url) as NativeMediaResult;
+        const media = await fetchResultMedia(result);
         saveFile(new File([media.data], media.filename, { type: media.type }));
     } catch (error) {
         logger.error("Failed to save Pinterest result", error);
-        showToast("Could not save that media.", Toasts.Type.FAILURE);
+        showToast(t("saveFailed"), Toasts.Type.FAILURE);
     }
 }
 
@@ -269,12 +376,14 @@ async function writeFavoritesForTarget(
         );
     } catch (error) {
         logger.error(`Could not save Pinterest ${target.toLowerCase()} favorites`, error);
-        showToast("Could not save Pinterest favorites.", Toasts.Type.FAILURE);
+        showToast(t("favoritesFailed"), Toasts.Type.FAILURE);
     }
 }
 
+// Pinterest pin ids and DeviantArt deviation ids are both numeric, so the
+// source is part of the key; older favorites without one were Pinterest pins.
 function favoriteKey(result: PinterestImageResult, target: SearchKind) {
-    return `${target}:${result.id}`;
+    return `${target}:${result.source ?? "PINTEREST"}:${result.id}`;
 }
 
 // These were referenced in the pagination buttons below but never defined
@@ -332,57 +441,6 @@ function PillButton({
         >
             {children}
         </button>
-    );
-}
-
-function SelectionDropdown({
-    target,
-    open,
-    onToggle,
-    onSelect
-}: {
-    target: SearchTarget;
-    open: boolean;
-    onToggle(): void;
-    onSelect(target: SearchTarget): void;
-}) {
-    const options: SearchTarget[] = ["ALL", "AVATAR", "BANNER"];
-
-    return (
-        <div className={cl("selection-wrap")}>
-            <button type="button" className={cl("selection-button")} onClick={onToggle}>
-                <span>{target === "ALL" ? "All" : target === "AVATAR" ? "Avatar" : "Banner"}</span>
-                <span className={cl("selection-caret")}>⌄</span>
-            </button>
-            {open ? (
-                <div className={cl("selection-menu")}>
-                    {options.map(option => (
-                        <button
-                            key={option}
-                            type="button"
-                            className={classes(cl("selection-item"), option === target && cl("selection-item-active"))}
-                            onClick={() => onSelect(option)}
-                        >
-                            {option === "ALL" ? "All" : option === "AVATAR" ? "Avatar" : "Banner"}
-                        </button>
-                    ))}
-                </div>
-            ) : null}
-        </div>
-    );
-}
-
-function PinterestLogo({ size = 18 }: { size?: number; }) {
-    return (
-        <svg
-            width={size}
-            height={size}
-            viewBox="0 0 24 24"
-            fill="currentColor"
-            aria-hidden="true"
-        >
-            <path d="M12 0C5.4 0 0 5.4 0 12c0 5.1 3.2 9.4 7.6 11.1-.1-.9-.2-2.3 0-3.3.2-.9 1.3-5.6 1.3-5.6s-.3-.7-.3-1.6c0-1.5.9-2.7 2-2.7.9 0 1.4.7 1.4 1.6 0 1-.6 2.4-1 3.7-.3 1.1.5 2 1.6 2 1.9 0 3.4-2 3.4-5 0-2.6-1.9-4.5-4.6-4.5-3.1 0-5 2.3-5 4.8 0 .9.3 1.8.8 2.4.1.1.1.2 0 .3l-.3 1.2c-.1.2-.2.3-.4.2-1.5-.7-2.4-2.8-2.4-4.6 0-3.7 2.7-7.2 7.8-7.2 4.1 0 7.3 2.9 7.3 6.8 0 4.1-2.6 7.3-6.1 7.3-1.2 0-2.3-.6-2.7-1.4l-.7 2.8c-.3 1-1 2.3-1.4 3.1.1 0 .2.1.3.1 1.1.4 2.2.6 3.4.6 6.6 0 12-5.4 12-12S18.6 0 12 0z" />
-        </svg>
     );
 }
 
@@ -445,7 +503,7 @@ function hsvToHex(h: number, s: number, v: number) {
     else if (h < 180) [r, g, b] = [0, chroma, x];
     else if (h < 240) [r, g, b] = [0, x, chroma];
     else if (h < 300) [r, g, b] = [x, 0, chroma];
-    else[r, g, b] = [chroma, 0, x];
+    else [r, g, b] = [chroma, 0, x];
 
     return rgbToHex((r + m) * 255, (g + m) * 255, (b + m) * 255);
 }
@@ -528,7 +586,7 @@ function ThemePicker({
         const EyeDropperCtor = (window as any).EyeDropper;
 
         if (!EyeDropperCtor) {
-            showToast("The system color picker is not available in this Discord build.", Toasts.Type.FAILURE);
+            showToast(t("colorFailed"), Toasts.Type.FAILURE);
             return;
         }
 
@@ -553,7 +611,7 @@ function ThemePicker({
     }
 
     function copyCurrentHex() {
-        copyWithToast(customAccent.toUpperCase(), "Color copied.");
+        copyWithToast(customAccent.toUpperCase(), t("colorCopied"));
     }
 
     const hueColor = hsvToHex(hue, 1, 1);
@@ -565,8 +623,8 @@ function ThemePicker({
     const presets = ["#1e293b", "#b9dceb", "#2f7d46", "#8b6a2f", "#7b3376"];
 
     return (
-        <div ref={pickerRef} className={cl("theme-picker")} aria-label="Pinterest Tool color theme">
-            <span className={cl("theme-label")}>Theme</span>
+        <div ref={pickerRef} className={cl("theme-picker")} aria-label={t("theme")}>
+            <span className={cl("theme-label")}>{t("theme")}</span>
             <div className={cl("theme-swatches")}>
                 {PINTEREST_THEMES.map(option => (
                     <button
@@ -590,8 +648,8 @@ function ThemePicker({
                         "--pt-custom-swatch": customAccent,
                         "--pt-custom-contrast": customContrast
                     } as any}
-                    title="Custom colour"
-                    aria-label="Choose custom colour"
+                    title={t("customColor")}
+                    aria-label={t("customColor")}
                     aria-expanded={pickerOpen}
                     onClick={() => setPickerOpen(open => !open)}
                 >
@@ -635,7 +693,7 @@ function ThemePicker({
                         min={0}
                         max={359}
                         value={Math.round(hue)}
-                        aria-label="Hue"
+                        aria-label={t("hue")}
                         onChange={event => {
                             const nextHue = Number(event.currentTarget.value);
                             setHue(nextHue);
@@ -655,6 +713,8 @@ function ThemePicker({
                                 onBlur={commitHex}
                                 onKeyDown={event => {
                                     if (event.key === "Enter") {
+                                        // The picker lives inside the search <form>; Enter must not start a search.
+                                        event.preventDefault();
                                         commitHex();
                                         event.currentTarget.blur();
                                     }
@@ -664,8 +724,8 @@ function ThemePicker({
                                 <button
                                     type="button"
                                     className={cl("color-action-button")}
-                                    title="Copy HEX"
-                                    aria-label="Copy HEX color"
+                                    title={t("copyHex")}
+                                    aria-label={t("copyHex")}
                                     onClick={copyCurrentHex}
                                 >
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -675,8 +735,8 @@ function ThemePicker({
                                 <button
                                     type="button"
                                     className={classes(cl("color-action-button"), cl("color-eyedropper"))}
-                                    title="Pick a color from your screen"
-                                    aria-label="Pick a color from your screen"
+                                    title={t("pickColor")}
+                                    aria-label={t("pickColor")}
                                     onClick={() => void pickColorFromScreen()}
                                 >
                                     <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -709,14 +769,87 @@ function ThemePicker({
     );
 }
 
+// Only mounted while a menu is open, so the theme observer below does not run
+// once per result card.
+function FloatingResultMenu({ result, menuRef, position, onClose }: {
+    result: PinterestImageResult;
+    menuRef: { current: HTMLDivElement | null; };
+    position: { top: number; left: number; accent: string; };
+    onClose(): void;
+}) {
+    const { appearance: appearanceSetting } = settings.use(["appearance"]);
+    const appearance = useResolvedAppearance(appearanceSetting as AppearanceSetting);
+
+    return ReactDOMPortal.createPortal(
+        <div
+            ref={menuRef}
+            className={classes(cl("menu"), cl("menu-floating"))}
+            role="menu"
+            style={{
+                // The menu is portaled to <body>, outside the themed root, so it
+                // carries the full palette itself.
+                ...getPinterestFullStyle("custom", position.accent, appearance, appearanceSetting === "AUTO"),
+                top: position.top,
+                left: position.left,
+                "--pt-accent": position.accent
+            } as any}
+            onPointerDown={event => event.stopPropagation()}
+            onClick={event => event.stopPropagation()}
+        >
+            <button type="button" role="menuitem" className={cl("menu-item")} onClick={() => {
+                openImageModal({ url: result.url, original: result.url, width: result.width, height: result.height });
+                onClose();
+            }}>
+                <span className={cl("menu-item-icon")} aria-hidden="true">⌕</span>
+                <span>{t("preview")}</span>
+            </button>
+
+            <button type="button" role="menuitem" className={cl("menu-item")} onClick={() => {
+                copyWithToast(result.url, t("copied"));
+                onClose();
+            }}>
+                <span className={cl("menu-item-icon")} aria-hidden="true">⧉</span>
+                <span>{t("copyLink")}</span>
+            </button>
+
+            <button type="button" role="menuitem" className={cl("menu-item")} onClick={() => {
+                void saveResult(result);
+                onClose();
+            }}>
+                <span className={cl("menu-item-icon")} aria-hidden="true">↓</span>
+                <span>{t("saveImage")}</span>
+            </button>
+
+            {result.pinterestUrl ? (
+                <>
+                    <div className={cl("menu-separator")} />
+                    <button type="button" role="menuitem" className={cl("menu-item")} onClick={() => {
+                        VencordNative.native.openExternal(result.pinterestUrl!);
+                        onClose();
+                    }}>
+                        <span className={cl("menu-item-icon")} aria-hidden="true">↗</span>
+                        <span>{t("openSource", { source: "Pinterest" })}</span>
+                    </button>
+                </>
+            ) : null}
+
+            <div className={cl("menu-resolution")}>{result.width} × {result.height}</div>
+        </div>,
+        document.body
+    );
+}
+
 function ResultMenu({
     result,
     open,
-    onToggle
+    onToggle,
+    anchor
 }: {
     result: PinterestImageResult;
     open: boolean;
     onToggle(): void;
+    /** Mouse position when opened with a right-click; null opens under the ••• button. */
+    anchor?: { x: number; y: number; } | null;
 }) {
     const buttonRef = useRef<HTMLButtonElement>(null);
     const menuRef = useRef<HTMLDivElement>(null);
@@ -730,16 +863,18 @@ function ResultMenu({
         const button = buttonRef.current;
         if (!button) return;
 
-        const rect = button.getBoundingClientRect();
+        const rect = anchor
+            ? { left: anchor.x, right: anchor.x + 164, top: anchor.y, bottom: anchor.y }
+            : button.getBoundingClientRect();
         const menuWidth = 164;
         const estimatedMenuHeight = 190;
         const gap = 6;
         const margin = 8;
 
-        let left = rect.right - menuWidth;
+        let left = anchor ? anchor.x : rect.right - menuWidth;
         left = Math.max(margin, Math.min(left, window.innerWidth - menuWidth - margin));
 
-        let top = rect.bottom + gap;
+        let top = rect.bottom + (anchor ? 2 : gap);
         if (top + estimatedMenuHeight > window.innerHeight - margin) {
             top = Math.max(margin, rect.top - estimatedMenuHeight - gap);
         }
@@ -748,14 +883,23 @@ function ResultMenu({
         setMenuPosition({ top, left, accent });
     }
 
+    // Position before the browser paints, so the menu never flashes at its
+    // previous spot (or the corner) and then jumps to the cursor.
+    const openedAtRef = useRef(0);
+    useLayoutEffect(() => {
+        if (!open) return;
+        openedAtRef.current = Date.now();
+        updateMenuPosition();
+    }, [open, anchor]);
+
     useEffect(() => {
         if (!open) return;
-
-        updateMenuPosition();
 
         function handlePointerDown(event: PointerEvent) {
             const target = event.target as Node;
             if (buttonRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+            // The press that opened the menu (a right-click) can still be in flight.
+            if (Date.now() - openedAtRef.current < 300) return;
             closeMenu();
         }
 
@@ -778,62 +922,11 @@ function ResultMenu({
             window.removeEventListener("resize", handleViewportChange);
             window.removeEventListener("scroll", handleViewportChange, true);
         };
-    }, [open]);
+    }, [open, anchor]);
 
-    const floatingMenu = open ? ReactDOMPortal.createPortal(
-        <div
-            ref={menuRef}
-            className={classes(cl("menu"), cl("menu-floating"))}
-            role="menu"
-            style={{
-                top: menuPosition.top,
-                left: menuPosition.left,
-                "--pt-accent": menuPosition.accent
-            } as any}
-            onPointerDown={event => event.stopPropagation()}
-            onClick={event => event.stopPropagation()}
-        >
-            <button type="button" role="menuitem" className={cl("menu-item")} onClick={() => {
-                openImageModal({ url: result.url, original: result.url, width: result.width, height: result.height });
-                closeMenu();
-            }}>
-                <span className={cl("menu-item-icon")} aria-hidden="true">⌕</span>
-                <span>Preview</span>
-            </button>
-
-            <button type="button" role="menuitem" className={cl("menu-item")} onClick={() => {
-                copyWithToast(result.url, "Media URL copied to clipboard.");
-                closeMenu();
-            }}>
-                <span className={cl("menu-item-icon")} aria-hidden="true">⧉</span>
-                <span>Copy link</span>
-            </button>
-
-            <button type="button" role="menuitem" className={cl("menu-item")} onClick={() => {
-                void saveResult(result);
-                closeMenu();
-            }}>
-                <span className={cl("menu-item-icon")} aria-hidden="true">↓</span>
-                <span>Save image</span>
-            </button>
-
-            {result.pinterestUrl ? (
-                <>
-                    <div className={cl("menu-separator")} />
-                    <button type="button" role="menuitem" className={cl("menu-item")} onClick={() => {
-                        VencordNative.native.openExternal(result.pinterestUrl!);
-                        closeMenu();
-                    }}>
-                        <span className={cl("menu-item-icon")} aria-hidden="true">↗</span>
-                        <span>Open Pinterest</span>
-                    </button>
-                </>
-            ) : null}
-
-            <div className={cl("menu-resolution")}>{result.width} × {result.height}</div>
-        </div>,
-        document.body
-    ) : null;
+    const floatingMenu = open
+        ? <FloatingResultMenu result={result} menuRef={menuRef} position={menuPosition} onClose={closeMenu}/>
+        : null;
 
     return (
         <div className={cl("menu-wrap")}>
@@ -841,7 +934,7 @@ function ResultMenu({
                 ref={buttonRef}
                 type="button"
                 className={cl("menu-button")}
-                aria-label="Image options"
+                aria-label={t("options")}
                 aria-expanded={open}
                 onPointerDown={event => {
                     // Do not let the lower-row options button receive browser focus.
@@ -864,310 +957,189 @@ function ResultMenu({
     );
 }
 
-function ResultsSection({
-    kind,
-    bucket,
-    menuId,
-    gifsOnly,
-    slotCount,
-    setMenuId,
-    setBuckets,
-    onLoadNextPage,
-    onPageChange,
-    onSelectResult,
-    isFavorite,
-    onToggleFavorite
-}: {
-    kind: SearchKind;
-    bucket: SearchBucketState;
-    menuId: string;
-    gifsOnly: boolean;
-    slotCount: number;
+type ResultSort = "relevance" | "quality" | "shape";
+
+function SearchIcon() {
+    return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" strokeWidth="1.8"/><path d="m16 16 4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>;
+}
+
+function ResultCard({ result, kind, favorite, menuId, setMenuId, onSelect, onFavorite, round = false }: {
+    result: PinterestImageResult; kind: SearchKind; favorite: boolean; menuId: string;
     setMenuId: Dispatch<SetStateAction<string>>;
-    setBuckets: Dispatch<SetStateAction<Record<SearchKind, SearchBucketState>>>;
-    onLoadNextPage(kind: SearchKind): void;
-    onPageChange(kind: SearchKind): void;
-    onSelectResult(result: PinterestImageResult, kind: SearchKind): void;
-    isFavorite(result: PinterestImageResult, kind: SearchKind): boolean;
-    onToggleFavorite(result: PinterestImageResult, kind: SearchKind): void;
+    onSelect(result: PinterestImageResult, kind: SearchKind): void;
+    onFavorite(result: PinterestImageResult, kind: SearchKind): void;
+    round?: boolean;
 }) {
-    const visibleResults = useMemo(() => bucket.data?.results ?? [], [bucket.data]);
-
-    const totalPages = Math.max(1, Math.ceil(visibleResults.length / slotCount));
-    const pagedResults = visibleResults.slice(bucket.page * slotCount, bucket.page * slotCount + slotCount);
-    const basePageLabel = bucket.bookmark?.length ? `Page ${bucket.page + 1}` : `Page ${bucket.page + 1} / ${totalPages}`;
-    const pageLabel = gifsOnly && pagedResults.length
-        ? `${basePageLabel} · ${pagedResults.length} GIF${pagedResults.length === 1 ? "" : "s"}`
-        : basePageLabel;
-
-    if (!bucket.error && bucket.data == null) return null;
-
+    const [loaded, setLoaded] = useState(false);
+    const [broken, setBroken] = useState(false);
+    const key = kind + ":" + (result.source ?? "PINTEREST") + ":" + result.id;
+    const src = getCardImage(result);
+    useEffect(() => { setLoaded(false); setBroken(false); }, [src]);
+    const label = getResultLabel(result);
+    const [anchor, setAnchor] = useState<{ x: number; y: number; } | null>(null);
+    // Right-click opens the same options as the ••• button, at the cursor. A
+    // native listener on the card stops the event here, so Discord's own
+    // context-menu handlers further up never see it (they closed the menu).
+    const cardRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        const card = cardRef.current;
+        if (!card) return;
+        const onContextMenu = (event: MouseEvent) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setAnchor({ x: event.clientX, y: event.clientY });
+            setMenuId(key);
+        };
+        card.addEventListener("contextmenu", onContextMenu);
+        return () => card.removeEventListener("contextmenu", onContextMenu);
+    }, [key]);
     return (
-        <section className={cl("section")}>
-            <div className={cl("section-header")}>
-                <div className={cl("section-title")}>
-                    {kind === "BANNER" ? "Banner results" : "Icon results"}
-                </div>
-                <div className={cl("page-indicator")}>{pageLabel}</div>
+        <div role="button" tabIndex={0} className={classes(cl("card"), round && kind === "AVATAR" && cl("card-round"))}
+            aria-label={t("select") + ": " + label} onClick={() => onSelect(result, kind)}
+            ref={cardRef}
+            onKeyDown={event => {
+                if (event.target !== event.currentTarget) return;
+                if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(result, kind); }
+            }}>
+            <div className={cl("card-top")}>
+                <button type="button" className={classes(cl("favorite-button"), favorite && cl("favorite-button-active"))}
+                    aria-label={t(favorite ? "removeFavorite" : "addFavorite")} title={t(favorite ? "removeFavorite" : "addFavorite")}
+                    aria-pressed={favorite} onClick={event => { event.stopPropagation(); onFavorite(result, kind); }}><HeartIcon filled={favorite}/></button>
+                <ResultMenu result={result} open={menuId === key} anchor={anchor}
+                    onToggle={() => { setAnchor(null); setMenuId(current => current === key ? "" : key); }}/>
             </div>
-            {bucket.error ? <div className={cl("state")}>{bucket.error}</div> : null}
-            {!bucket.error && bucket.data != null && !pagedResults.length ? (
-                <div className={cl("empty-state")}>
-                    <div className={cl("empty-state-title")}>
-                        {gifsOnly ? "No direct GIFs found" : "No results found"}
-                    </div>
-                    <div className={cl("empty-state-copy")}>
-                        {gifsOnly
-                            ? "Pinterest often returns video previews instead of real .gif files. Try another search or use Images."
-                            : "Try a shorter or different search."}
+            <div className={classes(cl("art"), kind === "BANNER" && cl("art-banner"), loaded && cl("art-loaded"))}>
+                {!broken ? <img src={src} alt={label} loading="lazy" decoding="async" draggable={false}
+                    onLoad={() => setLoaded(true)} onError={event => {
+                        if (result.fallbackUrl && event.currentTarget.dataset.fallback !== "1") {
+                            event.currentTarget.dataset.fallback = "1"; event.currentTarget.src = result.fallbackUrl;
+                        } else { setBroken(true); setLoaded(true); }
+                    }}/> : <span className={cl("preview-error")}>{t("previewUnavailable")}</span>}
+                <div className={cl("card-info")}>
+                    <div className={cl("card-info-title")} title={label}>{label}</div>
+                    <div className={cl("card-info-meta")}>
+                        <span>{result.width} × {result.height}</span>
+                        {result.isGif ? <span>GIF</span> : Math.min(result.width, result.height) < 250 ? <span>{t("lowRes")}</span> : null}
+                        {result.author ? <span>{t("by", { author: result.author })}</span> : null}
                     </div>
                 </div>
-            ) : null}
-            {bucket.data != null && (pagedResults.length > 0 || bucket.page > 0 || Boolean(bucket.bookmark?.length)) ? (
-                <div className={cl("section-body")}>
-                    <div className={cl("page-nav-sticky")}>
-                        <button
-                            type="button"
-                            aria-label="Previous results"
-                            title="Previous"
-                            className={classes(cl("page-button"), cl("page-button-side"), cl("page-button-left"))}
-                            disabled={bucket.page === 0}
-                            onMouseDown={event => event.preventDefault()}
-                            onClick={() => {
-                                onPageChange(kind);
-                                setBuckets(current => ({
-                                    ...current,
-                                    [kind]: {
-                                        ...current[kind],
-                                        page: Math.max(0, current[kind].page - 1)
-                                    }
-                                }));
-                            }}
-                        >
-                            <ChevronLeftIcon />
-                        </button>
-
-                        <button
-                            type="button"
-                            aria-label="Next results"
-                            title="Next"
-                            className={classes(cl("page-button"), cl("page-button-side"), cl("page-button-right"))}
-                            disabled={bucket.loadingNextPage || (bucket.page >= totalPages - 1 && !bucket.bookmark?.length)}
-                            onMouseDown={event => event.preventDefault()}
-                            onClick={() => {
-                                onPageChange(kind);
-
-                                if (bucket.page < totalPages - 1) {
-                                    setBuckets(current => ({
-                                        ...current,
-                                        [kind]: {
-                                            ...current[kind],
-                                            page: Math.min(totalPages - 1, current[kind].page + 1)
-                                        }
-                                    }));
-                                    return;
-                                }
-
-                                onLoadNextPage(kind);
-                            }}
-                        >
-                            {bucket.loadingNextPage ? <span className={cl("page-loading")}>•••</span> : <ChevronRightIcon />}
-                        </button>
-                    </div>
-
-                    {pagedResults.length ? (
-                        <div className={classes(
-                            cl("grid"),
-                            kind === "BANNER" && cl("grid-banner"),
-                            gifsOnly && kind !== "BANNER" && pagedResults.length > 0 && pagedResults.length < slotCount && cl("grid-gif-sparse")
-                        )}>
-                            {pagedResults.map(result => (
-                                <div
-                                    key={`${kind}-${result.id}`}
-                                    role="button"
-                                    tabIndex={0}
-                                    className={cl("card")}
-                                    onMouseDown={event => event.preventDefault()}
-                                    onClick={() => onSelectResult(result, kind)}
-                                    onKeyDown={event => {
-                                        if (event.currentTarget !== event.target) return;
-                                        if (event.key === "Enter" || event.key === " ") {
-                                            event.preventDefault();
-                                            onSelectResult(result, kind);
-                                        }
-                                    }}
-                                >
-                                    <div className={cl("card-top")}>
-                                        <button
-                                            type="button"
-                                            className={classes(cl("favorite-button"), isFavorite(result, kind) && cl("favorite-button-active"))}
-                                            aria-label={isFavorite(result, kind) ? "Remove from favorites" : "Add to favorites"}
-                                            title={isFavorite(result, kind) ? "Remove from favorites" : "Add to favorites"}
-                                            onMouseDown={event => event.stopPropagation()}
-                                            onClick={event => {
-                                                event.preventDefault();
-                                                event.stopPropagation();
-                                                onToggleFavorite(result, kind);
-                                            }}
-                                        >
-                                            <HeartIcon filled={isFavorite(result, kind)} />
-                                        </button>
-                                        <ResultMenu
-                                            result={result}
-                                            open={menuId === `${kind}:${result.id}`}
-                                            onToggle={() => setMenuId(current => current === `${kind}:${result.id}` ? "" : `${kind}:${result.id}`)}
-                                        />
-                                    </div>
-                                    <div className={classes(cl("art"), kind === "BANNER" && cl("art-banner"))}>
-                                        <img src={result.url} alt={result.title || bucket.activeQuery} />
-                                        <span className={cl("card-use")}>Select</span>
-                                    </div>
-                                    <div className={cl("card-bottom")}>
-                                        <div className={cl("card-title")}>{getResultLabel(result)}</div>
-                                        <div className={cl("card-meta")}>
-                                            {result.isGif ? <span>GIF</span> : <span>Image</span>}
-                                            <span>{targetLabel(kind)}</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    ) : null}
-                </div>
-            ) : null}
-        </section>
+            </div>
+        </div>
     );
 }
 
-function FavoritesSection({
-    target,
-    favorites,
-    slotCount,
-    page,
-    setPage,
-    menuId,
-    setMenuId,
-    onSelectResult,
-    onToggleFavorite
-}: {
-    target: SearchKind;
-    favorites: PinterestFavorite[];
-    slotCount: number;
-    page: number;
-    setPage(page: number): void;
-    menuId: string;
-    setMenuId: Dispatch<SetStateAction<string>>;
-    onSelectResult(result: PinterestImageResult, kind: SearchKind): void;
-    onToggleFavorite(result: PinterestImageResult, kind: SearchKind): void;
+// Columns, rows and card shape for one page. The stylesheet sizes the cards
+// from these so a whole page always fits the space without scrolling.
+function gridVars(kind: SearchKind) {
+    return (kind === "BANNER"
+        ? { "--cols": 2, "--rows": 2, "--ratio": 2.5 }
+        : { "--cols": 4, "--rows": 2, "--ratio": 1 }) as any;
+}
+
+// Round page arrows centred on each side of the grid. The gutters are always
+// reserved so the grid keeps the same width whether or not there are pages.
+function SidePager({ enabled, canPrevious, canNext, loadingNext, onPrevious, onNext, children }: {
+    enabled: boolean; canPrevious: boolean; canNext: boolean; loadingNext?: boolean;
+    onPrevious(): void; onNext(): void; children: ReactNode;
 }) {
-    const visible = useMemo(
-        () => favorites.filter(item => item.target === target).sort((a, b) => b.savedAt - a.savedAt),
-        [favorites, target]
-    );
+    return <div className={cl("paged")}>
+        {enabled ? <button type="button" className={classes(cl("page-arrow"), cl("page-arrow-prev"))} disabled={!canPrevious} aria-label={t("previous")} title={t("previous")}
+            onPointerDown={event => event.preventDefault()} onClick={onPrevious}><ChevronLeftIcon/></button> : null}
+        <div className={cl("paged-inner")}>{children}</div>
+        {enabled ? <button type="button" className={classes(cl("page-arrow"), cl("page-arrow-next"))} disabled={!canNext} aria-label={t("next")} title={t("next")}
+            onPointerDown={event => event.preventDefault()} onClick={onNext}>{loadingNext ? <span className={cl("page-arrow-spinner")}/> : <ChevronRightIcon/>}</button> : null}
+    </div>;
+}
 
+function ResultsSection({ kind, bucket, menuId, gifsOnly, slotCount, setMenuId, setBuckets,
+    onLoadNextPage, onPageChange, onSelectResult, isFavorite, onToggleFavorite, onRetry,
+    loading, sort, round }: {
+    kind: SearchKind; bucket: SearchBucketState; menuId: string; gifsOnly: boolean; slotCount: number;
+    setMenuId: Dispatch<SetStateAction<string>>; setBuckets: Dispatch<SetStateAction<Record<SearchKind, SearchBucketState>>>;
+    onLoadNextPage(kind: SearchKind, advance?: boolean): void; onPageChange(kind: SearchKind): void;
+    onSelectResult(result: PinterestImageResult, kind: SearchKind): void;
+    isFavorite(result: PinterestImageResult, kind: SearchKind): boolean;
+    onToggleFavorite(result: PinterestImageResult, kind: SearchKind): void;
+    onRetry(): void; loading: boolean; sort: ResultSort; round: boolean;
+}) {
+    const visible = useMemo(() => {
+        const items = [...(bucket.data?.results ?? [])];
+        if (sort === "quality") items.sort((a, b) => Math.min(b.width, b.height) - Math.min(a.width, a.height));
+        if (sort === "shape") items.sort((a, b) => shapeDistance(a, kind) - shapeDistance(b, kind));
+        return items;
+    }, [bucket.data, sort, kind]);
     const totalPages = Math.max(1, Math.ceil(visible.length / slotCount));
-    const safePage = Math.min(page, totalPages - 1);
-    const paged = visible.slice(safePage * slotCount, safePage * slotCount + slotCount);
-
+    const safePage = Math.min(bucket.page, totalPages - 1);
+    const paged = visible.slice(safePage * slotCount, (safePage + 1) * slotCount);
+    const prefetchedRef = useRef("");
     useEffect(() => {
-        if (page !== safePage) setPage(safePage);
-    }, [page, safePage]);
+        if (!bucket.data || loading || bucket.loadingNextPage || !bucket.bookmark?.length || visible.length > 240) return;
+        if (safePage < totalPages - 2 || totalPages === 1) return;
+        const key = JSON.stringify([bucket.activeQuery, bucket.bookmark]);
+        if (prefetchedRef.current === key) return;
+        const timer = window.setTimeout(() => { prefetchedRef.current = key; onLoadNextPage(kind, false); }, 400);
+        return () => window.clearTimeout(timer);
+    }, [bucket.activeQuery, bucket.bookmark, bucket.loadingNextPage, safePage, totalPages, loading]);
+    const showPager = (!loading || paged.length > 0) && (totalPages > 1 || Boolean(bucket.bookmark?.length));
+    const pageLabel = bucket.bookmark?.length ? t("page", { page: safePage + 1 }) : t("pageOf", { page: safePage + 1, total: totalPages });
+    function previous() {
+        onPageChange(kind);
+        setBuckets(current => ({ ...current, [kind]: { ...current[kind], page: Math.max(0, safePage - 1) } }));
+    }
+    function next() {
+        onPageChange(kind);
+        if (safePage < totalPages - 1) setBuckets(current => ({ ...current, [kind]: { ...current[kind], page: safePage + 1 } }));
+        else onLoadNextPage(kind);
+    }
+    return <section className={cl("section")} aria-busy={loading}>
+        <div className={cl("section-header")}><div className={cl("section-heading")}><span className={cl("section-title")}>{t(kind === "BANNER" ? "bannerResults" : kind === "IMAGE" ? "imageResults" : "iconResults")}</span>
+            <span className={cl("section-caption")}>{loading ? t("loading") : t("results", { count: visible.length })}</span>
+            {showPager ? <span className={cl("page-label")} role="status" aria-live="polite">{bucket.loadingNextPage ? t("moreLoading") : pageLabel}</span> : null}</div>
+</div>
 
-    return (
-        <section className={cl("section")}>
-            <div className={cl("section-header")}>
-                <div className={cl("section-title")}>{target === "BANNER" ? "Banner Favorites" : "Avatar Favorites"}</div>
-                <div className={cl("page-indicator")}>
-                    {visible.length ? `Page ${safePage + 1} / ${totalPages}` : "Saved pins"}
-                </div>
-            </div>
+        <SidePager enabled={showPager} canPrevious={safePage > 0} loadingNext={bucket.loadingNextPage && safePage >= totalPages - 1}
+            canNext={!loading && (safePage < totalPages - 1 || (!bucket.loadingNextPage && Boolean(bucket.bookmark?.length)))}
+            onPrevious={previous} onNext={next}>
+        {loading && !visible.length ? <div className={classes(cl("grid"), kind === "BANNER" && cl("grid-banner"))} style={gridVars(kind)} aria-hidden="true">
+            {Array.from({ length: slotCount }, (_, i) => <div key={i} className={classes(cl("skeleton"), kind === "BANNER" && cl("skeleton-banner"))}/>)}</div> : bucket.error ?
+            <div className={cl("empty-state")} role="alert"><SearchIcon/><div className={cl("empty-state-title")}>{t("searchFailed")}</div><div className={cl("empty-state-copy")}>{t("errorHint")}</div>
+                {bucket.error ? <div className={cl("empty-state-detail")}>{bucket.error}</div> : null}
+                <button type="button" className={cl("empty-state-action")} onClick={onRetry}>{t("retry")}</button></div> : !paged.length ?
+            <div className={cl("empty-state")}><SearchIcon/><div className={cl("empty-state-title")}>{t(gifsOnly ? "emptyGifs" : "empty")}</div>
+                <div className={cl("empty-state-copy")}>{t(gifsOnly ? "gifCopy" : "emptyCopy")}</div></div> :
+            <div className={classes(cl("grid"), kind === "BANNER" && cl("grid-banner"))} style={gridVars(kind)}>
+                {paged.map(result => <ResultCard key={kind + ":" + result.source + ":" + result.id} result={result} kind={kind} favorite={isFavorite(result, kind)} menuId={menuId} setMenuId={setMenuId}
+                    onSelect={onSelectResult} onFavorite={onToggleFavorite} round={round}/>)}</div>}
+        </SidePager>
+    </section>;
+}
 
-            {!visible.length ? (
-                <div className={cl("favorites-empty")}>
-                    <div className={cl("favorites-empty-heart")}><HeartIcon /></div>
-                    <div className={cl("empty-state-title")}>No favorites yet</div>
-                    <div className={cl("empty-state-copy")}>Tap the heart on a result to keep it here.</div>
-                </div>
-            ) : (
-                <div className={cl("section-body")}>
-                    <div className={cl("page-nav-sticky")}>
-                        <button
-                            type="button"
-                            aria-label="Previous favorites"
-                            title="Previous"
-                            className={classes(cl("page-button"), cl("page-button-side"), cl("page-button-left"))}
-                            disabled={safePage === 0}
-                            onClick={() => setPage(Math.max(0, safePage - 1))}
-                        >
-                            <ChevronLeftIcon />
-                        </button>
-
-                        <button
-                            type="button"
-                            aria-label="Next favorites"
-                            title="Next"
-                            className={classes(cl("page-button"), cl("page-button-side"), cl("page-button-right"))}
-                            disabled={safePage >= totalPages - 1}
-                            onClick={() => setPage(Math.min(totalPages - 1, safePage + 1))}
-                        >
-                            <ChevronRightIcon />
-                        </button>
-                    </div>
-
-                    <div className={classes(cl("grid"), target === "BANNER" && cl("grid-banner"))}>
-                        {paged.map(result => (
-                            <div
-                                key={`favorite-${target}-${result.id}`}
-                                role="button"
-                                tabIndex={0}
-                                className={cl("card")}
-                                onMouseDown={event => event.preventDefault()}
-                                onClick={() => onSelectResult(result, target)}
-                                onKeyDown={event => {
-                                    if (event.currentTarget !== event.target) return;
-                                    if (event.key === "Enter" || event.key === " ") {
-                                        event.preventDefault();
-                                        onSelectResult(result, target);
-                                    }
-                                }}
-                            >
-                                <div className={cl("card-top")}>
-                                    <button
-                                        type="button"
-                                        className={classes(cl("favorite-button"), cl("favorite-button-active"))}
-                                        aria-label="Remove from favorites"
-                                        title="Remove from favorites"
-                                        onMouseDown={event => event.stopPropagation()}
-                                        onClick={event => {
-                                            event.preventDefault();
-                                            event.stopPropagation();
-                                            onToggleFavorite(result, target);
-                                        }}
-                                    >
-                                        <HeartIcon filled />
-                                    </button>
-                                    <ResultMenu
-                                        result={result}
-                                        open={menuId === `favorite:${target}:${result.id}`}
-                                        onToggle={() => setMenuId(current =>
-                                            current === `favorite:${target}:${result.id}`
-                                                ? ""
-                                                : `favorite:${target}:${result.id}`
-                                        )}
-                                    />
-                                </div>
-
-                                <div className={classes(cl("art"), target === "BANNER" && cl("art-banner"))}>
-                                    <img src={result.url} alt={result.title || "Favorite Pinterest image"} />
-                                    <span className={cl("card-use")}>Select</span>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            )}
-        </section>
-    );
+function FavoritesSection({ target, favorites, slotCount, page, setPage, menuId, setMenuId, onSelectResult, onToggleFavorite }: {
+    target: SearchKind; favorites: PinterestFavorite[]; slotCount: number; page: number;
+    setPage: Dispatch<SetStateAction<number>>; menuId: string; setMenuId: Dispatch<SetStateAction<string>>;
+    onSelectResult(result: PinterestImageResult, kind: SearchKind): void; onToggleFavorite(result: PinterestImageResult, kind: SearchKind): void;
+}) {
+    // Saved images and GIFs are listed in separate sections.
+    const [kindFilter, setKindFilter] = useState<"images" | "gifs">("images");
+    const forTarget = favorites.filter(item => item.target === target);
+    const gifCount = forTarget.filter(item => item.isGif).length;
+    const visible = forTarget.filter(item => kindFilter === "gifs" ? item.isGif : !item.isGif);
+    const total = Math.max(1, Math.ceil(visible.length / slotCount));
+    const current = Math.min(page, total - 1);
+    return <section className={classes(cl("section"), cl("section-favorites"))}><div className={cl("section-header")}><div className={cl("section-heading")}>
+        <div className={cl("fav-tabs")} role="tablist" aria-label={t("favorites")}>
+            {([["images", t("images"), forTarget.length - gifCount], ["gifs", "GIF", gifCount]] as const).map(([id, label, count]) =>
+                <button key={id} type="button" role="tab" aria-selected={kindFilter === id} className={classes(cl("fav-tab"), kindFilter === id && cl("fav-tab-active"))}
+                    onClick={() => { setKindFilter(id); setPage(0); }}>{label}<span className={cl("tab-count")}>{count}</span></button>)}
+        </div>
+        {total > 1 ? <span className={cl("page-label")}>{t("pageOf", { page: current + 1, total })}</span> : null}</div></div>
+        <SidePager enabled={total > 1} canPrevious={current > 0} canNext={current < total - 1} onPrevious={() => setPage(current - 1)} onNext={() => setPage(current + 1)}>
+        {!visible.length ? <div className={cl("favorites-empty")}><div className={cl("favorites-empty-heart")}><HeartIcon/></div><div className={cl("empty-state-title")}>{t("favoritesEmpty")}</div><div className={cl("empty-state-copy")}>{t("favoritesCopy")}</div></div> : <>
+            <div className={classes(cl("grid"), target === "BANNER" && cl("grid-banner"))} style={gridVars(target)}>{visible.slice(current * slotCount, (current + 1) * slotCount).map(result =>
+                <ResultCard key={"favorite:" + result.source + ":" + result.id} result={result} kind={target} favorite menuId={menuId} setMenuId={setMenuId} onSelect={onSelectResult} onFavorite={onToggleFavorite}/>)}</div>
+        </>}
+        </SidePager>
+    </section>;
 }
 
 interface PinterestBrowserProps {
@@ -1177,13 +1149,7 @@ interface PinterestBrowserProps {
     onSelectResult(result: PinterestImageResult, kind: SearchKind): void;
     rootClassName: string;
     initialTarget: SearchTarget;
-    showTargetSelector: boolean;
     initialDiscoveryQuery?: string;
-    panelProps?: {
-        id?: string;
-        role?: "tabpanel";
-        "aria-labelledby"?: string;
-    };
 }
 
 function PinterestBrowser({
@@ -1193,18 +1159,23 @@ function PinterestBrowser({
     onSelectResult,
     rootClassName,
     initialTarget,
-    showTargetSelector,
-    initialDiscoveryQuery,
-    panelProps
+    initialDiscoveryQuery
 }: PinterestBrowserProps) {
-    const { colorTheme, customAccent } = settings.use(["colorTheme", "customAccent"]);
+    const { colorTheme, customAccent, randomizeSearch, appearance } = settings.use(["colorTheme", "customAccent", "randomizeSearch", "appearance"]);
+    const resolvedAppearance = useResolvedAppearance(appearance as AppearanceSetting);
+    useLocale();
+    const [sort, setSort] = useState<ResultSort>("relevance");
+    const [roundPreview, setRoundPreview] = useState(false);
+    const pagingRequests = useRef(new Set<string>());
+    const recentSearches = useRecentSearches();
 
     const scrollRef = useRef<HTMLDivElement>(null);
     const browserRef = useRef<HTMLDivElement>(null);
     // Images and GIFs own independent request generations. Switching tabs must
     // never invalidate a request that is still finishing in the background.
     const requestGenerationRef = useRef<Record<SearchMediaMode, number>>({ IMAGES: 0, GIFS: 0 });
-    const [target, setTarget] = useState<SearchTarget>(initialTarget);
+    // Fixed per window: the profile picker opens for either an avatar or a banner.
+    const target = initialTarget;
     const [gifsOnly, setGifsOnly] = useState(false);
     const [favoritesOnly, setFavoritesOnly] = useState(false);
     const [favorites, setFavorites] = useState<PinterestFavorite[]>([]);
@@ -1225,7 +1196,6 @@ function PinterestBrowser({
         GIFS: ""
     });
     const [menuId, setMenuId] = useState("");
-    const [selectionOpen, setSelectionOpen] = useState(false);
     const [tabQueries, setTabQueries] = useState<Record<SearchMediaMode, string>>({
         IMAGES: query,
         GIFS: ""
@@ -1257,6 +1227,42 @@ function PinterestBrowser({
     // accidentally start a brand-new randomized search. Editing the text still makes
     // Search available immediately, so typo corrections remain instant.
     const isPagingVisibleQuery = isLoadingNextPage && isSameAsLastSearch;
+
+    // <details> stays open until its summary is clicked again; close the
+    // appearance panel on an outside click or Escape like the other popovers.
+    const personalizeRef = useRef<HTMLDetailsElement>(null);
+    useEffect(() => {
+        function close(event: Event) {
+            const details = personalizeRef.current;
+            if (!details?.open) return;
+            if (event instanceof KeyboardEvent) {
+                if (event.key !== "Escape") return;
+                // Close only the panel, not the whole Pinterest Tool window.
+                event.stopPropagation();
+                details.open = false;
+            } else if (!details.contains(event.target as Node)) details.open = false;
+        }
+        document.addEventListener("pointerdown", close, true);
+        document.addEventListener("keydown", close, true);
+        return () => {
+            document.removeEventListener("pointerdown", close, true);
+            document.removeEventListener("keydown", close, true);
+        };
+    }, []);
+
+    const [suggestOpen, setSuggestOpen] = useState(false);
+    const typedLower = query.trim().toLowerCase();
+    const matchingRecent = recentSearches.recent
+        .filter(item => !typedLower || (item.toLowerCase().includes(typedLower) && item.toLowerCase() !== typedLower))
+        .slice(0, 5);
+    const relatedGuides = (getGuideSource()?.guides ?? []).slice(0, 8);
+    const showSuggestions = suggestOpen && !favoritesOnly && (matchingRecent.length > 0 || relatedGuides.length > 0);
+
+    function pickSuggestion(value: string) {
+        setSuggestOpen(false);
+        updateVisibleQuery(value);
+        void runSearch(value, gifsOnly, true);
+    }
 
     function focusSearchInput() {
         const input = browserRef.current?.querySelector<HTMLInputElement>(`.${cl("search-field")} input`);
@@ -1313,12 +1319,10 @@ function PinterestBrowser({
         });
     }
 
-    function getResultsPerRequest(kind: SearchKind) {
-        // Keep the broad fetch pool used by the stable build while page sizes stay fixed.
-        const base = Math.max(AVATAR_RESULTS_PER_PAGE, BANNER_RESULTS_PER_PAGE);
-        return kind === "BANNER"
-            ? Math.max(48, base * 18)
-            : Math.max(32, base * 12);
+    // Pinterest's own web client reads 25 pins per page. Smaller requests cost
+    // the same round-trip and leave banner searches with too few wide images.
+    function getResultsPerRequest() {
+        return 25;
     }
 
     function currentFavoriteTarget(): SearchKind {
@@ -1353,100 +1357,51 @@ function PinterestBrowser({
     async function runSearch(nextQuery = query, nextGifsOnly = gifsOnly, manual = false) {
         const trimmed = nextQuery.trim();
         if (!trimmed) return;
-
         const mode: SearchMediaMode = nextGifsOnly ? "GIFS" : "IMAGES";
         const kinds = getSearchKinds(target);
         const generation = ++requestGenerationRef.current[mode];
-
+        const isCurrent = () => generation === requestGenerationRef.current[mode];
         setFavoritesOnly(false);
         setLoadingByMode(current => ({ ...current, [mode]: true }));
-        // Search feedback belongs to the tab that launched it. The other tab can
-        // be opened while this request keeps running and caching its result.
         setManualSearchingByMode(current => ({ ...current, [mode]: manual }));
-        if (manual) {
-            setManualSearchQueryByMode(current => ({ ...current, [mode]: trimmed }));
-        }
+        setManualSearchQueryByMode(current => ({ ...current, [mode]: manual ? trimmed : "" }));
         setMenuId("");
         setBucketsForMode(mode, current => {
             const next = { ...current };
-            for (const kind of kinds) {
-                next[kind] = createEmptyBucket();
-            }
+            for (const kind of kinds) next[kind] = createEmptyBucket();
             return next;
         });
+        scrollPositionsRef.current[mode] = 0;
+        scrollRef.current?.scrollTo({ top: 0 });
 
-        try {
-            const responses = await Promise.all(kinds.map(async kind => {
-                const response = await Native.search(
-                    trimmed,
-                    getResultsPerRequest(kind),
-                    nextGifsOnly ? "GIFS" : "STATIC",
-                    [],
-                    kind
-                ) as PinterestSearchPayload;
-                return [kind, response] as const;
-            }));
-
-            if (generation !== requestGenerationRef.current[mode]) return;
-
-            setBucketsForMode(mode, current => {
-                const next = { ...current };
-                for (const [kind, response] of responses) {
-                    next[kind] = {
-                        data: response,
-                        activeQuery: response.query,
-                        bookmark: response.bookmark,
-                        page: 0,
-                        loadingNextPage: false,
-                        error: ""
-                    };
-                }
-                return next;
-            });
-
-            // Discovery feeds stay invisible in the search field. Only explicit
-            // user searches/guides become the remembered query for this tab.
-            if (manual) {
-                setTabLastSearchQueries(current => ({
-                    ...current,
-                    [mode]: trimmed
-                }));
-                setTabQueries(current => ({
-                    ...current,
-                    [mode]: trimmed
-                }));
-            }
-
-            scrollPositionsRef.current[mode] = 0;
-            setSelectionOpen(false);
-            window.requestAnimationFrame(() => {
-                if (!favoritesOnly && (gifsOnly ? "GIFS" : "IMAGES") === mode) {
-                    scrollRef.current?.scrollTo({ top: 0 });
-                }
-            });
-        } catch (error) {
-            if (generation !== requestGenerationRef.current[mode]) return;
-
-            logger.error("Pinterest search failed", error);
-            const message = error instanceof Error ? error.message : "Pinterest search failed.";
-
-            setBucketsForMode(mode, current => {
-                const next = { ...current };
-                for (const kind of kinds) {
-                    next[kind] = {
-                        ...createEmptyBucket(),
-                        error: message
-                    };
-                }
-                return next;
-            });
-        } finally {
-            if (generation === requestGenerationRef.current[mode]) {
-                setLoadingByMode(current => ({ ...current, [mode]: false }));
-                setManualSearchingByMode(current => ({ ...current, [mode]: false }));
-                setManualSearchQueryByMode(current => ({ ...current, [mode]: "" }));
-            }
+        function publish(kind: SearchKind, payload: PinterestSearchPayload) {
+            if (!isCurrent()) return;
+            // Discovery feed: images already shown in earlier openings go last.
+            if (!manual) payload = { ...payload, results: freshFirst(payload.results) };
+            setBucketsForMode(mode, current => ({ ...current, [kind]: {
+                data: payload, activeQuery: payload.query, bookmark: payload.bookmark,
+                page: 0, loadingNextPage: false, error: ""
+            } }));
         }
+        await Promise.all(kinds.map(async kind => {
+            try {
+                publish(kind, await Native.search(trimmed, getResultsPerRequest(), nextGifsOnly ? "GIFS" : "STATIC", [], kind,
+                    randomizeSearch || !manual) as PinterestSearchPayload);
+            } catch (error) {
+                if (!isCurrent()) return;
+                logger.error("Search failed", error);
+                setBucketsForMode(mode, current => ({ ...current, [kind]: { ...createEmptyBucket(), error: errorText(error) || t("searchFailed") } }));
+            }
+        }));
+        if (!isCurrent()) return;
+        if (manual) {
+            recentSearches.remember(trimmed);
+            setTabLastSearchQueries(current => ({ ...current, [mode]: trimmed }));
+            setTabQueries(current => ({ ...current, [mode]: trimmed }));
+        }
+        setLoadingByMode(current => ({ ...current, [mode]: false }));
+        setManualSearchingByMode(current => ({ ...current, [mode]: false }));
+        setManualSearchQueryByMode(current => ({ ...current, [mode]: "" }));
     }
 
     function hasCachedResults(mode: SearchMediaMode) {
@@ -1457,7 +1412,6 @@ function PinterestBrowser({
 
     function changeMediaMode(mode: "IMAGES" | "GIFS" | "FAVORITES") {
         setMenuId("");
-        setSelectionOpen(false);
         rememberCurrentScroll();
 
         if (mode === "FAVORITES") {
@@ -1512,10 +1466,13 @@ function PinterestBrowser({
         scrollRef.current?.scrollTo({ top: 0 });
     }
 
-    async function loadNextPage(kind: SearchKind) {
+    async function loadNextPage(kind: SearchKind, advance = true) {
         const mode = activeMediaMode;
         const bucket = bucketsByMode[mode][kind];
         if (!bucket.data || !bucket.bookmark?.length || bucket.loadingNextPage) return;
+        const requestKey = JSON.stringify([mode, kind, requestGenerationRef.current[mode], bucket.bookmark]);
+        if (pagingRequests.current.has(requestKey)) return;
+        pagingRequests.current.add(requestKey);
 
         setBucketsForMode(mode, current => ({
             ...current,
@@ -1528,23 +1485,42 @@ function PinterestBrowser({
         const generation = requestGenerationRef.current[mode];
 
         try {
-            const response = await Native.search(
-                bucket.activeQuery || tabLastSearchQueries[mode] || tabQueries[mode] || query,
-                getResultsPerRequest(kind),
-                mode === "GIFS" ? "GIFS" : "STATIC",
-                bucket.bookmark,
-                kind
-            ) as PinterestSearchPayload;
+            const searchQuery = bucket.activeQuery || tabLastSearchQueries[mode] || tabQueries[mode] || query;
+            const mediaFilter = mode === "GIFS" ? "GIFS" : "STATIC";
+            const sentBookmarkKey = JSON.stringify(bucket.bookmark);
+
+            let response = await Native.search(searchQuery, getResultsPerRequest(), mediaFilter, bucket.bookmark, kind, randomizeSearch) as PinterestSearchPayload;
+
+            // v15.5: if a whole static batch came back as pins that are already shown,
+            // try the next cursor once more right away instead of leaving the user on
+            // the same page (the old "stuck around page 12" behaviour). Only one extra
+            // request, and never for GIFs, which already scan several cursors natively.
+            const hasNewResults = (batch: PinterestSearchPayload) =>
+                mergeUniqueResults(bucket.data!.results, batch.results).length > bucket.data!.results.length;
+
+            if (
+                mediaFilter === "STATIC"
+                && generation === requestGenerationRef.current[mode]
+                && !hasNewResults(response)
+                && response.bookmark?.length
+                && JSON.stringify(response.bookmark) !== sentBookmarkKey
+            ) {
+                response = await Native.search(searchQuery, getResultsPerRequest(), mediaFilter, response.bookmark, kind, randomizeSearch) as PinterestSearchPayload;
+            }
+
+            logger.info(`[next] ${kind} ${mode}: ${response.results.length} results, new: ${hasNewResults(response) ? "yes" : "NO"}, cursor for more: ${response.bookmark?.length ? "yes" : "NO"}`);
+
+            // A cursor that points back at itself (or a batch with nothing new after
+            // the retry) means Pinterest has no more for this query: turn Next off
+            // instead of leaving a button that does nothing.
+            if (
+                JSON.stringify(response.bookmark) === sentBookmarkKey
+                || (mediaFilter === "STATIC" && !hasNewResults(response))
+            ) {
+                response = { ...response, bookmark: null };
+            }
+
             if (generation !== requestGenerationRef.current[mode]) {
-                // A newer manual search superseded this pagination request. Never leave
-                // the old bucket stuck showing the three-dot loading indicator.
-                setBucketsForMode(mode, current => ({
-                    ...current,
-                    [kind]: {
-                        ...current[kind],
-                        loadingNextPage: false
-                    }
-                }));
                 return;
             }
 
@@ -1570,15 +1546,17 @@ function PinterestBrowser({
                         // A Pinterest backend page is not the same thing as a visible
                         // plugin page. GIF batches can contain zero direct .gif files.
                         // Only advance the UI after enough real results exist to show it.
-                        page: canShowNextPage ? nextPage : currentBucket.page,
+                        page: advance && canShowNextPage ? nextPage : currentBucket.page,
                         loadingNextPage: false,
                         error: ""
                     }
                 };
             });
         } catch (error) {
-            logger.error("Pinterest next page failed", error);
-            showToast(error instanceof Error ? error.message : "Could not load more Pinterest results.", Toasts.Type.FAILURE);
+            if (generation !== requestGenerationRef.current[mode]) return;
+            logger.error("Next page failed", error);
+            // Background prefetches fail silently; the user can still press Next.
+            if (advance) showToast(t("searchFailed"), Toasts.Type.FAILURE);
             setBucketsForMode(mode, current => ({
                 ...current,
                 [kind]: {
@@ -1586,13 +1564,15 @@ function PinterestBrowser({
                     loadingNextPage: false
                 }
             }));
+        } finally {
+            pagingRequests.current.delete(requestKey);
         }
     }
 
-    useEffect(() => {
-        setMenuId("");
-        setSelectionOpen(false);
-    }, [target]);
+    useEffect(() => () => {
+        ++requestGenerationRef.current.IMAGES;
+        ++requestGenerationRef.current.GIFS;
+    }, []);
 
     useEffect(() => {
         let cancelled = false;
@@ -1604,7 +1584,7 @@ function PinterestBrowser({
         return () => {
             cancelled = true;
         };
-    }, [target, favoritesOnly]);
+    }, []);
 
     useEffect(() => {
         if (!initialDiscoveryQuery) return;
@@ -1618,7 +1598,7 @@ function PinterestBrowser({
     }
 
     function getPlaceholder() {
-        return "Search Pinterest";
+        return t("placeholder");
     }
 
     function resetToDiscovery() {
@@ -1635,7 +1615,6 @@ function PinterestBrowser({
             [mode]: ""
         }));
         setMenuId("");
-        setSelectionOpen(false);
         setFavoritesOnly(false);
         setFavoritesPage(0);
         scrollPositionsRef.current[mode] = 0;
@@ -1659,252 +1638,884 @@ function PinterestBrowser({
         return AVATAR_RESULTS_PER_PAGE;
     }
 
-    const guideSource = getGuideSource();
+    function selectResult(result: PinterestImageResult, kind: SearchKind) {
+        setMenuId("");
+        onSelectResult(result, kind);
+    }
 
+    function tabKey(event: React.KeyboardEvent<HTMLDivElement>) {
+        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+        const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("[role=tab]"));
+        const index = tabs.indexOf(event.target as HTMLButtonElement);
+        if (index < 0) return;
+        event.preventDefault();
+        const delta = (event.key === "ArrowRight" ? 1 : -1) * (direction() === "rtl" ? -1 : 1);
+        const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (index + delta + tabs.length) % tabs.length;
+        tabs[next].focus(); tabs[next].click();
+    }
     return (
-        <div ref={browserRef} {...panelProps} className={rootClassName} style={getPinterestThemeStyle(colorTheme, customAccent) as any}>
+        <div ref={browserRef} className={rootClassName} dir={direction()} style={getPinterestFullStyle(resolvePinterestTheme(colorTheme), customAccent, resolvedAppearance, appearance === "AUTO") as any} data-pt-mode={resolvedAppearance}
+            onKeyDown={event => { if (event.key === "/" && !(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)) { event.preventDefault(); focusSearchInput(); } }}>
             <div className={cl("container-header")}>
-                <form className={cl("search-shell")} onSubmit={event => {
-                    event.preventDefault();
-                    // Do not duplicate the exact same in-flight search, but allow a
-                    // corrected/extended query to supersede it immediately. The old
-                    // network request is not force-aborted; its stale result is simply
-                    // ignored by the per-tab request generation guard.
-                    if (!trimmedVisibleQuery || isSearchingVisibleQuery || isPagingVisibleQuery) return;
-
-                    if (favoritesOnly) {
-                        setFavoritesOnly(false);
-                    }
-
-                    void runSearch(query, gifsOnly, true);
-                }}>
-                    <div className={cl("media-controls")}>
-                        <div className={cl("media-tabs")} role="tablist" aria-label="Pinterest media type">
-                            <button
-                                type="button"
-                                role="tab"
-                                aria-selected={!gifsOnly && !favoritesOnly}
-                                className={classes(cl("media-tab"), !gifsOnly && !favoritesOnly && cl("media-tab-active"))}
-                                onClick={() => changeMediaMode("IMAGES")}
-                            >
-                                <span className={cl("media-tab-icon")} aria-hidden="true">▧</span>
-                                Images
-                            </button>
-                            <button
-                                type="button"
-                                role="tab"
-                                aria-selected={gifsOnly && !favoritesOnly}
-                                className={classes(cl("media-tab"), gifsOnly && !favoritesOnly && cl("media-tab-active"))}
-                                onClick={() => changeMediaMode("GIFS")}
-                            >
-                                <span className={classes(cl("media-tab-icon"), cl("media-tab-gif"))} aria-hidden="true">GIF</span>
-                                GIFs
-                            </button>
-                            <button
-                                type="button"
-                                role="tab"
-                                aria-selected={favoritesOnly}
-                                className={classes(cl("media-tab"), cl("media-tab-favorites"), favoritesOnly && cl("media-tab-active"))}
-                                onClick={() => changeMediaMode("FAVORITES")}
-                            >
-                                <span className={cl("media-tab-icon")} aria-hidden="true"><HeartIcon filled={favoritesOnly} /></span>
-                                Favorites
-                            </button>
+                <form className={cl("search-shell")} onSubmit={event => { event.preventDefault(); setSuggestOpen(false); if (!trimmedVisibleQuery || isSearchingVisibleQuery || isPagingVisibleQuery) return; void runSearch(query, gifsOnly, true); }}>
+                    <div className={cl("toolbar")}>
+                        <div className={cl("media-tabs")} role="tablist" aria-label={t("mediaType")} onKeyDown={tabKey}>
+                            <button type="button" role="tab" aria-selected={!gifsOnly && !favoritesOnly} className={classes(cl("media-tab"), !gifsOnly && !favoritesOnly && cl("media-tab-active"))} onClick={() => changeMediaMode("IMAGES")}>{t("images")}</button>
+                            <button type="button" role="tab" aria-selected={gifsOnly && !favoritesOnly} className={classes(cl("media-tab"), gifsOnly && !favoritesOnly && cl("media-tab-active"))} onClick={() => changeMediaMode("GIFS")}>GIF</button>
+                            <button type="button" role="tab" aria-selected={favoritesOnly} className={classes(cl("media-tab"), favoritesOnly && cl("media-tab-active"))} onClick={() => changeMediaMode("FAVORITES")}><HeartIcon filled={favoritesOnly}/>{t("favorites")}{favorites.length ? <span className={cl("tab-count")}>{favorites.length}</span> : null}</button>
                         </div>
-                        <ThemePicker theme={colorTheme} customAccent={customAccent} />
+                        <details ref={personalizeRef} className={cl("personalize")}><summary aria-label={t("customize")} title={t("customize")}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16M4 17h16" stroke="currentColor" strokeWidth="1.6"/><circle cx="9" cy="7" r="3" fill="var(--pt-surface)" stroke="currentColor" strokeWidth="1.6"/><circle cx="15" cy="17" r="3" fill="var(--pt-surface)" stroke="currentColor" strokeWidth="1.6"/></svg></summary>
+                            <div className={cl("personalize-panel")}><AppearanceToggle setting={appearance as AppearanceSetting} resolved={resolvedAppearance}/><ThemePicker theme={resolvePinterestTheme(colorTheme)} customAccent={customAccent}/></div>
+                        </details>
                     </div>
-                    {!favoritesOnly ? (
+                    {!favoritesOnly ? <>
                         <div className={cl("search-row")}>
-                            <div className={cl("search-field")}>
-                                <ManaSearchBar
-                                    autoFocus
-                                    placeholder={getPlaceholder()}
-                                    query={query}
-                                    onChange={updateVisibleQuery}
-                                    onClear={resetToDiscovery}
-                                />
+                            <div className={cl("search-field")} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setSuggestOpen(false); }}>
+                                <SearchIcon/>
+                                <input type="search" dir="auto" autoFocus maxLength={240} placeholder={getPlaceholder()} value={query} aria-label={t("search")}
+                                    aria-expanded={showSuggestions} aria-haspopup="listbox"
+                                    onChange={event => { updateVisibleQuery(event.currentTarget.value); setSuggestOpen(true); }}
+                                    onClick={() => setSuggestOpen(true)}
+                                    onKeyDown={event => {
+                                        if (event.key === "ArrowDown") { setSuggestOpen(true); return; }
+                                        if (event.key === "Escape" && showSuggestions) { event.stopPropagation(); setSuggestOpen(false); }
+                                    }}/>
+                                {query ? <button type="button" className={cl("search-clear")} aria-label={t("clear")} onClick={resetToDiscovery}>×</button> : <kbd title={t("shortcuts")}>/</kbd>}
+                                {/* Recent and related searches open under the field instead of taking a row of their own. */}
+                                {showSuggestions ? <div className={cl("suggest")} role="listbox" onMouseDown={event => event.preventDefault()}>
+                                    {matchingRecent.length ? <div className={cl("suggest-group")}>
+                                        <div className={cl("suggest-label")}><span>{t("recentSearches")}</span><button type="button" className={cl("suggest-clear")} onClick={() => recentSearches.clear()}>{t("clearRecent")}</button></div>
+                                        {matchingRecent.map(item => <button key={item} type="button" role="option" className={cl("suggest-item")} onClick={() => pickSuggestion(item)}><span className={cl("suggest-icon")} aria-hidden="true">↺</span>{item}</button>)}
+                                    </div> : null}
+                                    {relatedGuides.length ? <div className={cl("suggest-group")}>
+                                        <div className={cl("suggest-label")}><span>{t("related")}</span></div>
+                                        <div className={cl("suggest-chips")}>{relatedGuides.map(guide => <button key={guide.query} type="button" role="option" className={cl("chip")} onClick={() => pickSuggestion(guide.query)}>{guide.label}</button>)}</div>
+                                    </div> : null}
+                                </div> : null}
                             </div>
-                            {/* A running search only locks re-submitting the exact same text. If the
-                                user edits the query while Pinterest is still working, Search becomes available
-                                immediately so typos can be corrected without waiting. */}
-                            <PillButton compact type="submit" disabled={!trimmedVisibleQuery || isSearchingVisibleQuery || isPagingVisibleQuery}>
-                                {isSearchingVisibleQuery || isPagingVisibleQuery ? (
-                                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                            <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" opacity="0.28" />
-                                            <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
-                                                <animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.75s" repeatCount="indefinite" />
-                                            </path>
-                                        </svg>
-                                        <span>{isPagingVisibleQuery ? "Loading…" : "Searching…"}</span>
-                                    </span>
-                                ) : "Search"}
-                            </PillButton>
-                            {showTargetSelector ? (
-                                <SelectionDropdown
-                                    target={target}
-                                    open={selectionOpen}
-                                    onToggle={() => setSelectionOpen(current => !current)}
-                                    onSelect={value => {
-                                        setTarget(value);
-                                        setSelectionOpen(false);
-                                    }}
-                                />
-                            ) : null}
+                            <PillButton compact type="submit" disabled={!trimmedVisibleQuery || isSearchingVisibleQuery || isPagingVisibleQuery}>{isSearchingVisibleQuery ? t("searching") : t("search")}</PillButton>
+                            {target === "AVATAR" ? <button type="button" className={classes(cl("round-toggle"), roundPreview && cl("round-toggle-active"))} aria-label={t("round")} title={t("round")} aria-pressed={roundPreview} onClick={() => setRoundPreview(current => !current)}><span aria-hidden="true"/></button> : null}
+                            <select className={cl("sort-select")} aria-label={t("sort")} title={t("sort")} value={sort} onChange={event => { setSort(event.currentTarget.value as ResultSort); setActiveBuckets(current => Object.fromEntries(Object.entries(current).map(([kind, value]) => [kind, { ...value, page: 0 }])) as SearchBuckets); }}>{(["relevance", "quality", "shape"] as const).map(option => <option key={option} value={option}>{t(option)}</option>)}</select>
                         </div>
-                    ) : null}
-                    {!favoritesOnly && guideSource?.guides.length ? (
-                        <div className={cl("guides-row")}>
-                            {guideSource.guides.slice(0, 6).map(guide => (
-                                <button
-                                    key={guide.query}
-                                    type="button"
-                                    className={classes(cl("guide"), guide.query === guideSource.query && cl("guide-active"))}
-                                    onClick={() => {
-                                        updateVisibleQuery(guide.query);
-                                        void runSearch(guide.query, gifsOnly, true);
-                                    }}
-                                >
-                                    {guide.label}
-                                </button>
-                            ))}
-                        </div>
-                    ) : null}
+                    </> : null}
                 </form>
             </div>
             <div ref={scrollRef} className={cl("container-body")}>
-                {favoritesOnly ? (
-                    <FavoritesSection
-                        target={currentFavoriteTarget()}
-                        favorites={favorites}
-                        slotCount={getSlotCount(currentFavoriteTarget())}
-                        page={favoritesPage}
-                        setPage={setFavoritesPage}
-                        menuId={menuId}
-                        setMenuId={setMenuId}
-                        onSelectResult={onSelectResult}
-                        onToggleFavorite={toggleFavorite}
-                    />
-                ) : (
-                    getSearchKinds(target).map(kind => (
-                        <ResultsSection
-                            key={kind}
-                            kind={kind}
-                            bucket={buckets[kind]}
-                            menuId={menuId}
-                            gifsOnly={gifsOnly}
-                            slotCount={getSlotCount(kind)}
-                            setMenuId={setMenuId}
-                            setBuckets={setActiveBuckets}
-                            onLoadNextPage={loadNextPage}
-                            onPageChange={handleResultPageChange}
-                            onSelectResult={onSelectResult}
-                            isFavorite={isFavorite}
-                            onToggleFavorite={toggleFavorite}
-                        />
-                    ))
-                )}
+                {favoritesOnly ? <FavoritesSection target={currentFavoriteTarget()} favorites={favorites} slotCount={getSlotCount(currentFavoriteTarget())} page={favoritesPage} setPage={setFavoritesPage} menuId={menuId} setMenuId={setMenuId} onSelectResult={selectResult} onToggleFavorite={toggleFavorite}/> : getSearchKinds(target).map(kind =>
+                    <ResultsSection key={kind} kind={kind} bucket={buckets[kind]} menuId={menuId} gifsOnly={gifsOnly} slotCount={getSlotCount(kind)} setMenuId={setMenuId} setBuckets={setActiveBuckets} onLoadNextPage={loadNextPage} onPageChange={handleResultPageChange} onSelectResult={selectResult} isFavorite={isFavorite} onToggleFavorite={toggleFavorite} onRetry={() => void runSearch(query || lastSearchQuery || initialDiscoveryQuery || "", gifsOnly, Boolean(query.trim()))} loading={loadingByMode[activeMediaMode]} sort={sort} round={roundPreview}/>) }
             </div>
         </div>
     );
 }
 
-export function PinterestPicker({ onSelectItem }: PinterestPickerProps) {
-    const query = ExpressionPickerStore.useExpressionPickerStore(store => store.searchQuery);
+// ---------------------------------------------------------------------------
+// Editor step: real effects + text / pasted images (runs before Discord's Edit Image)
+// ---------------------------------------------------------------------------
 
+type EffectsOutcome =
+    | { kind: "cancel"; }
+    | { kind: "original"; }
+    | { kind: "edited"; file: File; dataUrl: string; };
+
+function loadImageElement(src: string) {
+    return new Promise<HTMLImageElement>((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error("Could not load the image."));
+        image.src = src;
+    });
+}
+
+function readFileAsDataUrl(file: Blob) {
+    return new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(new Error("Could not read the pasted image."));
+        reader.readAsDataURL(file);
+    });
+}
+
+let layerCounter = 0;
+const nextLayerId = () => `layer-${Date.now().toString(36)}-${++layerCounter}`;
+
+function FxSlider({
+    label,
+    value,
+    min,
+    max,
+    step = 1,
+    unit = "",
+    offLabel,
+    resetTo,
+    onChange
+}: {
+    label: string;
+    value: number;
+    min: number;
+    max: number;
+    step?: number;
+    unit?: string;
+    offLabel?: string;
+    resetTo?: number;
+    onChange(value: number): void;
+}) {
+    const changed = resetTo !== undefined && value !== resetTo;
     return (
-        <PinterestBrowser
-            query={query}
-            setQuery={value => ExpressionPickerStore.setSearchQuery(value)}
-            clearQuery={() => ExpressionPickerStore.setSearchQuery("")}
-            onSelectResult={result => {
-                onSelectItem({ url: result.url });
-                ExpressionPickerStore.closeExpressionPicker();
-            }}
-            rootClassName={cl("container")}
-            initialTarget="IMAGE"
-            showTargetSelector={false}
-            panelProps={{
-                id: "pinterest-picker-tab-panel",
-                role: "tabpanel",
-                "aria-labelledby": "pinterest-picker-tab"
-            }}
-        />
+        <div className={classes(cl("fx-slider"), changed && cl("fx-slider-changed"))}>
+            <span className={cl("fx-slider-label")}>
+                <span>{label}</span>
+                <span className={cl("fx-slider-side")}>
+                    {/* Space is always reserved so the row never shifts while dragging. */}
+                    <button type="button" className={cl("fx-slider-reset")} style={{ visibility: changed ? "visible" : "hidden" }} tabIndex={changed ? 0 : -1} title={t("reset")} aria-label={`${t("reset")}: ${label}`} onClick={() => onChange(resetTo!)}>↺</button>
+                    <span className={cl("fx-slider-value")}>{offLabel && value === 0 ? offLabel : `${value}${unit}`}</span>
+                </span>
+            </span>
+            <input type="range" min={min} max={max} step={step} value={value} aria-label={label} onChange={event => onChange(Number(event.currentTarget.value))} />
+        </div>
     );
 }
 
-export function PinterestProfilePanel({ guildId }: { guildId?: string; }) {
-    const [query, setQuery] = useState("");
-
+// Collapsible group of sliders in the Adjust tab.
+function FxSection({ title, icon, defaultOpen = false, children }: { title: string; icon: string; defaultOpen?: boolean; children: ReactNode; }) {
     return (
-        <PinterestBrowser
-            query={query}
-            setQuery={setQuery}
-            clearQuery={() => setQuery("")}
-            onSelectResult={(result, kind) => {
-                void applyProfileResult(result, kind, guildId);
-            }}
-            rootClassName={classes(cl("container"), cl("inline-wrap"))}
-            initialTarget="ALL"
-            showTargetSelector={true}
-        />
+        <details className={cl("fx-section")} open={defaultOpen}>
+            <summary><span className={cl("fx-section-icon")} aria-hidden="true">{icon}</span>{title}<span className={cl("fx-section-caret")} aria-hidden="true"/></summary>
+            <div className={cl("fx-section-body")}>{children}</div>
+        </details>
     );
 }
 
-interface PinterestProfileModalProps extends RenderModalProps {
+const PRESET_NAMES: Record<string, Parameters<typeof t>[0]> = {
+    Original: "original", Noir: "pNoir", Vivid: "pVivid", Glitch: "pGlitch", VHS: "pVhs", Pixel: "pPixel", Neon: "pNeon",
+    Sketch: "pSketch", Poster: "pPoster", Duotone: "pDuotone", Dream: "pDream", Film: "pFilm", Cyber: "pCyber"
+};
+
+// Small live preview of a filter applied to the current image.
+function PresetThumb({ image, natural, values, order }: { image: CanvasImageSource | null; natural: { w: number; h: number; }; values: Partial<Fx>; order: number; }) {
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas || !image) return;
+        // Drawn one after another instead of all at once, so opening the
+        // editor does not stall while 13 filtered previews render.
+        const timer = window.setTimeout(() => {
+            const scale = 120 / Math.max(natural.w, natural.h);
+            canvas.width = Math.max(1, Math.round(natural.w * scale));
+            canvas.height = Math.max(1, Math.round(natural.h * scale));
+            try {
+                drawScene(canvas, image, { ...FX_DEFAULT, ...values }, [], new Map(), { keepAlpha: true });
+            } catch (error) {
+                logger.error("Filter preview failed", error);
+            }
+        }, 40 + order * 30);
+        return () => window.clearTimeout(timer);
+    }, [image, natural.w, natural.h]);
+    return <canvas ref={canvasRef} className={cl("fx-thumb")} aria-hidden="true"/>;
+}
+
+function EffectsEditor({
+    src,
+    filename,
+    mediaType,
+    target,
+    onDone
+}: {
+    src: string;
+    filename: string;
+    mediaType: string;
+    target: SearchKind;
+    onDone(outcome: EffectsOutcome): void;
+}) {
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const imageRef = useRef<CanvasImageSource | null>(null);
+    const naturalRef = useRef({ w: 1, h: 1 });
+    const gifRef = useRef<DecodedGif | null>(null);
+    const animated = /gif/i.test(mediaType);
+    const [progress, setProgress] = useState("");
+    const [frameCount, setFrameCount] = useState(0);
+    const imageCacheRef = useRef<ImageCache>(new Map());
+    const dragRef = useRef<{ id: string; dx: number; dy: number; } | null>(null);
+    const textAreaRef = useRef<HTMLTextAreaElement>(null);
+
+    const [fx, setFx] = useState<Fx>(FX_DEFAULT);
+    const [activePreset, setActivePreset] = useState("Original");
+    const [layers, setLayers] = useState<Layer[]>([]);
+    const [selectedId, setSelectedId] = useState("");
+    const [tab, setTab] = useState<"filters" | "adjust" | "text">("filters");
+    const [ready, setReady] = useState(false);
+    const [tick, setTick] = useState(0);
+    const [busy, setBusy] = useState(false);
+    const [size, setSize] = useState({ w: 640, h: 400 });
+
+    // Undo / redo for everything in the editor (filters, sliders, text and
+    // layer moves). A slider drag or a layer drag is recorded once, not on
+    // every intermediate value.
+    type Snapshot = { fx: Fx; layers: Layer[]; preset: string; };
+    const historyRef = useRef<{ past: Snapshot[]; future: Snapshot[]; lastAt: number; lastKind: string; }>({ past: [], future: [], lastAt: 0, lastKind: "" });
+    const [historySize, setHistorySize] = useState({ past: 0, future: 0 });
+    const stateRef = useRef<Snapshot>({ fx: FX_DEFAULT, layers: [], preset: "Original" });
+    stateRef.current = { fx, layers, preset: activePreset };
+
+    function record(kind: string) {
+        const history = historyRef.current;
+        const now = Date.now();
+        if (kind === history.lastKind && now - history.lastAt < 700) {
+            history.lastAt = now;
+            return;
+        }
+        history.past.push(stateRef.current);
+        if (history.past.length > 50) history.past.shift();
+        history.future = [];
+        history.lastAt = now;
+        history.lastKind = kind;
+        setHistorySize({ past: history.past.length, future: 0 });
+    }
+
+    function restore(snapshot: Snapshot) {
+        setFx(snapshot.fx);
+        setLayers(snapshot.layers);
+        setActivePreset(snapshot.preset);
+        if (!snapshot.layers.some(layer => layer.id === selectedId)) setSelectedId("");
+    }
+
+    function undoEdit() {
+        const history = historyRef.current;
+        const previous = history.past.pop();
+        if (!previous) return;
+        history.future.push(stateRef.current);
+        history.lastKind = "";
+        restore(previous);
+        setHistorySize({ past: history.past.length, future: history.future.length });
+    }
+
+    function redoEdit() {
+        const history = historyRef.current;
+        const next = history.future.pop();
+        if (!next) return;
+        history.past.push(stateRef.current);
+        history.lastKind = "";
+        restore(next);
+        setHistorySize({ past: history.past.length, future: history.future.length });
+    }
+
+    const selected = layers.find(layer => layer.id === selectedId) ?? null;
+    const changed = !isPristine(fx) || layers.length > 0;
+
+    useEffect(() => {
+        let cancelled = false;
+
+        async function load() {
+            if (animated) {
+                // Frames are decoded once, already scaled to a size Discord accepts.
+                const gif = await decodeGif(dataUrlToBytes(src), target === "BANNER" ? 960 : 640, 300);
+                if (cancelled) {
+                    gif.frames.forEach(frame => frame.image.close());
+                    return;
+                }
+                gifRef.current = gif;
+                imageRef.current = gif.frames[0].image;
+                naturalRef.current = { w: gif.width, h: gif.height };
+                setFrameCount(gif.frames.length);
+            } else {
+                const image = await loadImageElement(src);
+                if (cancelled) return;
+                imageRef.current = image;
+                naturalRef.current = { w: image.naturalWidth, h: image.naturalHeight };
+            }
+
+            const { w, h } = naturalRef.current;
+            const scale = Math.min(1.5, 760 / w, 470 / h);
+            setSize({ w: Math.max(80, Math.round(w * scale)), h: Math.max(80, Math.round(h * scale)) });
+            setReady(true);
+        }
+
+        load().catch(error => {
+            logger.error("Editor could not open the media", error);
+            showToast(t("editorFailed"), Toasts.Type.FAILURE);
+            onDone({ kind: "original" });
+        });
+
+        return () => {
+            cancelled = true;
+            gifRef.current?.frames.forEach(frame => frame.image.close());
+            gifRef.current = null;
+        };
+    }, [src]);
+
+    // Glitch and grain change on every GIF frame so the effect moves with the animation.
+    const fxForFrame = (index: number): Fx => index === 0 ? fx : { ...fx, glitchSeed: fx.glitchSeed + index * 17 };
+
+    // Live preview: same engine as the export, at screen size. GIFs play.
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        const image = imageRef.current;
+        if (!ready || !canvas || !image) return;
+        const keepAlpha = animated || /png|webp/i.test(mediaType);
+        const gif = gifRef.current;
+        const render = (frame: CanvasImageSource, frameFx: Fx) =>
+            drawScene(canvas, frame, frameFx, layers, imageCacheRef.current, { selectedId, keepAlpha });
+
+        if (!animated || !gif || gif.frames.length < 2) {
+            const frame = requestAnimationFrame(() => {
+                try {
+                    render(image, fx);
+                } catch (error) {
+                    logger.error("Preview failed", error);
+                }
+            });
+            return () => cancelAnimationFrame(frame);
+        }
+
+        const total = gif.frames.reduce((sum, frame) => sum + frame.delay, 0) || 1;
+        const started = performance.now();
+        let handle = 0;
+        let lastIndex = -1;
+        const loop = (now: number) => {
+            let t = (now - started) % total;
+            let index = 0;
+            while (index < gif.frames.length - 1 && t >= gif.frames[index].delay) {
+                t -= gif.frames[index].delay;
+                index++;
+            }
+            if (index !== lastIndex) {
+                lastIndex = index;
+                try {
+                    render(gif.frames[index].image, fxForFrame(index));
+                } catch (error) {
+                    logger.error("Preview failed", error);
+                }
+            }
+            handle = requestAnimationFrame(loop);
+        };
+        handle = requestAnimationFrame(loop);
+        return () => cancelAnimationFrame(handle);
+    }, [ready, fx, layers, selectedId, size, tick]);
+
+    function addTextLayer(text = t("text")) {
+        const layer: TextLayer = {
+            kind: "text", id: nextLayerId(), text, x: 0.5, y: 0.5, size: 0.12, color: "#ffffff",
+            font: "Impact", bold: false, italic: false, outline: true, outlineColor: "#000000", shadow: true
+        };
+        record("add");
+        setLayers(current => [...current, layer]);
+        setSelectedId(layer.id);
+        setTab("text");
+        window.setTimeout(() => { textAreaRef.current?.focus(); textAreaRef.current?.select(); }, 30);
+    }
+
+    async function addImageLayer(dataUrl: string) {
+        try {
+            const image = await loadImageElement(dataUrl);
+            const id = nextLayerId();
+            imageCacheRef.current.set(id, image);
+            const layer: ImageLayer = { kind: "image", id, src: dataUrl, x: 0.5, y: 0.5, scale: 0.35 };
+            record("add");
+            setLayers(current => [...current, layer]);
+            setSelectedId(id);
+            setTab("text");
+            setTick(value => value + 1);
+        } catch {
+            showToast(t("addImageFailed"), Toasts.Type.FAILURE);
+        }
+    }
+
+    // Ctrl+V: a copied image becomes a movable layer, copied text becomes a text layer.
+    useEffect(() => {
+        async function onPaste(event: ClipboardEvent) {
+            const targetEl = event.target as HTMLElement | null;
+            if (targetEl && /^(INPUT|TEXTAREA)$/.test(targetEl.tagName)) return;
+            const data = event.clipboardData;
+            if (!data) return;
+
+            const imageItem = [...data.items].find(item => item.kind === "file" && item.type.startsWith("image/"));
+            if (imageItem) {
+                const blob = imageItem.getAsFile();
+                if (blob) {
+                    event.preventDefault();
+                    void addImageLayer(await readFileAsDataUrl(blob));
+                    return;
+                }
+            }
+
+            const text = data.getData("text/plain").trim();
+            if (text) {
+                event.preventDefault();
+                addTextLayer(text.slice(0, 300));
+            }
+        }
+
+        function onKey(event: KeyboardEvent) {
+            const targetEl = event.target as HTMLElement | null;
+            // Only real text fields keep their own shortcuts; a slider, checkbox
+            // or colour input that still has focus after a change must not.
+            const typing = !!targetEl && (targetEl.tagName === "TEXTAREA" || targetEl.isContentEditable
+                || (targetEl instanceof HTMLInputElement && /^(text|search|url|email|number|)$/.test(targetEl.type)));
+            const key = event.key.toLowerCase();
+            if ((event.ctrlKey || event.metaKey) && !typing && (key === "z" || key === "y")) {
+                // Ctrl+Z undo, Ctrl+Y / Ctrl+Shift+Z redo (text boxes keep their own undo).
+                event.preventDefault();
+                event.stopPropagation();
+                if (key === "y" || event.shiftKey) redoEdit(); else undoEdit();
+            } else if (event.key === "Escape") {
+                event.stopPropagation();
+                onDone({ kind: "cancel" });
+            } else if ((event.key === "Delete" || event.key === "Backspace") && !typing && selectedId) {
+                record("delete");
+                setLayers(current => current.filter(layer => layer.id !== selectedId));
+                setSelectedId("");
+            }
+        }
+
+        document.addEventListener("paste", onPaste, true);
+        document.addEventListener("keydown", onKey, true);
+        return () => {
+            document.removeEventListener("paste", onPaste, true);
+            document.removeEventListener("keydown", onKey, true);
+        };
+    }, [selectedId]);
+
+    async function pasteFromClipboardButton() {
+        try {
+            const items = await navigator.clipboard.read();
+            for (const item of items) {
+                const type = item.types.find(t => t.startsWith("image/"));
+                if (type) {
+                    await addImageLayer(await readFileAsDataUrl(await item.getType(type)));
+                    return;
+                }
+            }
+            const text = (await navigator.clipboard.readText()).trim();
+            if (text) {
+                addTextLayer(text.slice(0, 300));
+                return;
+            }
+            showToast(t("clipboardEmpty"), Toasts.Type.MESSAGE);
+        } catch {
+            showToast(t("clipboardHint"), Toasts.Type.MESSAGE);
+        }
+    }
+
+    function updateLayer(id: string, patch: Partial<TextLayer> & Partial<ImageLayer>, kind = `layer:${id}:${Object.keys(patch).join(",")}`) {
+        if (kind) record(kind);
+        setLayers(current => current.map(layer => layer.id === id ? { ...layer, ...patch } as Layer : layer));
+    }
+
+    function setFxValue<K extends keyof Fx>(key: K, value: Fx[K]) {
+        record(`fx:${String(key)}`);
+        setFx(current => ({ ...current, [key]: value }));
+        setActivePreset("Custom");
+    }
+
+    function applyPreset(label: string, values: Partial<Fx>) {
+        record(`preset:${label}`);
+        setFx(current => ({ ...FX_DEFAULT, glitchSeed: current.glitchSeed, ...values }));
+        setActivePreset(label);
+    }
+
+    function canvasPoint(event: ReactPointerEvent<HTMLCanvasElement>) {
+        const canvas = event.currentTarget;
+        const rect = canvas.getBoundingClientRect();
+        return {
+            x: ((event.clientX - rect.left) / rect.width) * canvas.width,
+            y: ((event.clientY - rect.top) / rect.height) * canvas.height
+        };
+    }
+
+    function onPointerDown(event: ReactPointerEvent<HTMLCanvasElement>) {
+        const canvas = event.currentTarget;
+        const { x, y } = canvasPoint(event);
+        const id = hitTestLayers(canvas, layers, imageCacheRef.current, x, y);
+        setSelectedId(id ?? "");
+        if (!id) return;
+        const layer = layers.find(item => item.id === id)!;
+        record(`move:${id}`);
+        dragRef.current = { id, dx: layer.x - x / canvas.width, dy: layer.y - y / canvas.height };
+        canvas.setPointerCapture(event.pointerId);
+        setTab("text");
+    }
+
+    function onPointerMove(event: ReactPointerEvent<HTMLCanvasElement>) {
+        const drag = dragRef.current;
+        if (!drag) return;
+        const canvas = event.currentTarget;
+        const { x, y } = canvasPoint(event);
+        updateLayer(drag.id, {
+            x: Math.min(1, Math.max(0, x / canvas.width + drag.dx)),
+            y: Math.min(1, Math.max(0, y / canvas.height + drag.dy))
+        }, "");
+    }
+
+    function onPointerUp(event: ReactPointerEvent<HTMLCanvasElement>) {
+        dragRef.current = null;
+        try { event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* not captured */ }
+    }
+
+    async function confirm() {
+        const image = imageRef.current;
+        if (!changed || !image) {
+            onDone({ kind: "original" });
+            return;
+        }
+
+        setBusy(true);
+
+        if (animated && gifRef.current) {
+            try {
+                const bytes = await encodeFittedGif(
+                    gifRef.current,
+                    (canvas, frame, index) => drawScene(canvas, frame.image, fxForFrame(index), layers, imageCacheRef.current, { keepAlpha: true }),
+                    setProgress
+                );
+                const base = filename.replace(/\.[a-z0-9]+$/i, "") || "animation";
+                const file = new File([bytes as unknown as BlobPart], `${base}-edit.gif`, { type: "image/gif" });
+                onDone({ kind: "edited", file, dataUrl: bytesToDataUrl(bytes, "image/gif") });
+            } catch (error) {
+                logger.error("Could not render the edited GIF", error);
+                showToast(error instanceof Error ? error.message : "Could not apply those edits to the GIF.", Toasts.Type.FAILURE);
+                setBusy(false);
+                setProgress("");
+            }
+            return;
+        }
+
+        try {
+            const { w: naturalW, h: naturalH } = naturalRef.current;
+            const scale = Math.min(1, 2048 / Math.max(naturalW, naturalH));
+            const canvas = document.createElement("canvas");
+            canvas.width = Math.max(1, Math.round(naturalW * scale));
+            canvas.height = Math.max(1, Math.round(naturalH * scale));
+
+            const keepAlpha = /png|webp/i.test(mediaType);
+            drawScene(canvas, image, fx, layers, imageCacheRef.current, { keepAlpha });
+
+            const mime = keepAlpha ? "image/png" : "image/jpeg";
+            const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, mime, 0.93));
+            if (!blob) throw new Error("Could not export the edited image.");
+
+            const base = filename.replace(/\.[a-z0-9]+$/i, "") || "image";
+            const file = new File([blob], `${base}-edit.${keepAlpha ? "png" : "jpg"}`, { type: mime });
+            onDone({ kind: "edited", file, dataUrl: canvas.toDataURL(mime, 0.93) });
+        } catch (error) {
+            logger.error("Could not render the edited image", error);
+            showToast(t("editFailed"), Toasts.Type.FAILURE);
+            onDone({ kind: "original" });
+        }
+    }
+
+    const fxSet = setFxValue;
+    const slider = (key: "brightness" | "contrast" | "saturate" | "hue" | "sepia" | "grayscale" | "invert" | "tintStrength" | "duotone" | "blur" | "pixelate" | "posterize" | "sharpen" | "sketch" | "rgbSplit" | "glitch" | "bloom" | "vignette" | "grain" | "scanlines",
+        label: string, min: number, max: number, unit = "", extra: { step?: number; offLabel?: string; } = {}) =>
+        <FxSlider label={label} value={fx[key]} min={min} max={max} unit={unit} step={extra.step} offLabel={extra.offLabel} resetTo={FX_DEFAULT[key]} onChange={v => fxSet(key, v)} />;
+
+    function resetAll() {
+        record("reset");
+        setFx(current => ({ ...FX_DEFAULT, glitchSeed: current.glitchSeed }));
+        setActivePreset("Original");
+        setLayers([]);
+        setSelectedId("");
+    }
+
+    return (
+        <div className={cl("fx")} role="dialog" aria-label={t("editor")}>
+            <div className={cl("fx-topbar")}>
+                <button type="button" className={cl("fx-back")} disabled={busy} onClick={() => onDone({ kind: "cancel" })}><ChevronLeftIcon/>{t("back")}</button>
+                <div className={cl("fx-title")}>
+                    {t("editTitle")}
+                    <span className={cl("fx-title-tag")}>{t(target === "BANNER" ? "banner" : "avatar")}{animated && frameCount ? " · GIF" : ""}</span>
+                </div>
+                <div className={cl("fx-topbar-actions")}>
+                    <button type="button" className={cl("fx-icon-btn")} disabled={busy || !historySize.past} title={`${t("undo")} (Ctrl+Z)`} aria-label={t("undo")} onClick={undoEdit}>↶</button>
+                    <button type="button" className={cl("fx-icon-btn")} disabled={busy || !historySize.future} title={`${t("redo")} (Ctrl+Y)`} aria-label={t("redo")} onClick={redoEdit}>↷</button>
+                    <button type="button" className={cl("fx-ghost")} disabled={busy || !changed} onClick={resetAll}>↺ {t("reset")}</button>
+                </div>
+            </div>
+
+            <div className={cl("fx-body")}>
+                <div className={cl("fx-preview")}>
+                    <div className={cl("fx-stage")}>
+                        <div className={cl("fx-canvas-wrap")}>
+                            <canvas
+                                ref={canvasRef}
+                                className={cl("fx-canvas")}
+                                width={size.w}
+                                height={size.h}
+                                onPointerDown={onPointerDown}
+                                onPointerMove={onPointerMove}
+                                onPointerUp={onPointerUp}
+                                onPointerCancel={onPointerUp}
+                            />
+                            {target === "AVATAR" ? <span className={cl("fx-guide")} aria-hidden="true" /> : null}
+                        </div>
+                    </div>
+                    <div className={cl("fx-hint")}>
+                        {animated && frameCount ? t("animatedFrames", { count: frameCount }) + " · " : ""}{t("editorHint")}
+                    </div>
+                </div>
+
+                <div className={cl("fx-panel")}>
+                    <div className={cl("fx-tabs")} role="tablist">
+                        {([["filters", "✨", t("filters")], ["adjust", "◐", t("adjust")], ["text", "T", t("text") + (layers.length ? ` · ${layers.length}` : "")]] as const).map(([id, icon, label]) => (
+                            <button key={id} type="button" role="tab" aria-selected={tab === id} className={classes(cl("fx-tab"), tab === id && cl("fx-tab-active"))} onClick={() => setTab(id)}>
+                                <span className={cl("fx-tab-icon")} aria-hidden="true">{icon}</span>{label}
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className={cl("fx-scroll")}>
+                        {tab === "filters" ? (
+                            <div className={cl("fx-preset-grid")}>
+                                {FX_PRESETS.map((preset, order) => (
+                                    <button
+                                        key={preset.label}
+                                        type="button"
+                                        className={classes(cl("fx-preset-card"), activePreset === preset.label && cl("fx-preset-card-active"))}
+                                        aria-pressed={activePreset === preset.label}
+                                        onClick={() => applyPreset(preset.label, preset.values)}
+                                    >
+                                        <PresetThumb image={ready ? imageRef.current : null} natural={naturalRef.current} values={preset.values} order={order} />
+                                        <span>{t(PRESET_NAMES[preset.label] ?? "original")}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        ) : tab === "adjust" ? (
+                            <>
+                                <FxSection title={t("lightColor")} icon="☀" defaultOpen>
+                                    {slider("brightness", t("brightness"), 30, 180, "%")}
+                                    {slider("contrast", t("contrast"), 30, 220, "%")}
+                                    {slider("saturate", t("saturation"), 0, 250, "%")}
+                                    {slider("hue", t("hueShift"), -180, 180, "°")}
+                                    <div className={cl("fx-color-row")}>
+                                        <span>{t("tint")}</span>
+                                        <input type="color" className={cl("fx-color")} value={fx.tint} aria-label={t("tint")} onChange={event => fxSet("tint", event.currentTarget.value)} />
+                                    </div>
+                                    {slider("tintStrength", t("tintStrength"), 0, 100, "%")}
+                                </FxSection>
+                                <FxSection title={t("details")} icon="◎">
+                                    {slider("sharpen", t("sharpen"), 0, 100, "%")}
+                                    {slider("blur", t("blur"), 0, 8, "px", { step: 0.2 })}
+                                    {slider("vignette", t("vignette"), 0, 100, "%")}
+                                    {slider("grain", t("grain"), 0, 100, "%")}
+                                    <label className={cl("fx-check")}>
+                                        <input type="checkbox" checked={fx.flipH} onChange={event => fxSet("flipH", event.currentTarget.checked)} />
+                                        {t("flip")}
+                                    </label>
+                                </FxSection>
+                                <FxSection title={t("creative")} icon="✦">
+                                    {slider("pixelate", t("pixelate"), 0, 40, "", { offLabel: t("off") })}
+                                    {slider("posterize", t("posterize"), 0, 10, "", { offLabel: t("off") })}
+                                    {slider("glitch", t("glitch"), 0, 100, "%")}
+                                    {slider("rgbSplit", t("rgbSplit"), 0, 30)}
+                                    {slider("bloom", t("bloom"), 0, 100, "%")}
+                                    {slider("sketch", t("sketch"), 0, 100, "%")}
+                                    {slider("scanlines", t("scanlines"), 0, 100, "%")}
+                                    {slider("sepia", t("sepia"), 0, 100, "%")}
+                                    {slider("grayscale", t("grayscale"), 0, 100, "%")}
+                                    {slider("invert", t("invert"), 0, 100, "%")}
+                                    <div className={cl("fx-color-row")}>
+                                        <span>{t("duotone")}</span>
+                                        <input type="color" className={cl("fx-color")} value={fx.duoA} aria-label={t("duotone")} onChange={event => fxSet("duoA", event.currentTarget.value)} />
+                                        <input type="color" className={cl("fx-color")} value={fx.duoB} aria-label={t("duotone")} onChange={event => fxSet("duoB", event.currentTarget.value)} />
+                                    </div>
+                                    {slider("duotone", t("duoStrength"), 0, 100, "%")}
+                                    <button type="button" className={cl("fx-btn")} onClick={() => { record("seed"); setFx(current => ({ ...current, glitchSeed: Math.floor(Math.random() * 100000) })); }}>
+                                        {t("reshuffle")}
+                                    </button>
+                                </FxSection>
+                            </>
+                        ) : (
+                            <>
+                                <div className={cl("fx-add-row")}>
+                                    <button type="button" className={classes(cl("fx-btn"), cl("fx-btn-primary"))} onClick={() => addTextLayer()}>{t("addText")}</button>
+                                    <button type="button" className={cl("fx-btn")} onClick={() => void pasteFromClipboardButton()}>{t("paste")}</button>
+                                </div>
+
+                                {layers.length === 0 ? (
+                                    <div className={cl("fx-empty")}>
+                                        <span className={cl("fx-empty-icon")} aria-hidden="true">T</span>
+                                        {t("layersEmpty")}
+                                    </div>
+                                ) : (
+                                    <div className={cl("fx-layers")}>
+                                        {layers.map((layer, index) => (
+                                            <button
+                                                key={layer.id}
+                                                type="button"
+                                                className={classes(cl("fx-layer"), layer.id === selectedId && cl("fx-layer-active"))}
+                                                onClick={() => setSelectedId(layer.id)}
+                                            >
+                                                <span className={cl("fx-layer-icon")} aria-hidden="true">{layer.kind === "text" ? "T" : "▣"}</span>
+                                                {layer.kind === "text" ? (layer.text.split("\n")[0].slice(0, 26) || t("emptyText")) : `${t("image")} ${index + 1}`}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {selected?.kind === "text" ? (
+                                    <div className={cl("fx-layer-editor")}>
+                                        <textarea
+                                            ref={textAreaRef}
+                                            className={cl("fx-textarea")}
+                                            value={selected.text}
+                                            rows={3}
+                                            placeholder={t("typeHere")}
+                                            onChange={event => updateLayer(selected.id, { text: event.currentTarget.value })}
+                                        />
+                                        <FxSlider label={t("size")} value={Math.round(selected.size * 100)} min={2} max={45} unit="%" onChange={v => updateLayer(selected.id, { size: v / 100 })} />
+                                        <div className={cl("fx-color-row")}>
+                                            <span>{t("color")}</span>
+                                            <input type="color" className={cl("fx-color")} value={selected.color} onChange={event => updateLayer(selected.id, { color: event.currentTarget.value })} />
+                                            <span>{t("outline")}</span>
+                                            <input type="color" className={cl("fx-color")} value={selected.outlineColor} onChange={event => updateLayer(selected.id, { outlineColor: event.currentTarget.value })} />
+                                        </div>
+                                        <select
+                                            className={cl("fx-select")}
+                                            value={selected.font}
+                                            onChange={event => updateLayer(selected.id, { font: event.currentTarget.value as FontKey })}
+                                        >
+                                            {(Object.keys(FONT_STACKS) as FontKey[]).map(key => <option key={key} value={key}>{key}</option>)}
+                                        </select>
+                                        <div className={cl("fx-toggles")}>
+                                            <label className={cl("fx-check")}><input type="checkbox" checked={selected.bold} onChange={event => updateLayer(selected.id, { bold: event.currentTarget.checked })} />{t("bold")}</label>
+                                            <label className={cl("fx-check")}><input type="checkbox" checked={selected.italic} onChange={event => updateLayer(selected.id, { italic: event.currentTarget.checked })} />{t("italic")}</label>
+                                            <label className={cl("fx-check")}><input type="checkbox" checked={selected.outline} onChange={event => updateLayer(selected.id, { outline: event.currentTarget.checked })} />{t("outline")}</label>
+                                            <label className={cl("fx-check")}><input type="checkbox" checked={selected.shadow} onChange={event => updateLayer(selected.id, { shadow: event.currentTarget.checked })} />{t("shadow")}</label>
+                                        </div>
+                                        <button type="button" className={classes(cl("fx-btn"), cl("fx-btn-danger"))} onClick={() => { record("delete"); setLayers(current => current.filter(l => l.id !== selected.id)); setSelectedId(""); }}>{t("deleteText")}</button>
+                                    </div>
+                                ) : null}
+
+                                {selected?.kind === "image" ? (
+                                    <div className={cl("fx-layer-editor")}>
+                                        <FxSlider label={t("size")} value={Math.round(selected.scale * 100)} min={5} max={100} unit="%" onChange={v => updateLayer(selected.id, { scale: v / 100 })} />
+                                        <button type="button" className={classes(cl("fx-btn"), cl("fx-btn-danger"))} onClick={() => { record("delete"); setLayers(current => current.filter(l => l.id !== selected.id)); setSelectedId(""); }}>{t("deleteImage")}</button>
+                                    </div>
+                                ) : null}
+                            </>
+                        )}
+                    </div>
+
+                    <div className={cl("fx-actions")}>
+                        {/* Cancel goes back to the search exactly as it was left (it stays mounted underneath). */}
+                        <button type="button" className={cl("fx-btn")} disabled={busy} onClick={() => onDone({ kind: "cancel" })}>{t("cancel")}</button>
+                        <button type="button" className={cl("fx-btn")} disabled={busy} title={t("skipHint")} onClick={() => onDone({ kind: "original" })}>{t("skip")}</button>
+                        <button type="button" className={classes(cl("fx-btn"), cl("fx-btn-primary"), cl("fx-continue"))} disabled={busy || !ready} onClick={confirm}>
+                            {busy ? (progress || t("working")) : t("continue")}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Discovery feed (what loads when the window opens with an empty search)
+// ---------------------------------------------------------------------------
+
+const DISCOVERY_QUERIES: Record<"AVATAR" | "BANNER", string[]> = {
+    AVATAR: [
+        "aesthetic profile icon", "dark aesthetic pfp", "anime profile picture", "minimal profile icon", "art profile picture",
+        "soft aesthetic icon", "manga icon", "grunge pfp", "cute anime icon", "y2k icon", "retro anime pfp", "pastel icon",
+        "cyberpunk pfp", "gothic aesthetic icon", "vintage art icon", "fantasy character icon", "dreamy aesthetic pfp", "black and white manga icon"
+    ],
+    BANNER: [
+        "aesthetic banner", "dark aesthetic header", "anime scenery banner", "cinematic landscape", "fantasy landscape art",
+        "minimal aesthetic header", "desktop wallpaper illustration", "scenery art banner", "night city banner", "sunset anime header",
+        "pastel sky banner", "ocean aesthetic header", "space art banner", "retro anime scenery", "rain aesthetic header", "forest illustration banner"
+    ]
+};
+
+// Remembered for as long as Discord stays open: recent discovery queries are
+// not picked again right away, and images already shown are moved back.
+const recentDiscovery: string[] = [];
+const shownDiscovery = new Set<string>();
+
+function pickDiscoveryQuery(target: SearchKind) {
+    const pool = DISCOVERY_QUERIES[target === "BANNER" ? "BANNER" : "AVATAR"];
+    const fresh = pool.filter(query => !recentDiscovery.includes(query));
+    const choice = (fresh.length ? fresh : pool)[Math.floor(Math.random() * (fresh.length || pool.length))];
+    recentDiscovery.push(choice);
+    if (recentDiscovery.length > Math.floor(pool.length / 2)) recentDiscovery.shift();
+    return choice;
+}
+
+function freshFirst(results: PinterestImageResult[]) {
+    const fresh: PinterestImageResult[] = [];
+    const seen: PinterestImageResult[] = [];
+    for (const result of results) (shownDiscovery.has(imageKey(result.url)) ? seen : fresh).push(result);
+    for (const result of fresh.slice(0, 16)) shownDiscovery.add(imageKey(result.url));
+    if (shownDiscovery.size > 800) shownDiscovery.clear();
+    return [...fresh, ...seen];
+}
+
+interface PinterestProfileModalProps extends ModalProps {
     target: Extract<SearchKind, "AVATAR" | "BANNER">;
     onEditFile?(file: File, onApplyStart?: () => void): Promise<"APPLIED" | "CANCELLED" | false>;
     onApplied?(): void;
 }
 
 export function PinterestProfileModal({ target, onEditFile, onApplied, ...props }: PinterestProfileModalProps) {
+    useLocale();
+    const baseRef = useRef<HTMLDivElement>(null);
+    const [selecting, setSelecting] = useState(false);
     const [query, setQuery] = useState("");
     // Guards against a fast double-click (or double-tap) on a result card
     // triggering onSelectResult twice concurrently, which raced two parallel
     // fetch/hand-off attempts against the same Discord dialog/input and
     // caused the flicker + error some people saw when clicking quickly.
     const isSelectingRef = useRef(false);
-    const { colorTheme, customAccent, editBeforeApply } = settings.use(["colorTheme", "customAccent", "editBeforeApply"]);
-    const discoveryQuery = useMemo(() => {
-        const avatarQueries = [
-            "aesthetic profile icon",
-            "dark aesthetic pfp",
-            "anime profile picture",
-            "minimal profile icon",
-            "art profile picture"
-        ];
-        // Discovery should feel broad, not like an exact-size Discord banner search.
-        // The native search layer still ranks wider results first for BANNER, while
-        // Edit Image handles the final crop/zoom chosen by the user.
-        const bannerQueries = [
-            "aesthetic wallpaper",
-            "dark aesthetic art",
-            "anime scenery",
-            "cinematic art",
-            "fantasy landscape art",
-            "minimal aesthetic",
-            "illustration wallpaper",
-            "scenery art"
-        ];
-        const choices = target === "BANNER" ? bannerQueries : avatarQueries;
-        return choices[Math.floor(Math.random() * choices.length)];
-    }, [target]);
+    const { colorTheme, customAccent, editBeforeApply, effectsStep, appearance: modalAppearance } = settings.use(["colorTheme", "customAccent", "editBeforeApply", "effectsStep", "appearance"]);
+    const [effectsRequest, setEffectsRequest] = useState<null | {
+        src: string;
+        filename: string;
+        mediaType: string;
+        resolve(outcome: EffectsOutcome): void;
+    }>(null);
+
+    useEffect(() => {
+        if (baseRef.current) baseRef.current.inert = Boolean(effectsRequest);
+        const frame = requestAnimationFrame(() => {
+            const element = effectsRequest
+                ? baseRef.current?.parentElement?.querySelector<HTMLButtonElement>(`.${cl("fx")} button`)
+                : baseRef.current?.querySelector<HTMLInputElement>("input[type=\"search\"]");
+            element?.focus({ preventScroll: true });
+        });
+        return () => cancelAnimationFrame(frame);
+    }, [effectsRequest]);
+
+    function requestEffects(src: string, filename: string, mediaType: string) {
+        return new Promise<EffectsOutcome>(resolve => {
+            setEffectsRequest({
+                src,
+                filename,
+                mediaType,
+                resolve: outcome => {
+                    setEffectsRequest(null);
+                    resolve(outcome);
+                }
+            });
+        });
+    }
+    const modalResolvedAppearance = useResolvedAppearance(modalAppearance as AppearanceSetting);
+    const discoveryQuery = useMemo(() => pickDiscoveryQuery(target), [target]);
 
     return (
-        <ModalRoot {...props} size={ModalSize.LARGE} className={cl("profile-modal")} style={getPinterestThemeStyle(colorTheme, customAccent) as any}>
+        <ModalRoot {...props} size={ModalSize.LARGE} className={classes(cl("profile-modal"), effectsRequest && cl("profile-modal-editing"))} dir={direction()} style={getPinterestFullStyle(resolvePinterestTheme(colorTheme), customAccent, modalResolvedAppearance, modalAppearance === "AUTO") as any}>
+            <div ref={baseRef} className={cl("profile-base")}>
             <ModalHeader separator={false} className={cl("profile-modal-header")}>
                 <div className={cl("profile-modal-heading")}>
-                    <div className={cl("profile-modal-mark")} aria-hidden="true"><PinterestLogo size={22} /></div>
+                    <div className={cl("profile-modal-mark")} aria-hidden="true"><img className={cl("profile-modal-icon")} src={PLUGIN_ICON} alt="" draggable={false} /></div>
                     <div>
-                        <div className={cl("profile-modal-title")}>Pinterest</div>
+                        <div className={cl("profile-modal-title")}>Pinterest Tool</div>
                         <div className={cl("profile-modal-subtitle")}>
-                            Pick a {target === "BANNER" ? "banner" : "profile icon"}, preview/edit it, then apply
+                            {t(target === "BANNER" ? "subtitleBanner" : "subtitleAvatar")}
                         </div>
                     </div>
                 </div>
                 <ModalCloseButton onClick={props.onClose} />
             </ModalHeader>
             <ModalContent className={cl("profile-modal-content")}>
+                {selecting && !effectsRequest ? <div className={cl("preparing-overlay")} role="status" aria-live="polite"><span className={cl("preparing-spinner")}/>{t("fitting")}</div> : null}
                 <PinterestBrowser
                     query={query}
                     setQuery={setQuery}
@@ -1912,53 +2523,91 @@ export function PinterestProfileModal({ target, onEditFile, onApplied, ...props 
                     onSelectResult={async result => {
                         if (isSelectingRef.current) return;
                         isSelectingRef.current = true;
+                        setSelecting(true);
 
                         try {
                             await selectResult(result);
                         } finally {
                             isSelectingRef.current = false;
+                            setSelecting(false);
                         }
 
                         async function selectResult(result: PinterestImageResult) {
-                            if (editBeforeApply && onEditFile) {
-                                try {
-                                    const file = await fetchProfileFile(result);
-
-                                    // Hand the file to Discord's own upload/editor flow. The
-                                    // previous flashing/disappearing editor was actually caused
-                                    // by handing the file to the wrong <input> (the chat
-                                    // attachment uploader) — now that the correct dialog input
-                                    // is used, Discord's real editor should open and stay open.
-                                    const editorResult = await onEditFile(file, () => {
-                                        // Close Pinterest as soon as Discord's Apply button is pressed,
-                                        // while Edit Image is still covering it. Waiting until the editor
-                                        // disappears causes one frame of Pinterest to flash back onscreen.
-                                        props.onClose();
-                                    });
-
-                                    // Keep Pinterest mounted underneath Discord's native editor.
-                                    // If the user presses Cancel (or closes the editor), Discord
-                                    // reveals this same Pinterest modal again with the search/results
-                                    // preserved. Only close Pinterest after a successful Apply.
-                                    if (editorResult === "APPLIED") {
-                                        // Pinterest was already closed on the Apply click to avoid a
-                                        // visible flash between Discord's editor and the profile page.
-                                        return;
-                                    }
-
-                                    if (editorResult === "CANCELLED") {
-                                        return;
-                                    }
-                                } catch (error) {
-                                    logger.error("Could not open Discord image editor", error);
-                                }
+                        // 1. Fetch once. 2. Optional editor (images and, when the build can
+                        // decode them, animated GIFs). 3. Always fit Discord's 10 MB limit.
+                        let file: File | null = null;
+                        try {
+                            const media = await fetchResultMedia(result);
+                            file = new File([media.data], media.filename, { type: media.type });
+                            const isAnimated = /gif/i.test(media.type);
+                            if (effectsStep && (!isAnimated || canDecodeAnimated())) {
+                                const outcome = await requestEffects(media.dataUrl, media.filename, media.type);
+                                if (outcome.kind === "cancel") return;
+                                if (outcome.kind === "edited") file = outcome.file;
                             }
+                        } catch (error) {
+                            logger.error("Could not prepare that media", error);
+                            setEffectsRequest(null);
+                        }
 
-                            const applied = await applyProfileResult(result, target);
-                            if (!applied) return;
+                        if (!file) {
+                            showToast(t("downloadFailed"), Toasts.Type.FAILURE);
+                            return;
+                        }
 
-                            props.onClose();
-                            window.setTimeout(() => onApplied?.(), 90);
+                        if (file.size > TARGET_BYTES) {
+                            showToast(t("resize", { size: (file.size / 1048576).toFixed(1) }), Toasts.Type.MESSAGE);
+                            try {
+                                file = await fitUnderLimit(file);
+                            } catch (error) {
+                                showToast(error instanceof Error ? error.message : t("tooLarge"), Toasts.Type.FAILURE);
+                                return;
+                            }
+                        }
+
+                        if (editBeforeApply && onEditFile) {
+                            try {
+
+                                // Hand the file to Discord's own upload/editor flow. The
+                                // previous flashing/disappearing editor was actually caused
+                                // by handing the file to the wrong <input> (the chat
+                                // attachment uploader) — now that the correct dialog input
+                                // is used, Discord's real editor should open and stay open.
+                                const editorResult = await onEditFile(file, () => {
+                                    // Close Pinterest as soon as Discord's Apply button is pressed,
+                                    // while Edit Image is still covering it. Waiting until the editor
+                                    // disappears causes one frame of Pinterest to flash back onscreen.
+                                    props.onClose();
+                                });
+
+                                // Keep Pinterest mounted underneath Discord's native editor.
+                                // If the user presses Cancel (or closes the editor), Discord
+                                // reveals this same Pinterest modal again with the search/results
+                                // preserved. Only close Pinterest after a successful Apply.
+                                if (editorResult === "APPLIED") {
+                                    // Pinterest was already closed on the Apply click to avoid a
+                                    // visible flash between Discord's editor and the profile page.
+                                    return;
+                                }
+
+                                if (editorResult === "CANCELLED") {
+                                    return;
+                                }
+                            } catch (error) {
+                                logger.error("Could not open Discord image editor", error);
+                            }
+                        }
+
+                        const applied = await applyProfileResult(
+                            result,
+                            target,
+                            undefined,
+                            { dataUrl: await readFileAsDataUrl(file), filename: file.name }
+                        );
+                        if (!applied) return;
+
+                        props.onClose();
+                        window.setTimeout(() => onApplied?.(), 90);
                         }
                     }}
                     rootClassName={classes(
@@ -1967,10 +2616,19 @@ export function PinterestProfileModal({ target, onEditFile, onApplied, ...props 
                         target === "BANNER" && cl("profile-browser-banner")
                     )}
                     initialTarget={target}
-                    showTargetSelector={false}
                     initialDiscoveryQuery={discoveryQuery}
                 />
             </ModalContent>
+            </div>
+            {effectsRequest ? (
+                <EffectsEditor
+                    src={effectsRequest.src}
+                    filename={effectsRequest.filename}
+                    mediaType={effectsRequest.mediaType}
+                    target={target}
+                    onDone={effectsRequest.resolve}
+                />
+            ) : null}
         </ModalRoot>
     );
 }

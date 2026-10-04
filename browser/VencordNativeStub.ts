@@ -149,6 +149,8 @@ window.VencordNative = {
     pluginHelpers: {} as any,
     privacy: {} as any,
     csp: {} as any,
+    // Desktop-only tray IPC, inert in the browser but needed for the stub to satisfy
+    // the native surface type.
     tray: {
         setUpdateState: NOOP,
         onCheckUpdates: NOOP,

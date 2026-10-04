@@ -12,6 +12,15 @@ export function mediaSrc(media: any): string | undefined {
     return media?.url ?? media?.proxyURL ?? media?.proxy_url ?? media?.proxyUrl;
 }
 
+// Title and description each come in two shapes; see embedFingerprint.
+function embedText(embed: any): string | undefined {
+    return embed.rawTitle ?? embed.title;
+}
+
+function embedDescription(embed: any): string | undefined {
+    return embed.rawDescription ?? embed.description;
+}
+
 export function collectEmbedText(embed: any): string {
     if (!embed || typeof embed !== "object") return "";
     const parts: string[] = [];
@@ -32,6 +41,72 @@ export function collectEmbedText(embed: any): string {
     if (typeof embed.provider?.name === "string") parts.push(embed.provider.name);
     if (typeof embed.url === "string") parts.push(embed.url);
     return parts.join("\n");
+}
+
+/**
+ * Whether an embed still carries a body of its own.
+ *
+ * This is what separates a stripped embed, which Discord emptied and left as a husk,
+ * from a replacement one. Bots that paginate or switch tabs reuse a single url across
+ * every page and send a complete new embed each time, so "this field is missing" on
+ * its own is no reason to restore the previous embed's field over it - that leaves the
+ * new page's rows sitting under the old page's title and footer.
+ */
+export function embedHasBody(embed: any): boolean {
+    if (!embed || typeof embed !== "object") return false;
+    return !!embedText(embed) || !!embedDescription(embed) || (Array.isArray(embed.fields) && embed.fields.length > 0);
+}
+
+/**
+ * Identity of an embed's content, ignoring the parts that change on a re-fetch.
+ *
+ * Title and description have to be read in both of the shapes they arrive in. A stored
+ * snapshot is raw JSON and carries title/description, but anything Discord's own embed
+ * model has touched exposes only rawTitle/rawDescription, and it has no title/description
+ * at all. Reading one form made every page of a paginated bot fingerprint the same, so a
+ * new page was indistinguishable from a stripped one and each edit appended the previous
+ * page's embeds to the message.
+ */
+export function embedFingerprint(embed: any): string {
+    if (!embed || typeof embed !== "object") return String(embed);
+    try {
+        return JSON.stringify({
+            url: embed.url,
+            type: embed.type,
+            title: embedText(embed),
+            description: embedDescription(embed),
+            author: embed.author?.name ?? embed.author?.url,
+            provider: embed.provider?.name,
+            fields: Array.isArray(embed.fields) ? embed.fields.map((f: any) => ({ name: f.name ?? f.rawName, value: f.value ?? f.rawValue, inline: f.inline })) : undefined,
+            footer: embed.footer?.text,
+            image: mediaSrc(embed.image),
+            thumbnail: mediaSrc(embed.thumbnail),
+            video: mediaSrc(embed.video)
+        });
+    } catch {
+        return `${embed.type ?? ""}|${embed.url ?? ""}|${embedText(embed) ?? ""}|${embedDescription(embed) ?? ""}`;
+    }
+}
+
+/**
+ * An embed's timestamp reaches us as a moment, and one that came back out of the database
+ * can be invalid. Discord formats it with Intl, which throws "RangeError: Invalid time
+ * value" and takes the whole channel render down with it, so it never reaches Discord
+ * unvalidated.
+ */
+export function withValidEmbedTimestamps<T>(embeds: T[]): T[] {
+    if (!Array.isArray(embeds)) return embeds;
+    return embeds.map(embed => {
+        if (!embed || typeof embed !== "object") return embed;
+        const { timestamp } = embed as Record<string, unknown>;
+        if (timestamp == null) return embed;
+        const date = (timestamp as { isValid?: () => boolean; toDate?: () => Date; })?.isValid?.call(timestamp)
+            ? (timestamp as { toDate: () => Date; }).toDate()
+            : new Date(timestamp as string);
+        if (date && !Number.isNaN(date.valueOf())) return { ...embed, timestamp: date } as T;
+        const { timestamp: _invalid, ...rest } = embed as Record<string, unknown>;
+        return rest as T;
+    });
 }
 
 export function collectComponentText(component: any): string {
@@ -94,5 +169,19 @@ export function collectLoggedMessageText(message: any): string {
         }
     }
     if (typeof message.poll?.question?.text === "string") parts.push(message.poll.question.text);
+    // Revisions count as content: an embed-only edit leaves the current message empty,
+    // so without this the old text and embeds are neither searchable nor copyable.
+    if (Array.isArray(message.editHistory)) {
+        for (const edit of message.editHistory) {
+            if (!edit || typeof edit !== "object") continue;
+            if (typeof edit.content === "string" && edit.content) parts.push(edit.content);
+            if (Array.isArray(edit.embeds)) {
+                for (const embed of edit.embeds) {
+                    const text = collectEmbedText(embed);
+                    if (text) parts.push(text);
+                }
+            }
+        }
+    }
     return parts.join("\n");
 }

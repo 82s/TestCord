@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import experimentalIconBase64 from "file://../../browser/ExpirimentalIcon.png?base64";
-import legacyIconBase64 from "file://../../browser/LegacyIcon.png?base64";
+import experimentalIconBase64 from "file://../../browser/ExpirimentalIcon.svg?base64";
+import legacyIconBase64 from "file://../../browser/LegacyIcon.svg?base64";
 
-export const ExperimentalIconUrl = `data:image/png;base64,${experimentalIconBase64}`;
-export const LegacyIconUrl = `data:image/png;base64,${legacyIconBase64}`;
+export const ExperimentalIconUrl = `data:image/svg+xml;base64,${experimentalIconBase64}`;
+export const LegacyIconUrl = `data:image/svg+xml;base64,${legacyIconBase64}`;
 
 export type PluginWarningType = "experimental" | "legacy" | "warning";
 
@@ -52,7 +52,8 @@ export const LEGACY_PLUGINS: string[] = [
     "TokenImporter",
     "UserAreaTweaks",
     "OSSpoofer",
-    "BetterScreenshare"
+    "BetterScreenshare",
+    "CustomStreamQuality"
 ];
 
 /**
@@ -78,6 +79,7 @@ export const LEGACY_REPLACEMENTS: Record<string, string> = {
     "userareatweaks": "PanelLayout",
     "BetterScreenshare": "StreamEnhancer",
     "betterscreenshare": "StreamEnhancer",
+    "CustomStreamQuality": "StreamEnhancer",
     "MusicControls": "PanelLayout",
     "musiccontrols": "PanelLayout",
     "ActivityBanner": "PanelLayout",
