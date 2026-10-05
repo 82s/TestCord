@@ -34,6 +34,9 @@ export default definePlugin({
                     // is in webpack's cache and the internal sound list is known before the type is read. The
                     // type is also recomputed here: a player built during startup was typed before anything had
                     // loaded that module, and would otherwise keep that answer for the rest of its life.
+                    // Upstream widened its `=class.{0,1000}?` gap to 1250 and dropped the `.concat(` branch, but
+                    // there is no gap left here to widen, and canary still emits both the template literal and
+                    // the concat spelling, so both branches stay.
                     match: /(let \i=new Audio;\i.src=)((\i\((\d+)\))(?:\(`\.\/\$\{|.{0,50}concat\()this.name(\}\.mp3`\)))/,
                     replace: "$3;$self.registerSounds($4);$1(this.type=$self.identifyAudioType(this.audio),this.type!==$self.AudioType.DISCORD?this.audio:$2)"
                 },
