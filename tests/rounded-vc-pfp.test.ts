@@ -11,6 +11,8 @@ import vm from "node:vm";
 
 import { transformSync } from "esbuild";
 
+import { makeRange } from "../src/utils/types";
+
 const source = readFileSync(new URL("../src/testcordplugins/RoundedVcPfp/index.tsx", import.meta.url), "utf8")
     .replace(/^import .*;\r?\n/gm, "")
     .replace("export default definePlugin(", "globalThis.plugin = definePlugin(");
@@ -20,6 +22,7 @@ const sandbox = {
     EquicordDevs: { mochienya: {} }, TestcordDevs: { DavidHiFi: {} },
     definePlugin: (plugin: unknown) => plugin,
     definePluginSettings: () => ({ store: { cornerRadius: 12 } }), OptionType: { SLIDER: 5 }, style: "",
+    makeRange,
     UserStore: { getUser: () => { lookups++; return user; } },
     VoiceStateStore: { getVoiceStateForUser: () => undefined },
     getUserAvatarUrl: () => undefined
