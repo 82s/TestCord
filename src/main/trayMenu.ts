@@ -6,7 +6,7 @@
 
 import { IpcEvents } from "@shared/IpcEvents";
 import { gitHash } from "@shared/vencordUserAgent";
-import { BaseWindow, BrowserWindow, dialog, ipcMain, Menu, MenuItemConstructorOptions, shell } from "electron";
+import { BrowserWindow, ipcMain, Menu, MenuItemConstructorOptions, shell } from "electron";
 import aboutHtml from "file://about.html?minify";
 
 import { SETTINGS_DIR, THEMES_DIR } from "./utils/constants";
@@ -88,8 +88,6 @@ function openAboutWindow() {
     });
 }
 
-const notify = (window: BaseWindow, title: string, message: string) => dialog.showMessageBox(window, { title, message });
-
 function createVencordMenuItems(): MenuItemConstructorOptions[] {
     return [
         {
@@ -105,8 +103,7 @@ function createVencordMenuItems(): MenuItemConstructorOptions[] {
                 },
                 {
                     label: "Repair Testcord",
-                    click: () => sendToRenderer(IpcEvents.TRAY_REPAIR)
-                },
+                    click: () => sendToRenderer(IpcEvents.TRAY_REPAIR)                },
                 { type: "separator" },
                 {
                     label: "Open Settings Folder",
