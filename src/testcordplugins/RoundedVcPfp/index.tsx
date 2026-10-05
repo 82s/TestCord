@@ -7,7 +7,7 @@
 import { definePluginSettings } from "@api/Settings";
 import { EquicordDevs, TestcordDevs } from "@utils/constants";
 import { getUserAvatarUrl } from "@utils/misc";
-import definePlugin, { OptionType } from "@utils/types";
+import definePlugin, { makeRange, OptionType } from "@utils/types";
 import { ChannelRTCStore, ChannelStore, UserStore, VoiceStateStore } from "@webpack/common";
 
 import style from "./style.css?managed";
@@ -16,9 +16,9 @@ const settings = definePluginSettings({
     cornerRadius: {
         type: OptionType.SLIDER,
         description: "Tile corner rounding in pixels. 0 is flat like FullVCPFP; 12 is a clean, visible round.",
-        markers: [0, 4, 8, 12, 16, 20, 24],
+        markers: makeRange(0, 24, 2),
         default: 12,
-        stickToMarkers: false
+        stickToMarkers: true
     }
 });
 
@@ -62,7 +62,7 @@ export default definePlugin({
 
         return {
             "--full-res-avatar": `url("${avatarUrl}")`,
-            "--vc-pfp-radius": `${settings.store.cornerRadius}px`
+            "--vc-pfp-radius": `${Math.round(settings.store.cornerRadius)}px`
         };
     },
 });
