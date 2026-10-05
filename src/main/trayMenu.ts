@@ -103,7 +103,8 @@ function createVencordMenuItems(): MenuItemConstructorOptions[] {
                 },
                 {
                     label: "Repair Testcord",
-                    click: () => sendToRenderer(IpcEvents.TRAY_REPAIR)                },
+                    click: () => sendToRenderer(IpcEvents.TRAY_REPAIR)
+                },
                 { type: "separator" },
                 {
                     label: "Open Settings Folder",
