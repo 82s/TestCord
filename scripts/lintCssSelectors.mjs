@@ -30,7 +30,7 @@ import { dirname, join, relative, resolve } from "node:path";
  * Lower it in the same commit that removes an offender.
  */
 
-const BASELINE = 142;
+const BASELINE = 140;
 const SRC = "src";
 
 const UNINDEXABLE = [

@@ -91,10 +91,12 @@ export const CspPolicies: PolicyMap = {
 
     // HCaptcha
     "*.hcaptcha.com": [...CSPSrc, "script-src"],
-    // Tenor, used by TenorSearch plugin and some themes
+    // Tenor & Giphy, used by GifProviderSwitcher plugin and some themes
     "*.tenor.com": ImageAndMediaSrc,
     "*.tenor.co": ImageAndMediaSrc,
     "api.tenor.com": ConnectSrc,
+    "*.giphy.com": ImageAndMediaSrc,
+    "api.giphy.com": ConnectSrc, // Giphy search/trending API, called from the renderer
 
     // File hosters used by renderer-side upload paths (fileUpload, bigFileUpload, bypassUpload, BigFileUploadEnhanced)
     "gofile.io": ConnectSrc,
