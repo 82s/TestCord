@@ -74,7 +74,18 @@ function toDate(input: unknown): Date | null {
     return date instanceof Date && !Number.isNaN(date.getTime()) ? date : null;
 }
 
+// Discord's own `<t:...>` formatter saves and restores these thresholds, and moment
+// forces `ss = s - 1` on every `s` write, so that restore wipes the `ss: -1` and
+// `[relative]` degrades to "a few seconds ago". Re-apply before every format.
+function applyRelativeTimeThresholds() {
+    moment.relativeTimeThreshold("s", 60);
+    moment.relativeTimeThreshold("ss", -1);
+    moment.relativeTimeThreshold("m", 60);
+}
+
 const format = (date: Date, formatTemplate: string): string => {
+    applyRelativeTimeThresholds();
+
     const second = Math.floor(date.getTime() / 1000);
     const key = `${second}|${formatTemplate}`;
     const cached = formatCache.get(key);
@@ -229,9 +240,7 @@ export default definePlugin({
     ],
 
     start() {
-        moment.relativeTimeThreshold("s", 60);
-        moment.relativeTimeThreshold("ss", -1);
-        moment.relativeTimeThreshold("m", 60);
+        applyRelativeTimeThresholds();
     },
 
     stop() {
