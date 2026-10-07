@@ -73,6 +73,12 @@ export async function update(branch?: string) {
         return false;
     }
 
+    if (outcome === "upToDate") {
+        isOutdated = false;
+        isNewer = false;
+        return true;
+    }
+
     return finishUpdate();
 }
 

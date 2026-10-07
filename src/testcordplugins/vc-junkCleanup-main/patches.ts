@@ -24,7 +24,7 @@ const Patches: Record<string, ConfigurablePatchDefinition> = {
         patches: {
             find: '"sticker")',
             replacement: {
-                match: /f\.gifts\?\.button!=null/,
+                match: /\i\.gifts\?\.button!=null/,
                 replace: "false"
             }
         }

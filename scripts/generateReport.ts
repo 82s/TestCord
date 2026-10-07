@@ -251,7 +251,7 @@ page.on("console", async e => {
 
     const firstArg = await rawArgs[0]?.jsonValue();
 
-    const isEquicord = firstArg === "[Equicord]";
+    const isEquicord = firstArg === "[Equicord]" || firstArg === "[Testcord]";
     const isDebug = firstArg === "[PUP_DEBUG]";
     const isReporterMeta = firstArg === "[REPORTER_META]";
 
@@ -268,7 +268,8 @@ page.on("console", async e => {
             break outer;
         }
 
-        const [, tag, message, otherMessage] = args as Array<string>;
+        const [, tag, rawMessage, otherMessage] = args as Array<string>;
+        const message = typeof rawMessage === "string" ? rawMessage : String(rawMessage ?? "");
 
         switch (tag) {
             case "WebpackPatcher:":

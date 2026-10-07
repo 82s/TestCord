@@ -145,8 +145,8 @@ export default definePlugin({
             predicate: () => settings.store.voiceBackground,
             replacement: [
                 {
-                    match: /(?<=function\((\i),\i\)\{)(?=let.{20,40},style:)/,
-                    replace: "$1.style=$self.getVoiceBackgroundStyles($1);"
+                    match: /function \i?\s*\((\i)(?:,\i)?\)\{(?=let[^;]+?style:)/,
+                    replace: "$&$1.style=$self.getVoiceBackgroundStyles($1);"
                 }
             ]
         },
