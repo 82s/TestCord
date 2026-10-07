@@ -26,18 +26,19 @@ export default definePlugin({
                     // Uses the audio as-is if external, otherwise checks for an internal Discord sound.
                     // Also force loads the internal sounds module to account for the second patch group below,
                     // as well as accounting for not calling the module in this patch when this.type is not DISCORD.
-                    // The `=class.{0,1000}?` became nothing: Discord dropped the class wrapper and builds the
-                    // element directly. `let \i=` must stay in the capture either way - dropping it yields
+                    // Canary builds the element directly, so `=class.{0,1000}?` matches nothing there.
+                    // `let \i=` must stay in the capture either way - dropping it yields
                     // `n(696354);new Audio;`, which rebinds the element variable to the sounds module and leaves
                     // an anonymous element behind ("i.load is not a function").
                     // registerSounds($4) runs right after $3 required the module, so the id the pattern captured
                     // is in webpack's cache and the internal sound list is known before the type is read. The
                     // type is also recomputed here: a player built during startup was typed before anything had
                     // loaded that module, and would otherwise keep that answer for the rest of its life.
-                    // Upstream widened its `=class.{0,1000}?` gap to 1250 and dropped the `.concat(` branch, but
-                    // there is no gap left here to widen, and canary still emits both the template literal and
-                    // the concat spelling, so both branches stay.
-                    match: /(let \i=new Audio;\i.src=)((\i\((\d+)\))(?:\(`\.\/\$\{|.{0,50}concat\()this.name(\}\.mp3`\)))/,
+                    // Upstream widened its `=class.{0,1000}?` gap to 1250 and dropped the `.concat(` branch.
+                    // The gap is kept as an optional group so the class-wrapped and the bare `new Audio` shape
+                    // both match, and canary still emits both the template literal and the concat spelling,
+                    // so both branches stay.
+                    match: /(let \i=(?:class.{0,1250}?)?new Audio;\i.src=)((\i\((\d+)\))(?:\(`\.\/\$\{|.{0,50}concat\()this.name(\}\.mp3`\)))/,
                     replace: "$3;$self.registerSounds($4);$1(this.type=$self.identifyAudioType(this.audio),this.type!==$self.AudioType.DISCORD?this.audio:$2)"
                 },
                 {

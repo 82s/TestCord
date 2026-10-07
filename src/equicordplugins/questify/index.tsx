@@ -157,7 +157,7 @@ export default definePlugin({
             // Exports the guildless server list item component used by the Quest button.
             find: '="DOWNLOAD_APPS";function',
             replacement: {
-                match: /(?=\i:\(\)=>\i.{0,30000}?asContainer:!\i.{0,50};let (\i)=\i.forwardRef\(function)/,
+                match: /(?<=\i\.\i\(\i,\{)(?=\i:\(\)=>\i.{0,30000}?let (\i)=function\(\i\)\{let\{ref:)/,
                 replace: "GuildlessServerListItemComponent:()=>$1,"
             }
         },
@@ -289,14 +289,14 @@ export default definePlugin({
                     replace: "$1+($2>=1e6?0.8:$2>=1e3?0.4:0)"
                 },
                 {
-                    match: /(?<=children:\i.to\(\i=>`\${\i)(.toFixed\(0\))/,
+                    match: /(?<=children:\i.to\(\i=>`\${\i).toFixed\(0\)/,
                     replace: ".toLocaleString(undefined,{maximumFractionDigits:0})"
                 }
             ]
         },
         {
             // Formats the Orbs balance in the balance popout on the Quests page with locale string formatting.
-            find: "PremiumTenureRewardsOrbsBalancePopover",
+            find: 'location:"BalanceWidgetMenu"',
             predicate: () => !getQuestifySettings().disableQuestsEverything,
             replacement: [
                 {
@@ -346,8 +346,23 @@ export default definePlugin({
             replacement: [
                 {
                     // Subscribes the Quest page sort/filter state to Questify rerenders.
-                    match: /(?<=;)(?=return \i\?\(0,\i\.\i\)\()(?=.{0,50}adCreativeIds:)/,
-                    replace: "let questRerenderTrigger=$self.useQuestRerender();"
+                    match: /(\{ref:\i,\.\.\.\i\}=\i,\i=\i\.useRef\(null\),)(?=\[\i,\i\]=)/,
+                    replace: "$1questRerenderTrigger=$self.useQuestRerender(),"
+                },
+                {
+                    // Set the initial sort method.
+                    match: /(\i.\i.SUGGESTED)/,
+                    replace: "$self.getLastSortChoice()??$1"
+                },
+                {
+                    // Set the initial filters and update the filters and sort method when they change.
+                    match: /(get\(\i\)\)\?\?)(\i,\[)(\i)(\]\),\i=\i.useCallback\((\i)=>{)(.{0,60}?useCallback\((\i)=>{)/,
+                    replace: "$1$self.getLastFilterChoices()??$2$3,questRerenderTrigger$4$self.setLastSortChoice($5);$6$self.setLastFilterChoices($7);$self.rerenderQuests();"
+                },
+                {
+                    // Update the last used sort and filter choices when the toggle setting for either is changed.
+                    match: /(?<=ALL,\i.useMemo\(\(\)=>\()({sortMethod:(\i),filters:(\i))/,
+                    replace: "$self.setLastSortChoice($2),$self.setLastFilterChoices($3),$1"
                 }
             ]
         },
@@ -363,7 +378,7 @@ export default definePlugin({
                 },
                 {
                     // Overwrite button props for ENROLLED/INCOMPLETE Quests.
-                    match: /(case \i\.\i\.(?:ENROLLED|INCOMPLETE):return)(?=\(0,\i\.jsx\)\(\i,\{quest:(\i),taskType:\i\.type,size:(\i),)/g,
+                    match: /(case \i\.\i\.(?:ENROLLED|INCOMPLETE):return)(?=\(0,\i\.jsx\)\(\i,\{quest:(\i),taskType:\i(?:\.type)?,size:(\i),)/g,
                     replace: "$1 $self.enrolledIncompleteButton({quest:$2,size:$3})||"
                 }
             ]
