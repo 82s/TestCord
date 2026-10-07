@@ -70,8 +70,8 @@ export default definePlugin({
             find: "\"data-selenium-video-tile\":",
             replacement: [
                 {
-                    match: /(?<=function\((\i),\i\)\{)(?=let.{20,40},style:)/,
-                    replace: "Object.assign($1.style=$1.style||{},$self.getVoiceBackgroundStyles($1));"
+                    match: /function \i?\s*\((\i)(?:,\i)?\)\{(?=let[^;]+?style:)/,
+                    replace: "$&Object.assign($1.style=$1.style||{},$self.getVoiceBackgroundStyles($1));"
                 }
             ]
         },
