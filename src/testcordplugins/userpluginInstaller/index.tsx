@@ -71,7 +71,7 @@ const settings = definePluginSettings({
     }
 });
 
-function listed(value: string) {
+function listed(value = "") {
     return value.split(",").map(entry => entry.trim()).filter(Boolean);
 }
 

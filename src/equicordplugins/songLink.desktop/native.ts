@@ -20,21 +20,24 @@ type SongLinkResult = {
 };
 
 export async function getTrackData(_, trackURL: string): Promise<SongLinkResult> {
-    const url = new URL("https://api.song.link/v1-alpha.1/links");
-    url.searchParams.set("url", trackURL);
-    url.searchParams.set("userCountry", RendererSettings.store.plugins?.SongLink.userCountry || "US");
-    const raw = await fetch(url.toString()).then(u => u.json());
-    const [, entry]: any = Object.entries(raw.entitiesByUniqueId)
-        .find(([key]) => !key.includes("YOUTUBE")) || [];
-    const possibleTrackInfo = entry
-        ? { title: (entry.title as string), artist: (entry.artistName as string) }
-        : null;
-    return {
-        // @ts-ignore
-        info: possibleTrackInfo,
-        links: Object.fromEntries(Object.entries<any>(raw.linksByPlatform).map(([name, data]) => [name, {
-            url: data.url,
-            nativeUri: data.nativeAppUriDesktop
-        }]))
-    };
+    const url = new URL(`https://song.link/${trackURL}`);
+    url.searchParams.set("userCountry", RendererSettings.store.plugins?.SongLink?.userCountry || "US");
+    const res = await fetch(url.toString(), { headers: { "User-Agent": "Mozilla/5.0" } });
+    if (!res.ok) throw new Error(`Song.link returned ${res.status}`);
+
+    const json = (await res.text()).match(/__NEXT_DATA__"[^>]*>(.*?)<\/script>/s)?.[1];
+    if (!json) throw new Error("Song.link page had no data");
+
+    const pageData = JSON.parse(json).props?.pageProps?.pageData;
+    const sections: any[] = pageData?.sections ?? [];
+    const links: SongLinkResult["links"] = {};
+    for (const section of sections) {
+        for (const link of section.links ?? []) {
+            if (link.url) links[link.platform] = { url: link.url, nativeUri: link.nativeAppUriDesktop };
+        }
+    }
+    if (!Object.keys(links).length) throw new Error("Song.link found no links for this track");
+
+    const { title, artistName } = pageData.entityData ?? {};
+    return { info: title ? { title, artist: artistName } : undefined, links };
 }
