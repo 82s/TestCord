@@ -139,6 +139,7 @@ async function runUpdateCheck() {
 
     try {
         const isOutdated = await checkForUpdates();
+        if (IS_DISCORD_DESKTOP) VencordNative.tray.setUpdateState(isOutdated);
         if (!isOutdated) return;
 
         if (Settings.autoUpdate) {

@@ -28,12 +28,12 @@ import { Paragraph } from "@components/Paragraph";
 import { SettingsTab, wrapTab } from "@components/settings/tabs/BaseTab";
 import { Margins } from "@utils/margins";
 import { useAwaiter } from "@utils/react";
-import { getRepo, isNewer, UpdateLogger } from "@utils/updater";
+import { getRepo, UpdateLogger } from "@utils/updater";
 import { React, Select } from "@webpack/common";
 
 import gitHash from "~git-hash";
 
-import { HashLink, Newer, Updatable } from "./Components";
+import { HashLink, Updatable } from "./Components";
 
 interface CommonProps {
     repo: string;
@@ -150,7 +150,7 @@ function Updater() {
             <Divider className={Margins.top20} />
 
             <Heading className={Margins.top20}>Updates</Heading>
-            {isNewer ? <Newer {...commonProps} /> : <Updatable key={settings.updaterBranch} {...commonProps} />}
+            <Updatable key={settings.updaterBranch} {...commonProps} />
         </SettingsTab>
     );
 }

@@ -204,13 +204,13 @@ async function calculateGitChanges(branchOrEvent?: any, maybeBranch?: string) {
         changes = [];
     }
 
-    // switching branches, or local-only commits: show the tip of the target
+    // switching branches: show the tip of the target
     // branch so the user can see what they would be moving to.
-    if (!changes.length) {
+    if (!changes.length && currentBranch !== branch) {
         try {
             const res = await git("log", "-n", "5", `origin/${branch}`, COMMIT_FORMAT);
             changes = parseCommits(res.stdout, (message, i) =>
-                currentBranch !== branch && i === 0
+                i === 0
                     ? `Switch to ${branch} branch (current: ${currentBranch}): ${message}`
                     : message
             );
@@ -268,7 +268,7 @@ async function forcePull(branchOrEvent?: any, maybeBranch?: string) {
         await git("checkout", "-f", "-B", branch, `origin/${branch}`);
         await git("reset", "--hard", `origin/${branch}`);
         await git("clean", "-fd");
-        return true;
+        return "updated" as const;
     });
 }
 

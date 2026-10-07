@@ -15,7 +15,7 @@ import { Margins } from "@utils/margins";
 import { relaunch } from "@utils/native";
 import { changes, checkForUpdates, forceUpdate, hasDiverged, isNewer, update, updateError } from "@utils/updater";
 import { ToastPosition } from "@vencord/discord-types/enums";
-import { ConfirmModal, openModal, React, showToast, Toasts, useState } from "@webpack/common";
+import { ConfirmModal, openModal, React, showToast, useState } from "@webpack/common";
 
 import { runWithDispatch } from "./runWithDispatch";
 
@@ -91,13 +91,8 @@ export function Newer(props: CommonProps) {
                     disabled={isUpdating || isChecking}
                     onClick={runWithDispatch(setIsChecking, async () => {
                         await checkForUpdates();
-                        Toasts.show({
-                            message: "Checked for updates!",
-                            id: Toasts.genId(),
-                            type: Toasts.Type.MESSAGE,
-                            options: {
-                                position: Toasts.Position.BOTTOM
-                            }
+                        showToast("Checked for updates!", "message", {
+                            position: ToastPosition.BOTTOM
                         });
                     })}
                 >
@@ -153,7 +148,7 @@ export function Updatable(props: CommonProps) {
                 setUpdates(outdated ? changes : []);
                 setDiverged(isNewer);
             })
-            .catch(() => {});
+            .catch(() => { });
     }, []);
 
     const isOutdated = (updates?.length ?? 0) > 0;
@@ -187,6 +182,7 @@ export function Updatable(props: CommonProps) {
                     disabled={isUpdating || isChecking}
                     onClick={runWithDispatch(setIsChecking, async () => {
                         const outdated = await checkForUpdates();
+                        setDiverged(hasDiverged());
 
                         if (outdated) {
                             setShowDiscardLocalChanges(false);
@@ -195,9 +191,11 @@ export function Updatable(props: CommonProps) {
                             setShowDiscardLocalChanges(false);
                             setUpdates([]);
 
-                            showToast("No updates found!", "message", {
-                                position: ToastPosition.BOTTOM
-                            });
+                            showToast(
+                                hasDiverged() ? "Local copy has diverged from remote!" : "No updates found!",
+                                "message",
+                                { position: ToastPosition.BOTTOM }
+                            );
                         }
                     })}
                 >
@@ -247,7 +245,7 @@ export function Updatable(props: CommonProps) {
                         Update Now
                     </Button>
                 )}
-                {isOutdated && (showDiscardLocalChanges || diverged) && (
+                {(showDiscardLocalChanges || diverged) && (
                     <Button
                         size="small"
                         variant="secondary"
@@ -257,6 +255,7 @@ export function Updatable(props: CommonProps) {
 
                             if (await forceUpdate()) {
                                 setShowDiscardLocalChanges(false);
+                                setDiverged(false);
                                 setUpdates([]);
 
                                 await new Promise<void>(r => {
@@ -283,11 +282,11 @@ export function Updatable(props: CommonProps) {
                     </Button>
                 )}
             </Flex>
-            {!updates && updateError ? (
+            {updateError ? (
                 <>
                     <Span size="md" weight="medium" color="text-strong">Error checking for updates</Span>
                     <ErrorCard className={Margins.top8} style={{ padding: "1em" }}>
-                        <p>{updateError.stderr || updateError.stdout || "An unknown error occurred"}</p>
+                        <p>{updateError.message || updateError.stderr || updateError.stdout || "An unknown error occurred"}</p>
                     </ErrorCard>
                 </>
             ) : isOutdated ? (
@@ -297,6 +296,10 @@ export function Updatable(props: CommonProps) {
                     </Paragraph>
                     <Changes updates={updates} {...props} />
                 </>
+            ) : diverged ? (
+                <Paragraph>
+                    Your local copy has more recent commits or changes that aren't on the remote repository. Stash or reset them, or click Discard Local Changes above to reset to the remote branch.
+                </Paragraph>
             ) : (
                 <Paragraph>
                     You're running the latest version of Testcord.
