@@ -1129,6 +1129,7 @@ function renderUsername(
 
 const hoveringMessageMap = new Map<string, number>();
 const hoveringRepliesMap = new Map<string, number>();
+let hoverNameRerenderQueued = false;
 
 // Offscreen gradient pause. Every visible animated name runs an infinite
 // background-position loop (+ a blurred glow copy), so paint cost grows with
@@ -1265,7 +1266,7 @@ function addHoveringMessage(id: string) {
     hoveringMessageMap.set(id, currentCount + 1);
 
     if (currentCount === 0) {
-        triggerNameRerender();
+        queueHoverNameRerender();
     }
 }
 
@@ -1276,7 +1277,7 @@ function removeHoveringMessage(id: string) {
 
     if (currentCount <= 1) {
         hoveringMessageMap.delete(id);
-        triggerNameRerender();
+        queueHoverNameRerender();
     } else {
         hoveringMessageMap.set(id, currentCount - 1);
     }
@@ -1289,7 +1290,7 @@ function addHoveringReply(id: string) {
     hoveringRepliesMap.set(id, currentCount + 1);
 
     if (currentCount === 0) {
-        triggerNameRerender();
+        queueHoverNameRerender();
     }
 }
 
@@ -1300,7 +1301,7 @@ function removeHoveringReply(id: string) {
 
     if (currentCount <= 1) {
         hoveringRepliesMap.delete(id);
-        triggerNameRerender();
+        queueHoverNameRerender();
     } else {
         hoveringRepliesMap.set(id, currentCount - 1);
     }
@@ -1308,6 +1309,17 @@ function removeHoveringReply(id: string) {
 
 function useNameHoverState() {
     return useState(false);
+}
+
+function queueHoverNameRerender() {
+    if (hoverNameRerenderQueued) return;
+    hoverNameRerenderQueued = true;
+
+    // Wait for name components to restore their settings subscriptions after effect cleanup.
+    queueMicrotask(() => {
+        hoverNameRerenderQueued = false;
+        triggerNameRerender();
+    });
 }
 
 function triggerNameRerender() {
