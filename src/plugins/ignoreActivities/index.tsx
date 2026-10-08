@@ -158,8 +158,7 @@ interface ContextMenuProps {
 }
 
 const registeredGameOverflowContextMenuPatch: NavContextMenuPatchCallback = (children, { rawGame }: ContextMenuProps) => {
-    const s = settings.use(["ignoredActivities"]);
-    const { ignoredActivities } = s;
+    const { ignoredActivities } = settings.store;
 
     const id = rawGame.id ?? rawGame.exePath;
     const isCurrentlyIgnored = ignoredActivities.some(act => act.id === id);

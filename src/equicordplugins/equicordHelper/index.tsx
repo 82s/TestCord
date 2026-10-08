@@ -120,7 +120,7 @@ function StandingButton() {
 }
 
 const addAutoCorrectMenuItem: NavContextMenuPatchCallback = children => {
-    const { enableAutoCorrect, autoCorrect } = settings.use(["enableAutoCorrect", "autoCorrect"]);
+    const { enableAutoCorrect, autoCorrect } = settings.store;
     if (!enableAutoCorrect) return;
 
     const group = findGroupChildrenByChildId("spellcheck-enabled", children, true);
