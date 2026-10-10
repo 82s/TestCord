@@ -117,7 +117,7 @@ export const activityBannerPatches = [
                 replace: "($self.saveRenderer($2),$1)?($self.markRenderedInEI(),$2($3,$4,{isGameRunning:!0}))"
             },
             {
-                match: /children:\[(\i),\(0,(\i)\.jsx\)\((\i),{stream:(\i),canGoLive:(\i),guildId:(\i),isStreaming:(\i),channel:(\i),canStream:(\i),runningGame:(\i),activity:(\i),application:(\i),/,
+                match: /children:\[(\i),\(0,(\i)\.jsx\)\((\i),{stream:(\i),canGoLive:(\i),(?:canGoLiveActivity:\i,)?guildId:(\i),isStreaming:(\i),channel:(\i),canStream:(\i),runningGame:(\i),activity:(\i),application:(\i),/,
                 replace: "children:[$1,($7&&null!=$10?$self.renderStreamingGame($12,$10):null),(0,$2.jsx)($3,{stream:$4,canGoLive:$5,guildId:$6,isStreaming:$7,channel:$8,canStream:$9,runningGame:$10,activity:$11,application:$12,"
             }
         ]
