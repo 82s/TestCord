@@ -157,6 +157,11 @@ export const Toasts = {
  * Show a simple toast. If you need more options, use Toasts.show manually
  */
 export function showToast(message: string, type: t.ToastType = "message", options?: ToastOptions) {
+    // No try/catch here. Upstream guards its `.currentToastMap.has(` store anchor, which
+    // can resolve to either of two stores and wants an already normalised entry. Ours
+    // anchors on Discord's own showToast, which takes this legacy shape directly and
+    // normalises it, so the `{text, variant}` fallback would never be reached and would
+    // not even be a valid argument here.
     Toasts.show(Toasts.create(message, type, options));
 }
 

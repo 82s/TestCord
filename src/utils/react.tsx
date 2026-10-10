@@ -213,7 +213,13 @@ function useVisibleTimer(callback: () => void, interval: number, deps: React.Dep
         let id: ReturnType<typeof setInterval> | null = null;
 
         const start = () => {
-            if (id === null) id = setInterval(() => callbackRef.current(), interval);
+            if (id !== null) return;
+            // Fire once up front instead of waiting a full interval. This is what the
+            // `setTime(0)` reset in the old useEffect did on a deps change: without it
+            // a timer that just restarted (or a window that just came back into view)
+            // renders the previous value for up to `interval` ms.
+            callbackRef.current();
+            id = setInterval(() => callbackRef.current(), interval);
         };
         const stop = () => {
             if (id !== null) {
@@ -234,9 +240,14 @@ function useVisibleTimer(callback: () => void, interval: number, deps: React.Dep
 
 export function useTimer({ interval = 1000, deps = [] }: TimerOpts) {
     const [time, setTime] = useState(0);
-    const start = useMemo(() => Date.now(), deps);
+    // use performance.now() over date.now() as the former is monotonic and not
+    // affetted by changes in the system clock (eg: timezone)
+    const start = useMemo(() => Math.round(performance.now()), deps);
 
-    useVisibleTimer(() => setTime(Date.now() - start), interval, deps);
+    // Upstream's switch to performance.now() must be taken together with the `start`
+    // above: Date.now() against a performance.now() baseline is ~1.7e12 ms out and
+    // renders a garbage timer.
+    useVisibleTimer(() => setTime(Math.round(performance.now()) - start), interval, deps);
 
     return time;
 }
