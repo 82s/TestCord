@@ -117,12 +117,16 @@ export default definePlugin({
 
     revealAllAuto() {
         if (!settings.store.autoReveal) return false;
-        // Only chat message lists. An unscoped document scan also matched
-        // settings rows (e.g. a spoiler option), clicking them open every
-        // 800ms and yanking scroll to them. role=log is stable ARIA, and the
-        // document fallback keeps the feature working if Discord renames it.
-        const logRoots = document.querySelectorAll('[role="log"]');
-        const roots: (Document | Element)[] = logRoots.length ? [...logRoots] : [document];
+        // Chat message lists plus open modals. Scanning role=log alone skipped
+        // spoilers in a profile's about me, because the message list stays
+        // mounted behind the modal so role=log never went away. An unscoped
+        // document scan matched settings rows (e.g. a spoiler option), clicking
+        // them open every 800ms and yanking scroll to them, so settings modals
+        // are dropped. The document fallback keeps the feature working if
+        // Discord renames the ARIA roles.
+        const surfaces = [...document.querySelectorAll('[role="log"], [role="dialog"], [class*="popout"]')]
+            .filter(root => !root.closest('[class*="settings"]'));
+        const roots: ParentNode[] = surfaces.length ? surfaces : [document];
         const fastCheck = roots.some(root => root.querySelector('[aria-expanded="false"][aria-label], [class*="spoilerContent"][class*="hidden"]'));
         if (!fastCheck) return false;
         if ((this as any)._isAutoRevealing) return false;
@@ -151,12 +155,11 @@ export default definePlugin({
                 try { (el as HTMLElement).blur(); } catch {}
             };
 
-            const root = document;
-            const hidden: HTMLElement[] = [];
-            const hiddenSpoilers: HTMLElement[] = [];
+            const hidden = new Set<HTMLElement>();
+            const hiddenSpoilers = new Set<HTMLElement>();
             for (const scope of roots) {
-                hidden.push(...scope.querySelectorAll<HTMLElement>('[aria-expanded="false"]'));
-                hiddenSpoilers.push(...scope.querySelectorAll<HTMLElement>('[class*="spoilerContent"][class*="hidden"]'));
+                for (const el of scope.querySelectorAll<HTMLElement>('[aria-expanded="false"]')) hidden.add(el);
+                for (const el of scope.querySelectorAll<HTMLElement>('[class*="spoilerContent"][class*="hidden"]')) hiddenSpoilers.add(el);
             }
             for (const el of hidden) {
                 const cls = el.className ?? "";
@@ -168,7 +171,7 @@ export default definePlugin({
                 }
             }
             for (const el of hiddenSpoilers) {
-                if ((el as HTMLElement).getAttribute("aria-expanded") === "false") continue;
+                if (el.getAttribute("aria-expanded") === "false") continue;
                 if (el.className.includes("hiddenVisually")) continue;
                 if (el.className.includes("spoiler")) {
                     revealNoScroll(el);
