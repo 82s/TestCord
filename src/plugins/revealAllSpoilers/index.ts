@@ -75,27 +75,37 @@ export default definePlugin({
         const scrollers = shouldPreserveScroll ? [...document.querySelectorAll<HTMLElement>('[class*="messagesWrapper"], [class*="scrollerBase"], [class*="scroller"]')] : [];
         const scrollStates = scrollers.map(s => ({ el: s, top: s.scrollTop, left: s.scrollLeft }));
         const winX = window.scrollX, winY = window.scrollY;
-        for (const sel of selectors) {
-            for (const el of parent.querySelectorAll(sel)) {
-                if (seen.has(el)) continue;
-                seen.add(el);
-                const cls = (el as HTMLElement).className ?? "";
-                const aria = (el.getAttribute("aria-label") ?? "").toLowerCase();
-                if (cls.includes("spoiler") || aria.includes("spoiler") || sel.includes("spoiler")) {
-                    doClick(el);
-                    revealed++;
+
+        // doClick re-enters through the capture listener and the removeObscurity
+        // patch, both of which land back here. Without this the two call each
+        // other forever and lock the main thread.
+        (this as any)._isAutoRevealing = true;
+        try {
+            for (const sel of selectors) {
+                for (const el of parent.querySelectorAll(sel)) {
+                    if (seen.has(el)) continue;
+                    seen.add(el);
+                    const cls = (el as HTMLElement).className ?? "";
+                    const aria = (el.getAttribute("aria-label") ?? "").toLowerCase();
+                    if (cls.includes("spoiler") || aria.includes("spoiler") || sel.includes("spoiler")) {
+                        doClick(el);
+                        revealed++;
+                    }
                 }
             }
-        }
-        if (revealed === 0) {
-            for (const el of parent.querySelectorAll('[class*="hidden"][aria-label]')) {
-                const aria = (el.getAttribute("aria-label") ?? "").toLowerCase();
-                if (aria.includes("spoiler")) {
-                    doClick(el);
-                    revealed++;
+            if (revealed === 0) {
+                for (const el of parent.querySelectorAll('[class*="hidden"][aria-label]')) {
+                    const aria = (el.getAttribute("aria-label") ?? "").toLowerCase();
+                    if (aria.includes("spoiler")) {
+                        doClick(el);
+                        revealed++;
+                    }
                 }
             }
+        } finally {
+            (this as any)._isAutoRevealing = false;
         }
+
         if (shouldPreserveScroll) {
             scrollStates.forEach(({ el, top, left }) => {
                 el.scrollTop = top;
