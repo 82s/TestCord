@@ -20,6 +20,7 @@ export default definePlugin({
     patches: [
         {
             find: "\"data-selenium-video-tile\":",
+            noWarn: true,
             replacement: {
                 match: /function \i?\s*\((\i)(?:,\i)?\)\{(?=let[^;]+?style:)/,
                 replace: "$&Object.assign($1.style=$1.style||{},$self.getVoiceBackgroundStyles($1));",
