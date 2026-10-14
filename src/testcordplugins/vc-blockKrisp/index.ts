@@ -22,12 +22,12 @@ export default definePlugin({
                 replace: "Promise.reject(new Error('Krisp blocked'))"
             }
         },
-        // Block loading Krisp module on Web
+        // Block loading Krisp module on Web, by skipping the noise-cancellation guard around the node creation
         {
             find: "krisp_browser_models",
             replacement: {
-                match: /\i:function\(\)\{/,
-                replace: "$&return null;"
+                match: /if\(this\._noiseCancellation\)/,
+                replace: "if(false)"
             }
         },
         // Set Krisp to not supported
