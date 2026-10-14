@@ -22,8 +22,9 @@ export default definePlugin({
             find: "\"data-selenium-video-tile\":",
             noWarn: true,
             replacement: {
-                match: /function \i?\s*\((\i)(?:,\i)?\)\{(?=let[^;]+?style:)/,
-                replace: "$&Object.assign($1.style=$1.style||{},$self.getVoiceBackgroundStyles($1));",
+                // USRBG patches this component's head first, so anchor after the destructuring
+                match: /(?<=let\{children:\i,className:\i,style:(\i),noBorder:\i=!1,participantUserId:\i,ref:\i\}=(\i);)/,
+                replace: "Object.assign($1=$1||{},$self.getVoiceBackgroundStyles($2));",
             }
         },
     ],
