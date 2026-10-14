@@ -236,7 +236,7 @@ check('Audio activity tracks native levels and clears when they stop', () => {
     assert.equal(vu.api.isAudioActive('alice'), true);
     assert.equal(vu.api.isAudioActive('bob'), true);
     assert.equal(vu.api.isAudioActive('nobody'), false);
-    vu.api.meters.get('alice').display[0] = 0; vu.api.meters.get('alice').display[1] = 0;
+    vu.api.meters.get('alice').display[0] = 0; vu.api.meters.get('alice').display[1] = 0; vu.api.meters.get('alice').activeUntil = 0;
     nativeLevels = [nativeLevel('bob', 0, .4)]; nativeTick();
     assert.equal(vu.api.isAudioActive('alice'), false);
     assert.equal(vu.api.isAudioActive('bob'), true);
@@ -264,6 +264,47 @@ check('Stream meters ignore the native bridge so soundshare moves while it is in
     const s = vu.api.meters.get('stream:alice');
     assert.notEqual(s.nativeAvailable, true); assert(s.display[0] > .5);
     assert.equal(vu.api.isAudioActive('alice'), true);
+});
+check('Received audio lights the glow before the speaking flag arrives or while a stale zero flag lingers', () => {
+    vu.api.meters.clear();
+    nativeBridgeInstalled = false; // bridge not connected yet: stats are the only level source
+    nativeConnection.localSpeakingFlags = { alice: 0 };
+    const [a, b] = ['alice', 'bob'].map(id => { const m = vu.api.newMeter(true); m.amplitude = .3; vu.api.meters.set(id, m); return m; });
+    nativeTick();
+    assert.equal(vu.api.isAudioActive('alice'), true); // flag says silent, audio says otherwise
+    assert.equal(vu.api.isAudioActive('bob'), true);   // no flag entry at all
+    assert(a.display[0] === 0); // the bar keeps following the flag, only the glow reads the raw level
+    delete nativeConnection.localSpeakingFlags;
+    nativeBridgeInstalled = true;
+});
+check('The glow follows the first audio from the bridge without waiting for smoothing', () => {
+    vu.api.meters.clear();
+    const m = vu.api.newMeter(true); vu.api.meters.set('alice', m);
+    nativeLevels = [nativeLevel('alice', .5, .5)]; nativeTick();
+    assert.equal(vu.api.isAudioActive('alice'), true);
+    assert((m.activeUntil ?? 0) > Date.now());
+});
+check('The glow ends once the audio stops, within the hold', () => {
+    vu.api.meters.clear();
+    nativeBridgeInstalled = false;
+    const m = vu.api.newMeter(true); m.amplitude = .3; vu.api.meters.set('alice', m);
+    nativeTick(); assert.equal(vu.api.isAudioActive('alice'), true);
+    m.amplitude = 0;
+    const armedUntil = m.activeUntil;
+    nativeTick();
+    assert.equal(m.activeUntil, armedUntil); // silence never extends the hold
+    assert(armedUntil - Date.now() <= 200);
+    m.activeUntil = Date.now() - 1; nativeTick();
+    assert.equal(vu.api.isAudioActive('alice'), false);
+    nativeBridgeInstalled = true;
+});
+check('Room noise below the active level does not light the glow', () => {
+    vu.api.meters.clear();
+    nativeBridgeInstalled = false;
+    const m = vu.api.newMeter(true); m.amplitude = .0005; vu.api.meters.set('alice', m);
+    nativeTick();
+    assert.equal(vu.api.isAudioActive('alice'), false);
+    nativeBridgeInstalled = true;
 });
 check('Stream meter audio activity keys on the owner id', () => {
     vu.api.meters.clear();
