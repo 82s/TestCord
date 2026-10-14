@@ -89,6 +89,9 @@ let autoWatchAllStreamsOnJoin = false;
 let autoWatchRetryTimeout: ReturnType<typeof setTimeout> | null = null;
 let autoWatchPollTimeout: ReturnType<typeof setTimeout> | null = null;
 let persistAutoWatchPreferencesTimeout: ReturnType<typeof setTimeout> | null = null;
+// True from the first change until its save lands. A reload in that window would read the
+// stored value, which is older than memory, and wipe the change.
+let autoWatchPreferencesDirty = false;
 
 export const renderedStreamScaleStore = proxyLazy(() => {
     const { Store } = Flux;
@@ -297,15 +300,20 @@ const persistAutoWatchPreferences = () => DataStore.set(autoWatchPreferencesStor
 } satisfies StoredAutoWatchPreferences);
 
 const schedulePersistAutoWatchPreferences = () => {
+    autoWatchPreferencesDirty = true;
     if (persistAutoWatchPreferencesTimeout != null) clearTimeout(persistAutoWatchPreferencesTimeout);
 
     persistAutoWatchPreferencesTimeout = setTimeout(() => {
         persistAutoWatchPreferencesTimeout = null;
-        void persistAutoWatchPreferences();
+        void persistAutoWatchPreferences().finally(() => {
+            if (persistAutoWatchPreferencesTimeout == null) autoWatchPreferencesDirty = false;
+        });
     }, persistAutoWatchPreferencesDelayMs);
 };
 
 export const loadAutoWatchPreferences = async () => {
+    if (autoWatchPreferencesDirty) return;
+
     const storedPreferences = await DataStore.get<StoredAutoWatchPreferences>(autoWatchPreferencesStoreKey);
     let savedAutoWatchUserIds: unknown = storedPreferences?.autoWatchUserIds;
     let savedAutoFocusUserIds: unknown = storedPreferences?.autoFocusUserIds;
@@ -353,6 +361,7 @@ export const setAutoFocusEnabledForUser = (userId: string, enabled: boolean) => 
 export const setAutoWatchAllStreamsOnJoinEnabled = (enabled: boolean) => {
     if (autoWatchAllStreamsOnJoin === enabled) return;
 
+    autoWatchAllStreamsOnJoin = enabled;
     renderedStreamScaleStore.updateAutoWatchAllStreamsOnJoin(enabled);
     schedulePersistAutoWatchPreferences();
 
@@ -870,33 +879,53 @@ export const applyStreamScaleToDom = (streamKey?: string | null) => {
 // so re-apply on DOM mutations. Registered streams are pruned when their controls
 // unmount, so this cannot grow unbounded.
 let sharedFitObserver: MutationObserver | null = null;
+let fitRefreshAt = 0;
+let fitRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+
+function queueFitRefresh() {
+    fitFrameRefreshQueued = true;
+
+    requestAnimationFrame(() => {
+        fitFrameRefreshQueued = false;
+        if (applyingStreamStyles) return;
+
+        applyingStreamStyles = true;
+        try {
+            for (const streamKey of [...streamFitTargets]) {
+                applyStreamFitToVideo(streamKey);
+                applyStreamScaleToVideo(streamKey);
+            }
+        } finally {
+            applyingStreamStyles = false;
+        }
+
+        if (streamFitTargets.size === 0) {
+            if (fitRefreshTimer !== undefined) { clearTimeout(fitRefreshTimer); fitRefreshTimer = undefined; }
+            sharedFitObserver?.disconnect();
+            sharedFitObserver = null;
+        }
+    });
+}
 
 function ensureSharedFitObserver() {
     if (sharedFitObserver || typeof MutationObserver === "undefined") return;
 
     sharedFitObserver = new MutationObserver(() => {
         if (applyingStreamStyles || fitFrameRefreshQueued) return;
-        fitFrameRefreshQueued = true;
-
-        requestAnimationFrame(() => {
-            fitFrameRefreshQueued = false;
-            if (applyingStreamStyles) return;
-
-            applyingStreamStyles = true;
-            try {
-                for (const streamKey of [...streamFitTargets]) {
-                    applyStreamFitToVideo(streamKey);
-                    applyStreamScaleToVideo(streamKey);
-                }
-            } finally {
-                applyingStreamStyles = false;
+        const since = Date.now() - fitRefreshAt;
+        if (since < 250) {
+            if (fitRefreshTimer === undefined) {
+                fitRefreshTimer = setTimeout(() => {
+                    fitRefreshTimer = undefined;
+                    if (streamFitTargets.size === 0) return;
+                    fitRefreshAt = Date.now();
+                    queueFitRefresh();
+                }, 250 - since);
             }
-
-            if (streamFitTargets.size === 0) {
-                sharedFitObserver?.disconnect();
-                sharedFitObserver = null;
-            }
-        });
+            return;
+        }
+        fitRefreshAt = Date.now();
+        queueFitRefresh();
     });
 
     sharedFitObserver.observe(document.body, {
@@ -1509,6 +1538,7 @@ export const resetRenderedStreamMenuState = (participant: StreamParticipant | nu
 };
 
 const clearStreamFitAnchors = () => {
+    if (fitRefreshTimer !== undefined) { clearTimeout(fitRefreshTimer); fitRefreshTimer = undefined; }
     sharedFitObserver?.disconnect();
     sharedFitObserver = null;
 
