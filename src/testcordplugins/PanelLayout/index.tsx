@@ -153,6 +153,7 @@ export const settings = definePluginSettings({
     hideUserAccountArea: { type: OptionType.BOOLEAN, default: false, description: "Hide the user account & buttons area", onChange: () => { apply(); void setUserAccountAreaEnabled(settings.store, settings.store.hideUserAccountArea); } },
     hideLine: { type: OptionType.BOOLEAN, default: true, description: "Hide the line between user and buttons", onChange: () => apply() },
     fixProfileNameplate: { type: OptionType.BOOLEAN, default: false, description: "Fixes the rounding of the profile nameplate", onChange: () => apply() },
+    showUserAndStatus: { type: OptionType.BOOLEAN, default: false, description: "Show the user and the status at the same time", onChange: () => apply() },
 });
 
 // ─── Selectors & Constants ────────────────────────────────────────────────────
@@ -900,6 +901,30 @@ function buildCSS(): string {
             ${S.panelContainer} .container_df39b2 { border-radius: 0px !important; }
             ${S.panelContainer} { border-radius: 0px !important; }
             .panels__5e434 { overflow: hidden !important; }
+        `);
+    }
+
+    if (st.showUserAndStatus) {
+        lines.push(`
+            */ [class*=avatarWrapper] [class*=nameTag] [class*=hovered]::before {
+                color: var(--text-muted);
+                content: "@";
+            }
+
+            [class*=avatarWrapper] [class*=nameTag] [class*=hovered]::after {
+                color: var(--text-muted);
+                font-family: var(--font-code) !important;
+            }
+
+            .container__37e49 .hovered__0263c,
+            .hoverRoll__0263c.forceHover__0263c:not(.disabled__0263c) .default__0263c {
+                opacity: 1 !important;
+                transform: none;
+            }
+
+            [class*=hoverRoll]:not([class*="rtcConnectionStatusConnected"])>[class*=default] {
+                margin-top: 15px;
+            }
         `);
     }
 
@@ -3366,6 +3391,7 @@ function PanelLayoutModal({ modalProps }: { modalProps: RenderModalProps; }) {
                             <FormSwitch title="Lock Button Position" description="Prevents Mute, Deafen, and Settings buttons from dropping down to a new row when you have a long status or share screen." value={s.lockButtonPosition} onChange={v => set("lockButtonPosition", v)} />
                             <FormSwitch title="Hide line" description="Hide the line between user and buttons" value={s.hideLine} onChange={v => set("hideLine", v)} />
                             <FormSwitch title="Fix Profile Nameplate" description="Fixes the rounding of the profile nameplate" value={s.fixProfileNameplate} onChange={v => set("fixProfileNameplate", v)} hideBorder />
+                            <FormSwitch title="Show User And Status" description="Show the user and the status at the same time" value={s.showUserAndStatus} onChange={v => set("showUserAndStatus", v)} hideBorder />
                         </Card>
                     </>}
 
