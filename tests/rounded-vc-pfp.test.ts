@@ -40,20 +40,26 @@ const sandbox = {
     definePluginSettings: () => ({ store }), OptionType: { SLIDER: 5 }, style: "",
     makeRange,
     UserStore: { getUser: () => { lookups++; return user; } },
-    VoiceStateStore: { getVoiceStateForUser: () => voiceState.channelId ? voiceState : undefined },
+    VoiceStateStore: { getVoiceStateForUser: () => voiceState.channelId ? voiceState : undefined, addReactChangeListener: () => {}, removeReactChangeListener: () => {} },
     ChannelStore: { getChannel: () => ({ guild_id: "guild-1" }) },
-    ChannelRTCStore: { getSpeakingParticipants: () => [{ user: { id: "1" }, speaking: true }] },
-    UserProfileStore: { getUserProfile: () => profile },
+    ChannelRTCStore: { getSpeakingParticipants: () => [{ user: { id: "1" }, speaking: true }], addReactChangeListener: () => {}, removeReactChangeListener: () => {} },
+    UserProfileStore: { getUserProfile: () => profile, addReactChangeListener: () => {}, removeReactChangeListener: () => {} },
     IconUtils: { getUserBannerURL: () => "banner-url" },
     fetchUserProfile: () => { fetches++; return Promise.resolve(); },
     isPluginEnabled: () => usrbgState.enabled,
     usrbg: { name: "USRBG", userHasBackground: () => usrbgState.hasBackground },
-    useStateFromStores: () => undefined,
+    // Discord's Flux useStateFromStores subscribes through addReactChangeListener
+    // on every store it receives; the stub enforces that contract so a plain
+    // object store fails here instead of crashing the tile render live.
+    useStateFromStores: (stores: Array<Record<string, unknown>>) => {
+        for (const store of stores) store.addReactChangeListener(() => {});
+        return undefined;
+    },
     getUserAvatarUrl: () => undefined
 };
 vm.createContext(sandbox);
 vm.runInContext(transformSync(source, { loader: "tsx", format: "cjs" }).code, sandbox);
-const plugin = (sandbox as typeof sandbox & { plugin: { getVoiceBackgroundStyles(props: { className?: string; participantUserId?: string; children?: unknown; }): Record<string, string> | undefined; }; }).plugin;
+const plugin = (sandbox as typeof sandbox & { plugin: { getVoiceBackgroundStyles(props: { className?: string; participantUserId?: string; children?: unknown; }): Record<string, string> | undefined; useTileBanner(props: { participantUserId?: string; }): void; }; }).plugin;
 
 const styles = (props: { participantUserId: string; }) => plugin.getVoiceBackgroundStyles({ className: "tile", participantUserId: props.participantUserId }) ?? {};
 
@@ -205,7 +211,7 @@ test("The glow filter composes both layers from the configured hex", () => {
 test("Stream tiles do not inherit their owner's speaking glow", () => {
     Object.assign(store, { speakingIndicator: "picture", enableGlow: false });
     voiceState.channelId = "channel-1";
-    const children = { props: { children: [{ props: { participant: { streamId: "stream-1" } } }] } };
+    const children = { props: { children: [{ props: { participant: { type: 0, streamId: "stream-1" } } }] } };
     const stream = plugin.getVoiceBackgroundStyles({ className: "tile", participantUserId: "1", children });
     assert.equal(stream?.["--vc-pfp-stream"], "1");
     assert.equal(stream?.["--vc-pfp-speaking"], "");
@@ -216,4 +222,57 @@ test("Stream tiles do not inherit their owner's speaking glow", () => {
     assert.ok(person["--vc-pfp-glow-filter"].includes("--green-360"));
     Object.assign(store, { speakingIndicator: "box" });
     delete voiceState.channelId;
+});
+
+test("Camera tiles keep their speaking state and tile border in picture mode", () => {
+    Object.assign(store, { speakingIndicator: "picture", enableGlow: false });
+    voiceState.channelId = "channel-1";
+    const children = { props: { children: [{ props: { participant: { type: 2, streamId: "camera-1" } } }] } };
+    const camera = plugin.getVoiceBackgroundStyles({ className: "tile", participantUserId: "1", children });
+    assert.equal(camera?.["--vc-pfp-stream"], "");
+    assert.equal(camera?.["--vc-pfp-camera"], "1");
+    assert.equal(camera?.["--vc-pfp-speaking"], "1");
+    const person = styles({ participantUserId: "1" });
+    assert.equal(person["--vc-pfp-camera"], "");
+    Object.assign(store, { speakingIndicator: "box" });
+    delete voiceState.channelId;
+});
+
+test("Every store handed to useStateFromStores carries the Flux listener contract", () => {
+    voiceState.channelId = "channel-1";
+    // The tile hook subscribes to three Flux stores and the plain audio-activity
+    // store; the contract-enforcing stub throws if any of them lacks the pair.
+    assert.doesNotThrow(() => plugin.useTileBanner({ participantUserId: "1" }));
+    delete voiceState.channelId;
+});
+
+// Strip comments so assertions only see real rules.
+const rules = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, "");
+
+test("Picture mode keeps the speaking glow on the picture for every tile, never on the box", () => {
+    const css = rules(readFileSync(new URL("../src/testcordplugins/RoundedVcPfp/style.css", import.meta.url), "utf8"));
+    // Box mode (and camera tiles) still ring the tile box, and only when the
+    // tile is not in picture mode.
+    assert.ok(
+        /div\[data-selenium-video-tile\]\[style\*="--vc-pfp-speaking"\]:not\(\[style\*="--vc-pfp-ring-pic"\]\)\s*\{[^}]*0 0 0 2px var\(--green-360/.test(css),
+        "box-mode speaking ring rule missing"
+    );
+    // No rule may ring the tile box for a picture-mode tile: that is the mixed
+    // box-and-picture look this guards against.
+    const boxRings = [...css.matchAll(/([^{}]+)\{[^}]*0 0 0 2px var\(--green-360/g)].map(m => m[1].trim());
+    assert.equal(boxRings.length, 1, `unexpected box ring rules: ${boxRings.join(" | ")}`);
+    assert.ok(boxRings[0].includes(":not([style*=\"--vc-pfp-ring-pic\"])"), "the only box ring must exclude picture mode");
+});
+
+test("The glow filter sits on the unmasked avatar element so it traces only the picture", () => {
+    const css = rules(readFileSync(new URL("../src/testcordplugins/RoundedVcPfp/style.css", import.meta.url), "utf8"));
+    const block = (selector: string) => css.split("}").map(part => part.split("{")).find(([sel]) => sel.trim() === selector)?.[1] ?? "";
+    const avatar = block('div[data-selenium-video-tile] div[role="img"]');
+    assert.match(avatar, /filter:\s*var\(--vc-pfp-glow-filter/, "glow filter must be on the avatar element");
+    assert.doesNotMatch(avatar, /mask/, "the filtered element must not carry the mask");
+    const picture = block('div[data-selenium-video-tile] div[role="img"]::before');
+    assert.match(picture, /background-image:\s*var\(--full-res-avatar\)/, "picture must paint on ::before");
+    assert.match(picture, /mask-image:/, "picture mask must live on ::before");
+    // The backdrop wrapper may hold a profile gradient; a filter there traces its box.
+    assert.doesNotMatch(css, /div\[class\*="background"\]\s*\{[^}]*filter/, "no glow filter on the backdrop wrapper");
 });
