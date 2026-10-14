@@ -19,9 +19,15 @@ const source = readFileSync(new URL("../src/testcordplugins/RoundedVcPfp/index.t
 let lookups = 0;
 let user: { getDefaultAvatarURL?: unknown; } = {};
 const voiceState: { channelId?: string; } = {};
+// The call the current user is connected to, and the channel the last speaking lookup used
+let selfVoiceChannel: string | undefined;
+let speakingChannel: string | undefined;
 let profile: { banner?: string; } | undefined;
 let fetches = 0;
 const usrbgState = { enabled: false, hasBackground: false };
+// What ChannelRTCStore.getSelectedParticipant would return for the voice
+// channel: the stream the call view currently paints, or none.
+let selectedStream: { type?: unknown; id?: unknown } | null = null;
 const store: Record<string, unknown> = {
     avatarRadius: 5,
     cornerRadius: 12,
@@ -41,8 +47,9 @@ const sandbox = {
     makeRange,
     UserStore: { getUser: () => { lookups++; return user; } },
     VoiceStateStore: { getVoiceStateForUser: () => voiceState.channelId ? voiceState : undefined, addReactChangeListener: () => {}, removeReactChangeListener: () => {} },
+    SelectedChannelStore: { getVoiceChannelId: () => selfVoiceChannel, addReactChangeListener: () => {}, removeReactChangeListener: () => {} },
     ChannelStore: { getChannel: () => ({ guild_id: "guild-1" }) },
-    ChannelRTCStore: { getSpeakingParticipants: () => [{ user: { id: "1" }, speaking: true }], addReactChangeListener: () => {}, removeReactChangeListener: () => {} },
+    ChannelRTCStore: { getSpeakingParticipants: (channelId: string) => { speakingChannel = channelId; return [{ user: { id: "1" }, speaking: true }]; }, getSelectedParticipant: () => selectedStream, addReactChangeListener: () => {}, removeReactChangeListener: () => {} },
     UserProfileStore: { getUserProfile: () => profile, addReactChangeListener: () => {}, removeReactChangeListener: () => {} },
     IconUtils: { getUserBannerURL: () => "banner-url" },
     fetchUserProfile: () => { fetches++; return Promise.resolve(); },
@@ -208,20 +215,55 @@ test("The glow filter composes both layers from the configured hex", () => {
     Object.assign(store, { hideTileBackground: false, enableGlow: false, glowColor: "#45475a" });
 });
 
-test("Stream tiles do not inherit their owner's speaking glow", () => {
+test("Stream tiles glow while unwatched and stay unlit while their video paints", () => {
     Object.assign(store, { speakingIndicator: "picture", enableGlow: false });
     voiceState.channelId = "channel-1";
     const children = { props: { children: [{ props: { participant: { type: 0, streamId: "stream-1" } } }] } };
-    const stream = plugin.getVoiceBackgroundStyles({ className: "tile", participantUserId: "1", children });
-    assert.equal(stream?.["--vc-pfp-stream"], "1");
-    assert.equal(stream?.["--vc-pfp-speaking"], "");
-    assert.equal(stream?.["--vc-pfp-glow-filter"], "");
+    // Unwatched: the tile shows a static preview picture, so it glows like any
+    // other tile (this is the state StreamEnhancer's custom preview paints in).
+    selectedStream = null;
+    const unwatched = plugin.getVoiceBackgroundStyles({ className: "tile", participantUserId: "1", children });
+    assert.equal(unwatched?.["--vc-pfp-stream"], "1");
+    assert.equal(unwatched?.["--vc-pfp-speaking"], "1");
+    assert.ok(unwatched?.["--vc-pfp-glow-filter"].includes("--green-360"));
+    // Watched: the live video paints over the tile, so the glow stands down.
+    selectedStream = { type: "STREAM", id: "guild:guild-1:channel-1:1" };
+    const watched = plugin.getVoiceBackgroundStyles({ className: "tile", participantUserId: "1", children });
+    assert.equal(watched?.["--vc-pfp-speaking"], "");
+    assert.equal(watched?.["--vc-pfp-glow-filter"], "");
+    // Another user's stream being watched leaves this tile glowing.
+    selectedStream = { type: "STREAM", id: "guild:guild-1:channel-1:999" };
+    assert.equal(plugin.getVoiceBackgroundStyles({ className: "tile", participantUserId: "1", children })?.["--vc-pfp-speaking"], "1");
+    // Non-stream selections and malformed ids never count as watching.
+    selectedStream = { type: "USER", id: "guild:guild-1:channel-1:1" };
+    assert.equal(plugin.getVoiceBackgroundStyles({ className: "tile", participantUserId: "1", children })?.["--vc-pfp-speaking"], "1");
+    selectedStream = null;
     const person = styles({ participantUserId: "1" });
     assert.equal(person["--vc-pfp-stream"], "");
     assert.equal(person["--vc-pfp-speaking"], "1");
     assert.ok(person["--vc-pfp-glow-filter"].includes("--green-360"));
     Object.assign(store, { speakingIndicator: "box" });
     delete voiceState.channelId;
+});
+
+test("Speaking resolves through the call we are in while a participant's own voice state lags", () => {
+    delete voiceState.channelId;
+    selfVoiceChannel = "call-1";
+    speakingChannel = undefined;
+    store["speakingIndicator"] = "picture";
+    assert.equal(styles({ participantUserId: "1" })["--vc-pfp-speaking"], "1");
+    assert.equal(speakingChannel, "call-1");
+    // Their own voice state wins once it has arrived
+    voiceState.channelId = "other-call";
+    styles({ participantUserId: "1" });
+    assert.equal(speakingChannel, "other-call");
+    // Not in a call and no voice state: nothing to look up, so no glow
+    delete voiceState.channelId;
+    selfVoiceChannel = undefined;
+    speakingChannel = undefined;
+    assert.equal(styles({ participantUserId: "1" })["--vc-pfp-speaking"], "");
+    assert.equal(speakingChannel, undefined);
+    store["speakingIndicator"] = "box";
 });
 
 test("Camera tiles keep their speaking state and tile border in picture mode", () => {
@@ -249,7 +291,7 @@ test("Every store handed to useStateFromStores carries the Flux listener contrac
 // Strip comments so assertions only see real rules.
 const rules = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, "");
 
-test("Picture mode keeps the speaking glow on the picture for every tile, never on the box", () => {
+test("Box rings stay on box mode and unwatched stream tiles, never on voice picture tiles", () => {
     const css = rules(readFileSync(new URL("../src/testcordplugins/RoundedVcPfp/style.css", import.meta.url), "utf8"));
     // Box mode (and camera tiles) still ring the tile box, and only when the
     // tile is not in picture mode.
@@ -257,11 +299,17 @@ test("Picture mode keeps the speaking glow on the picture for every tile, never 
         /div\[data-selenium-video-tile\]\[style\*="--vc-pfp-speaking"\]:not\(\[style\*="--vc-pfp-ring-pic"\]\)\s*\{[^}]*0 0 0 2px var\(--green-360/.test(css),
         "box-mode speaking ring rule missing"
     );
-    // No rule may ring the tile box for a picture-mode tile: that is the mixed
-    // box-and-picture look this guards against.
+    // A stream tile paints its preview picture over the avatar layer, so in
+    // picture mode its visible green is the box ring; the watched stream never
+    // carries the speaking marker, so a playing video stays unringed.
+    assert.ok(
+        /div\[data-selenium-video-tile\]\[style\*="--vc-pfp-stream"\]\[style\*="--vc-pfp-ring-pic"\]\[style\*="--vc-pfp-speaking"\]\s*\{[^}]*0 0 0 2px var\(--green-360/.test(css),
+        "stream-tile picture-mode ring rule missing"
+    );
     const boxRings = [...css.matchAll(/([^{}]+)\{[^}]*0 0 0 2px var\(--green-360/g)].map(m => m[1].trim());
-    assert.equal(boxRings.length, 1, `unexpected box ring rules: ${boxRings.join(" | ")}`);
-    assert.ok(boxRings[0].includes(":not([style*=\"--vc-pfp-ring-pic\"])"), "the only box ring must exclude picture mode");
+    assert.equal(boxRings.length, 2, `unexpected box ring rules: ${boxRings.join(" | ")}`);
+    assert.ok(boxRings[0].includes(":not([style*=\"--vc-pfp-ring-pic\"])"), "the box ring must exclude picture mode");
+    assert.ok(boxRings[1].includes("--vc-pfp-stream"), "the second box ring must be the stream-tile one");
 });
 
 test("The glow filter sits on the unmasked avatar element so it traces only the picture", () => {
