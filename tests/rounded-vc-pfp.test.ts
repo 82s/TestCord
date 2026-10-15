@@ -24,6 +24,8 @@ let selfVoiceChannel: string | undefined;
 let speakingChannel: string | undefined;
 let profile: { banner?: string; } | undefined;
 let fetches = 0;
+let fetchFails = 0;
+const fetchCacheArgs: unknown[] = [];
 const usrbgState = { enabled: false, hasBackground: false };
 // What ChannelRTCStore.getSelectedParticipant would return for the voice
 // channel: the stream the call view currently paints, or none.
@@ -40,7 +42,13 @@ const store: Record<string, unknown> = {
     glowColor: "#45475a",
     speakingIndicator: "box"
 };
+const windowListeners = new Map<string, Set<unknown>>();
+const fakeWindow = {
+    addEventListener: (type: string, fn: unknown) => { if (!windowListeners.has(type)) windowListeners.set(type, new Set()); windowListeners.get(type)!.add(fn); },
+    removeEventListener: (type: string, fn: unknown) => { windowListeners.get(type)?.delete(fn); }
+};
 const sandbox = {
+    window: fakeWindow,
     EquicordDevs: { mochienya: {} }, TestcordDevs: { DavidHiFi: {} },
     definePlugin: (plugin: unknown) => plugin,
     definePluginSettings: () => ({ store }), OptionType: { SLIDER: 5 }, style: "",
@@ -52,7 +60,14 @@ const sandbox = {
     ChannelRTCStore: { getSpeakingParticipants: (channelId: string) => { speakingChannel = channelId; return [{ user: { id: "1" }, speaking: true }]; }, getSelectedParticipant: () => selectedStream, addReactChangeListener: () => {}, removeReactChangeListener: () => {} },
     UserProfileStore: { getUserProfile: () => profile, addReactChangeListener: () => {}, removeReactChangeListener: () => {} },
     IconUtils: { getUserBannerURL: () => "banner-url" },
-    fetchUserProfile: () => { fetches++; return Promise.resolve(); },
+    fetchUserProfile: (_id: string, _options: unknown, cache: unknown) => {
+        fetches++;
+        fetchCacheArgs.push(cache);
+        if (fetchFails > 0) { fetchFails--; return Promise.reject(new Error("429")); }
+        return Promise.resolve();
+    },
+    // the banner fetch queue paces itself and retries with timers
+    setTimeout: (fn: () => void) => setImmediate(fn),
     isPluginEnabled: () => usrbgState.enabled,
     usrbg: { name: "USRBG", userHasBackground: () => usrbgState.hasBackground },
     // Discord's Flux useStateFromStores subscribes through addReactChangeListener
@@ -66,7 +81,7 @@ const sandbox = {
 };
 vm.createContext(sandbox);
 vm.runInContext(transformSync(source, { loader: "tsx", format: "cjs" }).code, sandbox);
-const plugin = (sandbox as typeof sandbox & { plugin: { getVoiceBackgroundStyles(props: { className?: string; participantUserId?: string; children?: unknown; }): Record<string, string> | undefined; useTileBanner(props: { participantUserId?: string; }): void; }; }).plugin;
+const plugin = (sandbox as typeof sandbox & { plugin: { start(): void; stop(): void; getVoiceBackgroundStyles(props: { className?: string; participantUserId?: string; children?: unknown; }): Record<string, string> | undefined; useTileBanner(props: { participantUserId?: string; }): void; }; }).plugin;
 
 const styles = (props: { participantUserId: string; }) => plugin.getVoiceBackgroundStyles({ className: "tile", participantUserId: props.participantUserId }) ?? {};
 
@@ -203,6 +218,19 @@ test("Users without a banner keep the default look and are fetched once", () => 
     Object.assign(store, { showUserBanners: false });
 });
 
+test("A failed banner fetch retries uncached so rate-limited users still get their banner", async () => {
+    Object.assign(store, { showUserBanners: true });
+    fetches = 0;
+    fetchFails = 1;
+    fetchCacheArgs.length = 0;
+    styles({ participantUserId: "3" });
+    for (let i = 0; i < 20 && fetches < 2; i++) await new Promise(resolve => setImmediate(resolve));
+    assert.equal(fetches, 2);
+    // a cached stub profile from a failed fetch must not short-circuit the request
+    assert.deepEqual(fetchCacheArgs, [false, false]);
+    Object.assign(store, { showUserBanners: false });
+});
+
 test("The glow filter composes both layers from the configured hex", () => {
     Object.assign(store, { hideTileBackground: true, enableGlow: true, glowColor: "#45475a" });
     const result = styles({ participantUserId: "1" });
@@ -215,29 +243,22 @@ test("The glow filter composes both layers from the configured hex", () => {
     Object.assign(store, { hideTileBackground: false, enableGlow: false, glowColor: "#45475a" });
 });
 
-test("Stream tiles glow while unwatched and stay unlit while their video paints", () => {
-    Object.assign(store, { speakingIndicator: "picture", enableGlow: false });
+test("Stream tiles never glow in either mode, watched or not", () => {
     voiceState.channelId = "channel-1";
     const children = { props: { children: [{ props: { participant: { type: 0, streamId: "stream-1" } } }] } };
-    // Unwatched: the tile shows a static preview picture, so it glows like any
-    // other tile (this is the state StreamEnhancer's custom preview paints in).
+    for (const speakingIndicator of ["picture", "box"]) {
+        Object.assign(store, { speakingIndicator, enableGlow: false });
+        for (const selection of [null, { type: "STREAM", id: "guild:guild-1:channel-1:1" }]) {
+            selectedStream = selection;
+            const stream = plugin.getVoiceBackgroundStyles({ className: "tile", participantUserId: "1", children });
+            assert.equal(stream?.["--vc-pfp-stream"], "1");
+            assert.equal(stream?.["--vc-pfp-speaking"], "");
+            assert.equal(stream?.["--vc-pfp-glow-filter"], "");
+        }
+    }
+    // The same speaker's own voice tile still glows.
     selectedStream = null;
-    const unwatched = plugin.getVoiceBackgroundStyles({ className: "tile", participantUserId: "1", children });
-    assert.equal(unwatched?.["--vc-pfp-stream"], "1");
-    assert.equal(unwatched?.["--vc-pfp-speaking"], "1");
-    assert.ok(unwatched?.["--vc-pfp-glow-filter"].includes("--green-360"));
-    // Watched: the live video paints over the tile, so the glow stands down.
-    selectedStream = { type: "STREAM", id: "guild:guild-1:channel-1:1" };
-    const watched = plugin.getVoiceBackgroundStyles({ className: "tile", participantUserId: "1", children });
-    assert.equal(watched?.["--vc-pfp-speaking"], "");
-    assert.equal(watched?.["--vc-pfp-glow-filter"], "");
-    // Another user's stream being watched leaves this tile glowing.
-    selectedStream = { type: "STREAM", id: "guild:guild-1:channel-1:999" };
-    assert.equal(plugin.getVoiceBackgroundStyles({ className: "tile", participantUserId: "1", children })?.["--vc-pfp-speaking"], "1");
-    // Non-stream selections and malformed ids never count as watching.
-    selectedStream = { type: "USER", id: "guild:guild-1:channel-1:1" };
-    assert.equal(plugin.getVoiceBackgroundStyles({ className: "tile", participantUserId: "1", children })?.["--vc-pfp-speaking"], "1");
-    selectedStream = null;
+    Object.assign(store, { speakingIndicator: "picture" });
     const person = styles({ participantUserId: "1" });
     assert.equal(person["--vc-pfp-stream"], "");
     assert.equal(person["--vc-pfp-speaking"], "1");
@@ -291,25 +312,10 @@ test("Every store handed to useStateFromStores carries the Flux listener contrac
 // Strip comments so assertions only see real rules.
 const rules = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, "");
 
-test("Box rings stay on box mode and unwatched stream tiles, never on voice picture tiles", () => {
+test("The only box ring is box mode's, and it skips stream tiles", () => {
     const css = rules(readFileSync(new URL("../src/testcordplugins/RoundedVcPfp/style.css", import.meta.url), "utf8"));
-    // Box mode (and camera tiles) still ring the tile box, and only when the
-    // tile is not in picture mode.
-    assert.ok(
-        /div\[data-selenium-video-tile\]\[style\*="--vc-pfp-speaking"\]:not\(\[style\*="--vc-pfp-ring-pic"\]\)\s*\{[^}]*0 0 0 2px var\(--green-360/.test(css),
-        "box-mode speaking ring rule missing"
-    );
-    // A stream tile paints its preview picture over the avatar layer, so in
-    // picture mode its visible green is the box ring; the watched stream never
-    // carries the speaking marker, so a playing video stays unringed.
-    assert.ok(
-        /div\[data-selenium-video-tile\]\[style\*="--vc-pfp-stream"\]\[style\*="--vc-pfp-ring-pic"\]\[style\*="--vc-pfp-speaking"\]\s*\{[^}]*0 0 0 2px var\(--green-360/.test(css),
-        "stream-tile picture-mode ring rule missing"
-    );
     const boxRings = [...css.matchAll(/([^{}]+)\{[^}]*0 0 0 2px var\(--green-360/g)].map(m => m[1].trim());
-    assert.equal(boxRings.length, 2, `unexpected box ring rules: ${boxRings.join(" | ")}`);
-    assert.ok(boxRings[0].includes(":not([style*=\"--vc-pfp-ring-pic\"])"), "the box ring must exclude picture mode");
-    assert.ok(boxRings[1].includes("--vc-pfp-stream"), "the second box ring must be the stream-tile one");
+    assert.deepEqual(boxRings, ['div[data-selenium-video-tile][style*="--vc-pfp-speaking"]:not([style*="--vc-pfp-ring-pic"], [style*="--vc-pfp-stream"])']);
 });
 
 test("The glow filter sits on the unmasked avatar element so it traces only the picture", () => {
@@ -323,4 +329,19 @@ test("The glow filter sits on the unmasked avatar element so it traces only the 
     assert.match(picture, /mask-image:/, "picture mask must live on ::before");
     // The backdrop wrapper may hold a profile gradient; a filter there traces its box.
     assert.doesNotMatch(css, /div\[class\*="background"\]\s*\{[^}]*filter/, "no glow filter on the backdrop wrapper");
+});
+
+test("Tile styles go into a fresh style object so cleared keys leave the DOM", () => {
+    // Mutating the parent's style object in place made React compare it with
+    // itself, so switching to box mode kept the picture-mode ring painted.
+    assert.ok(source.includes('replace: "$self.useTileBanner($2);$1={...$1,...$self.getVoiceBackgroundStyles($2)};"'));
+    assert.ok(!source.includes("Object.assign($1"));
+});
+
+test("The audio-activity window listener is added on start and removed on stop", () => {
+    assert.equal(windowListeners.get("testcord-vu-audio-change")?.size ?? 0, 0);
+    plugin.start();
+    assert.equal(windowListeners.get("testcord-vu-audio-change")?.size, 1);
+    plugin.stop();
+    assert.equal(windowListeners.get("testcord-vu-audio-change")?.size, 0);
 });
