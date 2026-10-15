@@ -126,7 +126,7 @@ export async function pruneSavedAttachments(preservedChannelId?: string): Promis
     if (!settings.store.pruneSavedAttachmentFiles || !settings.store.saveImages) return;
     const { retentionDays } = settings.store;
     if (retentionDays <= 0) return;
-    if (Date.now() - lastPruneAt < 24 * 86_400_000) return;
+    if (Date.now() - lastPruneAt < 86_400_000) return;
     lastPruneAt = Date.now();
 
     const dir = getAttachmentDir() || await ensureDefaultDir();
