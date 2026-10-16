@@ -170,27 +170,32 @@ export default definePlugin({
     patches: [
         // ─── Main Timestamp component (cozy + compact messages + hover tooltip) ─
         {
-            find: "timeFormatted:",
+            find: "#{intl::MESSAGE_EDITED_TIMESTAMP_A11Y_LABEL}",
             replacement: [
                 {
-                    // Compact & Cozy modes: the ternary formatting "LT" or calendar
-                    match: /(\i)\?\(0,\i\.\i\)\((\i),"LT",\i\):\(0,\i\.\i\)\(\2,!0\)/,
-                    replace: "$1?$self.renderTimestamp($2,'compact'):$self.renderTimestamp($2,'cozy')",
+                    // Compact mode: the useMemo that formats with "LT"
+                    match: /(\i\.useMemo\(.{0,50}"LT".{0,30}\]\))/,
+                    replace: "$self.renderTimestamp(arguments[0].timestamp,'compact')",
+                },
+                {
+                    // Cozy mode: the useMemo that calls the calendar/relative formatter
+                    match: /(\i\.useMemo\(.{0,10}\i\.\i\)\(.{0,10}\]\))/,
+                    replace: "$self.renderTimestamp(arguments[0].timestamp,'cozy')",
                 },
                 {
                     // Tooltip shown when hovering a message timestamp
                     match: /(__unsupportedReactNodeAsText:).{0,25}"LLLL"\)/,
-                    replace: "$1$self.renderTimestamp(k,'tooltip')",
+                    replace: "$1$self.renderTimestamp(arguments[0].timestamp,'tooltip')",
                 },
             ],
         },
 
         // ─── Timestamp markdown <t:unix:t> — hover tooltip ────────────────────
         {
-            find: /__unsupportedReactNodeAsText:\i\.full/,
+            find: /\.full,.{0,15}children:/,
             replacement: {
-                match: /(__unsupportedReactNodeAsText:)(\i)\.full/,
-                replace: "$1$self.renderTimestamp(new Date($2.timestamp*1000),'tooltip')",
+                match: /(__unsupportedReactNodeAsText:)\i\.full/,
+                replace: "$1$self.renderTimestamp(new Date(arguments[0].node.timestamp*1000),'tooltip')",
             },
         },
     ],
