@@ -70,7 +70,6 @@ export default definePlugin({
         {
             find: 'type:"MESSAGE_LENGTH_UPSELL"',
             predicate: () => settings.store.bypassLengthLimit,
-            noWarn: true,
             replacement: {
                 match: /if\(\i\.length>\i/,
                 replace: "if(false"
@@ -79,7 +78,6 @@ export default definePlugin({
         {
             find: ".onHideAutocomplete?",
             predicate: () => settings.store.overrideDiscordConversion,
-            noWarn: true,
             replacement: {
                 match: /(?<=getData\(\i\.type\);)if\(\i\.length>\i\)/,
                 replace: "if(false)"

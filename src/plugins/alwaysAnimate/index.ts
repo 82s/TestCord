@@ -102,7 +102,6 @@ export default definePlugin({
             predicate: () => settings.store.icons,
             all: true,
             // Some modules match the find but the replacement is returned untouched
-            noWarn: true,
             replacement: {
                 match: /canAnimate:.+?([,}].*?\))/g,
                 replace: (m, rest) => {
@@ -161,7 +160,6 @@ export default definePlugin({
             find: "animateGradient:",
             predicate: () => settings.store.roleGradients,
             all: true,
-            noWarn: true,
             replacement: {
                 match: /animateGradient:.+?([,}].*?\))/g,
                 replace: (m, rest) => {

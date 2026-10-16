@@ -55,7 +55,6 @@ export default definePlugin({
         {
             find: '"dot"===',
             all: true,
-            noWarn: true,
             predicate: () => settings.store.bothStyles,
             replacement: {
                 match: /"(?:username|dot)"===\i(?!\.\i)/g,
@@ -67,7 +66,6 @@ export default definePlugin({
             find: "#{intl::ADD_ROLE_A11Y_LABEL}",
             all: true,
             predicate: () => settings.store.copyRoleColorInProfilePopout && !settings.store.bothStyles,
-            noWarn: true,
             replacement: {
                 match: /"dot"===\i/,
                 replace: "true"
@@ -77,7 +75,6 @@ export default definePlugin({
             find: ".roleVerifiedIcon",
             all: true,
             predicate: () => settings.store.copyRoleColorInProfilePopout && !settings.store.bothStyles,
-            noWarn: true,
             replacement: {
                 match: /"dot"===\i/,
                 replace: "true"

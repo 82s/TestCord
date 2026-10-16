@@ -129,7 +129,6 @@ export default definePlugin({
                 match: /\i\.\i\.track\("experiment_user_override"/,
                 replace: "(()=>{})(\"experiment_user_override\"",
             },
-            noWarn: true,
         },
         // Block RTC call diagnostics/stats reporting
         {
@@ -139,7 +138,6 @@ export default definePlugin({
                 match: /sendDiagnosticsReport\(\)\{/,
                 replace: "sendDiagnosticsReport(){return;",
             },
-            noWarn: true,
         },
         // Block remote debug log collection
         {
@@ -149,7 +147,6 @@ export default definePlugin({
                 match: /submit\(\i\)\{/,
                 replace: "submit(){return;",
             },
-            noWarn: true,
         },
         // Neutralize Sentry by blanking the DSN so the SDK never boots. The SDK
         // instruments setTimeout and dispatch globally; with the repeating frozen-array
@@ -161,7 +158,6 @@ export default definePlugin({
                 match: /Sentry\.init\(\{([^}]*?)dsn:[^,}]*/,
                 replace: 'Sentry.init({$1dsn:""',
             },
-            noWarn: true,
         },
     ],
 

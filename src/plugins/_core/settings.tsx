@@ -626,7 +626,6 @@ export default definePlugin({
     patches: [
         {
             find: "#{intl::COPY_VERSION}",
-            noWarn: true,
             replacement: [
                 {
                     match: /\.RELEASE_CHANNEL/,
@@ -646,7 +645,6 @@ export default definePlugin({
         },
         {
             find: ".buildLayout().map",
-            noWarn: true,
             replacement: {
                 match: /(\i)\.buildLayout\(\)(?=\.map)/,
                 replace: "$self.buildLayout($1)"
@@ -654,7 +652,6 @@ export default definePlugin({
         },
         {
             find: "#{intl::DISCODO_DISABLED}",
-            noWarn: true,
             replacement: {
                 match: /(?<=BUTTON_HOME.{0,10}children:)(\(0,\i.jsxs?\)\(\i,{}\))/,
                 replace: "$self.renderDiscordIcon($1)"

@@ -129,7 +129,6 @@ export default definePlugin({
                 },
             ],
             predicate: () => settings.store.unlockQualityOptions && !isPluginEnabled(fakeNitro.name) && !Settings.plugins[fakeNitro.name].enableStreamQualityBypass,
-            noWarn: true,
         },
         // remove guild premium tier restriction from stream fps options
         {
@@ -139,7 +138,6 @@ export default definePlugin({
                 replace: "",
             },
             predicate: () => settings.store.unlockQualityOptions && !isPluginEnabled(fakeNitro.name),
-            noWarn: true,
         },
         // allow resolutions above 720p at 60fps
         {

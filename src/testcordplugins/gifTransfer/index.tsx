@@ -698,7 +698,6 @@ export default definePlugin({
     patches: [
         {
             find: "toBinary(t).length>",
-            noWarn: true,
             replacement: {
                 match: /\.toBinary\(\i\)\.length>\d+/,
                 replace: ".toBinary(t).length>Number.MAX_SAFE_INTEGER",

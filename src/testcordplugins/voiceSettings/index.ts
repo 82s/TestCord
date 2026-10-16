@@ -39,7 +39,6 @@ export default definePlugin({
                 match: /(?<=mediaBitrate:)\d+/,
                 replace: "$self.settings.store.voiceBitrateKbps*1000",
             },
-            noWarn: true,
         },
         // Extend PTT release delay slider maximum beyond 2000ms
         {
@@ -48,7 +47,6 @@ export default definePlugin({
                 match: /(?<=pttReleaseDelay.{0,200})maxValue:2000/,
                 replace: "maxValue:$self.settings.store.pttDelayMax",
             },
-            noWarn: true,
         },
     ],
 });

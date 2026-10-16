@@ -94,7 +94,6 @@ export default definePlugin({
     patches: [
         {
             find: "#{intl::INCOMING_CALL_ELLIPSIS}",
-            noWarn: true,
             replacement: {
                 match: /(?<=onCallJoined:\(\).{0,150})\(\i\)\}\),className:\i\.\i\}\)/,
                 replace: "$&,$self.renderIgnore(arguments[0].channel)"

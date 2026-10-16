@@ -1425,7 +1425,6 @@ export default definePlugin({
     patches: [
         {
             find: "onClick:this.handleMessageClick,",
-            noWarn: true,
             replacement: {
                 match: /this(?=\.handleContextMenu\(\i,\i\))/,
                 replace: "$self"
@@ -1433,7 +1432,6 @@ export default definePlugin({
         },
         {
             find: "#{intl::MESSAGE_ACTIONS_MENU_LABEL}),shouldHideMediaOptions:",
-            noWarn: true,
             replacement: {
                 match: /favoriteableType:\i,(?<=(\i)\.getAttribute\("data-type"\).+?)/,
                 replace: (match, target) => `${match}reverseImageSearchType:${target}.getAttribute("data-role"),`
@@ -1442,7 +1440,6 @@ export default definePlugin({
         {
             find: "renderHeaderContent()",
             predicate: () => settings.store.disableGifPickerSearch,
-            noWarn: true,
             replacement: {
                 match: /(,suggestions:)\i,/,
                 replace: "$1null,"
@@ -1451,7 +1448,6 @@ export default definePlugin({
         {
             find: 'tutorialId:"direct-messages",',
             predicate: () => settings.store.disableDmSearchBar,
-            noWarn: true,
             replacement: {
                 match: /\(0,\i\.jsx\)\(\i\.\i,{.{0,50}?tutorialId:"direct-messages",.{0,600}?\}\)\}\)\}\),/,
                 replace: ""
@@ -1459,7 +1455,6 @@ export default definePlugin({
         },
         {
             find: "\"SearchQueryStore\";",
-            noWarn: true,
             replacement: {
                 match: /\i\.searchResultsQuery=(\i)/,
                 replace: "$&,$self.adjustSearchOffset($1)"
@@ -1467,7 +1462,6 @@ export default definePlugin({
         },
         {
             find: "#{intl::QUICKSWITCHER_PLACEHOLDER}",
-            noWarn: true,
             replacement: {
                 match: /renderInput\(\)\{return/,
                 replace: "renderInput(){try{this.props.results=Vencord.Plugins.plugins['SearchUtility'].modifyQuickSwitcherResults(this.state.query,this.props.results)}catch(e){}return"

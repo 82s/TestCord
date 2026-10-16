@@ -20,7 +20,6 @@ export default definePlugin({
     patches: [
         {
             find: "\"data-selenium-video-tile\":",
-            noWarn: true,
             replacement: {
                 // USRBG patches this component's head first, so anchor after the destructuring
                 match: /(?<=let\{children:\i,className:\i,style:(\i),noBorder:\i=!1,participantUserId:\i,ref:\i\}=(\i);)/,

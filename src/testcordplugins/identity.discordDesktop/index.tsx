@@ -141,7 +141,6 @@ export default definePlugin({
     patches: [
         {
             find: "DefaultCustomizationSections",
-            noWarn: true,
             replacement: {
                 match: /"decoration"\),/,
                 replace: "$&$self.ResetCard(),"

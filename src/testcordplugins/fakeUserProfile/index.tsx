@@ -1162,7 +1162,6 @@ export default definePlugin({
     patches: [
         {
             find: ",getUserTag:",
-            noWarn: true,
             replacement: {
                 match: /if\(\i\((\i)\.global_name\)\)return(?=.{0,100}return"\?\?\?")/,
                 replace: "const vcFupName=$self.getUsername($1);if(vcFupName)return vcFupName;$&"
@@ -1170,7 +1169,6 @@ export default definePlugin({
         },
         {
             find: "getUserAvatarURL:",
-            noWarn: true,
             replacement: {
                 match: /(getUserAvatarURL:)(\i),/,
                 replace: "$1$self.wrapAvatar($2),"
@@ -1178,7 +1176,6 @@ export default definePlugin({
         },
         {
             find: "getAvatarDecorationURL:",
-            noWarn: true,
             replacement: {
                 match: /(?<=function \i\(\i\){)(?=let{avatarDecoration)/,
                 replace: "const vcFupDeco=$self.getAvatarDecorationURL(arguments[0]);if(vcFupDeco)return vcFupDeco;"
@@ -1186,7 +1183,6 @@ export default definePlugin({
         },
         {
             find: "UserProfileStore",
-            noWarn: true,
             replacement: {
                 match: /(?<=getUserProfile\(\i\){return )(.+?)(?=})/,
                 replace: "$self.profileHook(arguments[0],$1)"
@@ -1194,7 +1190,6 @@ export default definePlugin({
         },
         {
             find: ":\"SHOULD_LOAD\");",
-            noWarn: true,
             replacement: {
                 match: /\i(?:\?)?\.getPreviewBanner\(\i,\i,\i\)(?=.{0,100}"COMPLETE")/,
                 replace: "($self.bannerHook(arguments[0])??($&))"
@@ -1203,7 +1198,6 @@ export default definePlugin({
         {
             find: "isAvatarDecorationAnimating:",
             group: true,
-            noWarn: true,
             replacement: [
                 {
                     match: /(?<=\.avatarDecoration,guildId:\i\}\)\),)(?<=user:(\i).+?)/,
@@ -1221,7 +1215,6 @@ export default definePlugin({
         },
         {
             find: "renderNameTag",
-            noWarn: true,
             replacement: [
                 {
                     match: /(?<=\i\)\({avatarDecoration:)\i(?=,)(?<=currentUser:(\i).+?)/,
@@ -1233,7 +1226,6 @@ export default definePlugin({
             "#{intl::ayozFl::raw}",
         ].map(find => ({
             find,
-            noWarn: true,
             replacement: [
                 {
                     match: /(\i)\.length>0\?void 0:(\i)\.avatarDecoration/,
@@ -1243,7 +1235,6 @@ export default definePlugin({
         })),
         {
             find: "avatarDecorationPreview",
-            noWarn: true,
             replacement: [
                 {
                     match: /(?<==)\i=>{let{user:\i,guildId:\i,avatarDecoration:/,

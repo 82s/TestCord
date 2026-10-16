@@ -21,7 +21,6 @@ export default definePlugin({
                 match: /#{intl::ADD_FRIEND}.{0,15}\(\i,\{\}\)/,
                 replace: "$&,$self.FriendCodesPanel"
             },
-            noWarn: true,
         }
     ],
 

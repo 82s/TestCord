@@ -53,7 +53,6 @@ export default definePlugin({
         },
         {
             find: "DefaultCustomizationSections: user cannot be undefined",
-            noWarn: true,
             replacement: {
                 match: /className:R\.Q,children:\[/,
                 replace: "className:R.Q,children:[$self.renderEditProfileButton({}),",
@@ -61,7 +60,6 @@ export default definePlugin({
         },
         {
             find: "USER_SETTINGS_GUILD_PROFILE)",
-            noWarn: true,
             replacement: {
                 match: /guildId:(\i\.id),onChange:(\i)\}\)(?=.{0,25}profilePreviewTitle:)/,
                 replace: "guildId:$1,onChange:$2}),$self.renderEditProfileButton({guildId:$1})"

@@ -94,7 +94,6 @@ export default definePlugin({
         // Legacy User Profile Modal
         {
             find: ".BOT_DATA_ACCESS?(",
-            noWarn: true,
             replacement: [
                 {
                     match: /(?<=initialSection:\i=\i\.\i\.USER_INFO,onClose:\i\}=)(\i)/,
@@ -115,7 +114,6 @@ export default definePlugin({
         // User Profile Modal v2
         {
             find: ".WIDGETS?",
-            noWarn: true,
             replacement: [
                 {
                     match: /(?<=items:\i,initialSection:\i,onClose:\i\}=)(\i)/,
@@ -135,7 +133,6 @@ export default definePlugin({
         // Legacy DM Sidebar
         {
             find: 'section:"MUTUAL_FRIENDS"',
-            noWarn: true,
             replacement: [
                 {
                     match: /\i\|\|\i(?=\?\(0,\i\.jsxs?\)\(\i\.\i\.Overlay,)/,

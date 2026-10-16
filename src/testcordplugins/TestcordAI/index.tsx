@@ -769,7 +769,6 @@ export default definePlugin({
         {
             // Patch 1: Replace the Shop page (CollectiblesShop) with our TestcordAI panel
             find: "CollectiblesShop",
-            noWarn: true,
             replacement: [
                 {
                     // Variant A: CollectiblesShop:function(){...} or CollectiblesShop:SomeVar
@@ -791,7 +790,6 @@ export default definePlugin({
         {
             // Patch 2: Inject the TestcordAI button in the DM sidebar (Old system reactivated with version fix)
             find: ".FRIENDS},\"friends\"",
-            noWarn: true,
             replacement: {
                 // Target the injection of the Shop button in the Sidebar component
                 // Match $1 captures the selection expression (selected: ...)

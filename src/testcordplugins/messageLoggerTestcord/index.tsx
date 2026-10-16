@@ -1041,7 +1041,6 @@ export default definePlugin({
         // dont fetch messages for deleted logged messages when jumping
         {
             find: "Using PollReferenceMessageContext without",
-            noWarn: true,
             replacement: {
                 match: /(?:\i\.)?\i\.(?:default\.)?focusMessage\(/,
                 replace: "!(arguments[0]?.message?.deleted || arguments[0]?.message?.editHistory?.length > 0) && $&"
@@ -1050,7 +1049,6 @@ export default definePlugin({
         // fix saved videos failing to play back from blob: urls (readyState stuck LOADING)
         {
             find: ".handleImageLoad)",
-            noWarn: true,
             replacement: {
                 match: /(componentDidMount\(\)\{)(let\{readyState:\i\}=this\.state;if\(\i===)([\w.$]+)\.LOADING/,
                 replace: "$1if(this.props?.src?.startsWith('blob:') && this.props?.item?.type === 'VIDEO')return this.setState({readyState: $3.READY});$2$3.LOADING"
@@ -1059,7 +1057,6 @@ export default definePlugin({
         // only check for expired attachments if the message is not deleted
         {
             find: "refreshed_urls",
-            noWarn: true,
             replacement: {
                 match: /\i\.attachments\.some\(\i\)\|\|\i\.embeds\.some/,
                 replace: "!arguments[0].deleted && $&"

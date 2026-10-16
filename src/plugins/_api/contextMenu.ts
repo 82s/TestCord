@@ -45,7 +45,6 @@ export default definePlugin({
         {
             find: "navId:",
             all: true,
-            noWarn: true,
             replacement: [
                 {
                     match: /navId:(?=.+?([,}].*?\)))/g,
@@ -71,7 +70,6 @@ export default definePlugin({
 
         {
             find: "Menu API only allows Items",
-            noWarn: true,
             replacement: [
                 // Patch the central context menu handler
                 {

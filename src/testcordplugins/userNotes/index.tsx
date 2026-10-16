@@ -114,7 +114,6 @@ export default definePlugin({
         {
             find: "toolbar:function",
             predicate: () => settings.store.addNotesDataToolBar,
-            noWarn: true,
             replacement: {
                 match: /(function \i\(\i\){)(.{1,200}toolbar.{1,100}mobileToolbar)/,
                 replace: "$1$self.addToolBarButton(arguments[0]);$2"

@@ -58,7 +58,6 @@ export default definePlugin({
         // Change the max volume for sliders to allow for values above 200
         {
             find: "#{intl::USER_VOLUME}",
-            noWarn: true,
             replacement: {
                 match: /(?<=maxValue:)\i\.isPlatformEmbedded\?(\i\.\i):\i\.\i(?=,)/,
                 replace: (_, higherMaxVolume) => `${higherMaxVolume}*$self.settings.store.multiplier`
@@ -67,7 +66,6 @@ export default definePlugin({
         // Change the max volume for sliders to allow for values above 200
         {
             find: "currentVolume:",
-            noWarn: true,
             replacement: {
                 match: /(?<=maxValue:)\i\.\i\?(\d+?):\d+?(?=,)/,
                 replace: (_, higherMaxVolume) => `${higherMaxVolume}*$self.settings.store.multiplier`
@@ -77,7 +75,6 @@ export default definePlugin({
         {
             find: "streamSourceNode",
             predicate: () => !IS_DISCORD_DESKTOP,
-            noWarn: true,
             group: true,
             replacement: [
                 // Remove rounding algorithm
@@ -100,7 +97,6 @@ export default definePlugin({
         // Prevent Audio Context Settings sync from trying to sync with values above 200, changing them to 200 before we send to Discord
         {
             find: "AudioContextSettingsMigrated",
-            noWarn: true,
             replacement: [
                 {
                     match: /(?<=isLocalMute\(\i,\i\),volume:(\i).+?\(0,\i\.\i\)\(\i,\i,\{volume:)\1(?=\}\))/,
@@ -119,7 +115,6 @@ export default definePlugin({
         // Prevent the MediaEngineStore from overwriting our LocalVolumes above 200 with the ones the Discord Audio Context Settings sync sends
         {
             find: '="MediaEngineStore",',
-            noWarn: true,
             replacement: [
                 {
                     match: /(\.settings\.audioContextSettings.+?)(\i\[\i\])=(\i\.volume)(.+?setLocalVolume\(\i,).+?\)/,

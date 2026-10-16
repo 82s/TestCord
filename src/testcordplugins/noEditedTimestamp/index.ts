@@ -20,7 +20,6 @@ export default definePlugin({
                 match: /(\i)\.edited_timestamp(?=.{0,300}MESSAGE_EDITED_TIMESTAMP_A11Y_LABEL)/,
                 replace: "null",
             },
-            noWarn: true,
         },
     ],
 });

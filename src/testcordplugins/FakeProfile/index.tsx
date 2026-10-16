@@ -105,7 +105,6 @@ export default definePlugin({
         },
         {
             find: "getAvatarDecorationURL:",
-            noWarn: true,
             replacement: {
                 match: /(?<=function \i\(\i\){)(?=let{avatarDecoration)/,
                 replace: "const vcDecoration=$self.getAvatarDecorationURL(arguments[0]);if(vcDecoration)return vcDecoration;"
@@ -113,7 +112,6 @@ export default definePlugin({
         },
         {
             find: "#{intl::USER_SETTINGS_RESET_PROFILE_THEME}",
-            noWarn: true,
             replacement: {
                 match: /#{intl::USER_SETTINGS_RESET_PROFILE_THEME}.+?}\)(?=\])(?=\])(?<=color:(\i),.{0,500}?color:(\i),.{0,500}?)/,
                 replace: "$&,$self.addCopy3y3Button({primary:$1,accent:$2})"
@@ -121,7 +119,6 @@ export default definePlugin({
         },
         {
             find: "DefaultCustomizationSections",
-            noWarn: true,
             replacement: {
                 match: /(?<=#{intl::USER_SETTINGS_AVATAR_DECORATION}\)},"decoration"\),)/,
                 replace: "$self.fakeProfileSection(),"
@@ -154,7 +151,6 @@ export default definePlugin({
         },
         {
             find: "getUserAvatarURL:",
-            noWarn: true,
             replacement: [
                 {
                     match: /(getUserAvatarURL:)(\i),/,
@@ -166,7 +162,6 @@ export default definePlugin({
         {
             find: "isAvatarDecorationAnimating:",
             group: true,
-            noWarn: true,
             replacement: [
                 {
                     match: /(?<=\.avatarDecoration,guildId:\i\}\)\),)(?<=user:(\i).+?)/,
@@ -191,7 +186,6 @@ export default definePlugin({
         // },
         {
             find: "#{intl::ACCOUNT_SPEAKING_WHILE_MUTED}",
-            noWarn: true,
             replacement: [
                 // Use Decor avatar decoration hook
                 {
@@ -206,7 +200,6 @@ export default definePlugin({
             "#{intl::ayozFl::raw}", // Avatar preview
         ].map(find => ({
             find,
-            noWarn: true,
             replacement: [
                 {
                     match: /(?<=userValue.{0,25}void 0:)((\i)\.avatarDecoration)/,
@@ -229,7 +222,6 @@ export default definePlugin({
         },
         {
             find: "role:\"listitem\",innerRef",
-            noWarn: true,
             replacement: {
                 match: /focusProps.\i\}=(\i).*?children:\[/,
                 replace: "$&$1.banner,"

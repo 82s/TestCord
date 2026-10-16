@@ -50,7 +50,6 @@ export default definePlugin({
     patches: [
         {
             find: ".GUILD_CREATE_INVITE_SUGGESTION,defaultMaxAge",
-            noWarn: true,
             replacement: [
                 {
                     match: /maxAge:null!=\(\i=null!=\i\?\i:\i\)\?\i:\i.value/,

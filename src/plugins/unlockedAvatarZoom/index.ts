@@ -26,7 +26,6 @@ export default definePlugin({
     patches: [
         {
             find: "changeAvatarButtonText",
-            noWarn: true,
             replacement: {
                 match: /maxValue:\d/,
                 replace: "maxValue:$self.settings.store.zoomMultiplier",

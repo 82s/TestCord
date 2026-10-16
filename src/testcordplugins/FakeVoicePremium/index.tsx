@@ -712,7 +712,6 @@ export default definePlugin({
     patches: [
         {
             find: "}voiceStateUpdate(",
-            noWarn: true,
             replacement: {
                 match: /self_mute:([^,]+),self_deaf:([^,]+),self_video:([^,]+)/,
                 replace: "self_mute:$self.toggle($1,'fakeMute'),self_deaf:$self.toggle($2,'fakeDeafen'),self_video:$self.toggle($3,'fakeCam')"
@@ -720,7 +719,6 @@ export default definePlugin({
         },
         {
             find: "OPEN_EMBEDDED_ACTIVITY,{location:",
-            noWarn: true,
             replacement: {
                 match: /\i\._\.dispatch\(\i\.\i\.OPEN_EMBEDDED_ACTIVITY,\{location:\i,applicationId:\i,/,
                 replace: "$self.shouldOpenEmbeddedActivity()&&$&"
@@ -728,7 +726,6 @@ export default definePlugin({
         },
         {
             find: "handleOpenActivityPopout",
-            noWarn: true,
             replacement: {
                 match: /\i\.open\(\i\.\i\.ACTIVITY_POPOUT,.{0,80}?defaultHeight:480\}\)/,
                 replace: "$self.shouldOpenEmbeddedActivity()&&$&"
@@ -736,7 +733,6 @@ export default definePlugin({
         },
         {
             find: "CAMERA_PREVIEW]:",
-            noWarn: true,
             replacement: {
                 match: /d\.set\(\i,\i\),(\i)===(\i\.\i)\.VIDEO.{0,100}?\2\.HAVEN&&null==\i&&\(\i=\i\)/,
                 replace: "(($1!==$2.ACTIVITY||$self.shouldOpenEmbeddedActivity())&&($1!==$2.VIDEO||$self.shouldOpenStreamPip()))&&($&)",

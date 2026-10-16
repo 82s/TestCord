@@ -1165,7 +1165,6 @@ export default definePlugin({
         // these calculations even with isMe() guard. DomObserver + fakeCurrentUser are enough.
         {
             find: "DISPLAY_NAME",
-            noWarn: true,
             replacement: {
                 match: /(?<=currentUser:\i,user:)(\i)/,
                 replace: "$self.fakeCurrentUser($1)"
@@ -1175,7 +1174,6 @@ export default definePlugin({
             find: "isHoveringOrFocusing",
             replacement: [
                 {
-                    noWarn: true,
                     match: /user:([A-Za-z_$][\w$]*),displayProfile:([A-Za-z_$][\w$]*),themeType/,
                     replace: "user:$self.fakeCurrentUser($1),displayProfile:$2,themeType"
                 }

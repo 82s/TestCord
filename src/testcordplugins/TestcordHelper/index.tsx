@@ -1930,7 +1930,6 @@ export default definePlugin({
         {
             find: "AUDIO_RESET:function(){",
             predicate: () => Settings.plugins.TestcordOptimizer?.preventAudioResetReload !== false,
-            noWarn: true,
             replacement: {
                 match: /(?<=AUDIO_RESET:function\(\).{0,300}?)location\.reload\(\)/,
                 replace: "$self.onAudioReset()"
