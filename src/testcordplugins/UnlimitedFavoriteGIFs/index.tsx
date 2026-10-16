@@ -5,6 +5,7 @@
  */
 
 import { DataStore } from "@api/index";
+import { isPluginEnabled } from "@api/PluginManager";
 import { definePluginSettings } from "@api/Settings";
 import { Link } from "@components/Link";
 import definePlugin, { OptionType } from "@utils/types";
@@ -141,11 +142,11 @@ export default definePlugin({
 
     patches: [
         {
-            find: '"+XYXtZ"',
-            all: true,
+            find: "#{intl::FAVORITE_GIFS_LIMIT_REACHED_BODY}",
+            predicate: () => !isPluginEnabled("GifTransfer"),
             replacement: {
-                match: /\.toBinary\(t\)\.length>\d+/,
-                replace: ".toBinary(t).length>Number.MAX_SAFE_INTEGER",
+                match: /\.toBinary\((\i)\)\.length>\d+/,
+                replace: ".toBinary($1).length>Number.MAX_SAFE_INTEGER",
             }
         },
     ],
