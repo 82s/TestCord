@@ -46,7 +46,7 @@ export default definePlugin({
         {
             find: "#{intl::MEMBERS_LIST_LANDMARK_LABEL}",
             replacement: {
-                match: /"aria-labelledby":.{0,130}#{intl::MEMBERS_LIST_LANDMARK_LABEL}/,
+                match: /"aria-labelledby":.{0,200}#{intl::MEMBERS_LIST_LANDMARK_LABEL}/,
                 replace: '...(Vencord.Api.SurfaceClasses._trackSurfaceInstance("membersList",this),Vencord.Api.SurfaceClasses._getSurfaceProps("membersList")),$&'
             }
         },
