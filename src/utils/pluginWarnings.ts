@@ -53,7 +53,11 @@ export const LEGACY_PLUGINS: string[] = [
     "UserAreaTweaks",
     "OSSpoofer",
     "BetterScreenshare",
-    "CustomStreamQuality"
+    "CustomStreamQuality",
+    "FakeProfile",
+    "fakeProfile",
+    "FakeUserProfile",
+    "fakeUserProfile"
 ];
 
 /**
@@ -61,6 +65,10 @@ export const LEGACY_PLUGINS: string[] = [
  * Matching is case-insensitive and ignores spaces, hyphens, and underscores.
  */
 export const LEGACY_REPLACEMENTS: Record<string, string> = {
+    "FakeProfile": "FakeUserSwitcher",
+    "fakeprofile": "FakeUserSwitcher",
+    "FakeUserProfile": "FakeUserSwitcher",
+    "fakeuserprofile": "FakeUserSwitcher",
     "AntiStereo": "Force Mono",
     "antistereo": "Force Mono",
     "FakeMuteDeafen": "FakeVoicePremium",
