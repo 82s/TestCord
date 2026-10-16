@@ -173,7 +173,7 @@ export default definePlugin({
     },
     commands: [
         {
-            name: "verify-os",
+            name: "verify-platform",
             description: "Verify the spoofed platform by triggering a reconnect and displaying the current spoof.",
             execute: (args, ctx) => {
                 const platform = settings.store.plateforme ?? "windows";

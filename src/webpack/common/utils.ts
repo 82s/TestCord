@@ -18,7 +18,7 @@
 
 import { Logger } from "@utils/Logger";
 import type * as t from "@vencord/discord-types";
-import { _resolveReady, filters, findByCodeLazy, findByProps, findByPropsLazy, findLazy, mapMangledModule, mapMangledModuleLazy, proxyLazyWebpack, waitFor } from "@webpack";
+import { _resolveReady, filters, find, findByCodeLazy, findByProps, findByPropsLazy, findLazy, mapMangledModule, mapMangledModuleLazy, proxyLazyWebpack, waitFor } from "@webpack";
 import type * as TSPattern from "ts-pattern";
 
 const logger = new Logger("WebpackCommon");
@@ -144,7 +144,8 @@ function resolveCreateToast(mod: ToastsExports): ((...args: any[]) => any) | und
 
     probedCreateToast = true;
     try {
-        const byCode = findByCodeLazy('variant:"default",icon:', ".duration");
+        const byCode = find(filters.byCode('variant:"default",icon:', ".duration"), { isIndirect: true }) as ((...args: any[]) => any) | null;
+        if (!byCode) return undefined;
         // builds taking (message, type, options) answer the object probe with a
         // non-string text, older ones answer the positional probe with junk, so
         // try both before rejecting the normaliser

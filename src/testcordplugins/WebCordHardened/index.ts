@@ -338,7 +338,9 @@ function setHideNag(): void {
     if (!settings.store.hideDownloadNag) return;
 
     try {
-        localStorage.setItem("hideNag", "true");
+        if (typeof window !== "undefined" && window?.localStorage) {
+            window.localStorage.setItem("hideNag", "true");
+        }
     } catch (error) {
         logger.warn("Could not hide Discord download prompts.", error);
     }

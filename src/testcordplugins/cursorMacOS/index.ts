@@ -16,7 +16,7 @@ async function apply() {
     console.log(`[CursorMacOS] Applying: ${style}/${size}`);
     const result = await Native.applyCursors(style, size);
     if (!result.ok) {
-        console.error("[CursorMacOS] Failed to apply:", result.error);
+        console.warn("[CursorMacOS] Could not apply cursors:", result.error);
     }
 }
 

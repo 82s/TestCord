@@ -804,7 +804,7 @@ export default definePlugin({
         getReidverseKey().then(() => {
             console.log("[TestcordAI] Reidverse AI key ready");
         }).catch(e => {
-            console.warn("[TestcordAI] Reidverse AI auto-register failed:", e?.message ?? e);
+            console.debug("[TestcordAI] Reidverse AI auto-register unavailable:", e?.message ?? e);
         });
 
         // DOM fallback system if the Webpack patch fails on this Discord version

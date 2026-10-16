@@ -48,6 +48,8 @@ function resetTranslations() {
 
     for (const controller of abortControllers) controller.abort();
     abortControllers.clear();
+    rateLimitedUntil = 0;
+    hasLoggedRateLimit = false;
 }
 
 const settings = definePluginSettings({
@@ -87,7 +89,11 @@ function getTranslationCacheKey(kind: string, id: string, text: string) {
     return `${settings.store.targetLanguage}:${kind}:${id}:${text}`;
 }
 
+let rateLimitedUntil = 0;
+let hasLoggedRateLimit = false;
+
 function getTranslatedText(kind: string, id: string, text: string, onTranslated: () => void): string | undefined {
+    if (Date.now() < rateLimitedUntil) return;
     const trimmed = text.trim();
     if (!trimmed) return;
 
@@ -101,7 +107,7 @@ function getTranslatedText(kind: string, id: string, text: string, onTranslated:
 }
 
 function queueTranslation(key: string, text: string, onTranslated: () => void) {
-    if (inProgress.has(key)) return;
+    if (Date.now() < rateLimitedUntil || inProgress.has(key)) return;
 
     const currentGeneration = generation;
     const controller = new AbortController();
@@ -120,7 +126,9 @@ function queueTranslation(key: string, text: string, onTranslated: () => void) {
     }).catch(error => {
         if (error instanceof Error && error.name === "AbortError") return;
         skippedTranslations.add(key);
-        logger.warn("Surface translation failed", error);
+        if (Date.now() >= rateLimitedUntil) {
+            logger.warn("Surface translation failed", error);
+        }
     }).finally(() => {
         inProgress.delete(key);
         abortControllers.delete(controller);
@@ -132,12 +140,21 @@ function getBaseLanguage(language: string) {
 }
 
 async function fetchTranslation(text: string, signal: AbortSignal): Promise<string | null> {
+    if (Date.now() < rateLimitedUntil) return null;
     const targetLanguage = settings.store.targetLanguage.trim();
     const targetBaseLanguage = getBaseLanguage(targetLanguage);
     if (!targetBaseLanguage) return null;
 
     const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(targetLanguage)}&dt=t&dj=1&q=${encodeURIComponent(text)}`;
     const response = await fetch(url, { signal });
+    if (response.status === 429) {
+        rateLimitedUntil = Date.now() + 60_000;
+        if (!hasLoggedRateLimit) {
+            hasLoggedRateLimit = true;
+            logger.warn("Translation API returned 429 (rate limit). Pausing translations for 60s.");
+        }
+        return null;
+    }
     if (!response.ok) throw new Error(`Translation API returned ${response.status} ${response.statusText}`);
 
     const data: unknown = await response.json();

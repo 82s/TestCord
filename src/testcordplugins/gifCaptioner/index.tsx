@@ -200,7 +200,17 @@ async function fetchAllGoogleFonts(): Promise<GoogleFontMetadata[]> {
         },
         method: "POST"
     })
-        .then(response => response.ok ? response.json() : null)
+        .then(async response => {
+            if (!response.ok) return null;
+            const text = await response.text();
+            try {
+                const clean = text.replace(/^\)\]\}'[\r\n]*/, "");
+                return JSON.parse(clean);
+            } catch {
+                return null;
+            }
+        })
+        .catch(() => null)
         .then(data => {
             const rows = Array.isArray(data?.[1]) ? data[1] as unknown[] : [];
             const fonts: GoogleFontMetadata[] = [];
@@ -402,7 +412,7 @@ export default definePlugin({
     ],
 
     start() {
-        void fetchAllGoogleFonts();
+        void fetchAllGoogleFonts().catch(() => {});
     },
 
     stop() {},

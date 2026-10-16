@@ -224,7 +224,7 @@ export default definePlugin({
                 },
                 {
                     // Tooltips when hovering over message timestamps
-                    match: /(__unsupportedReactNodeAsText:).{0,25}"LLLL"\)/,
+                    match: /(__unsupportedReactNodeAsText:).{0,100}?"LLLL"\)/,
                     replace: "$1$self.renderTimestamp(arguments[0].timestamp,'tooltip')",
                 },
             ]
@@ -233,7 +233,7 @@ export default definePlugin({
             find: ".MINUTE],[45*",
             replacement: {
                 // Tooltips for timestamp markdown (e.g. <t:1234567890>)
-                match: /(__unsupportedReactNodeAsText:)\i.full/,
+                match: /(__unsupportedReactNodeAsText:).{0,50}?\.full/,
                 replace: "$1$self.renderTimestamp(new Date(arguments[0].node.timestamp*1000),'tooltip')"
             }
         }

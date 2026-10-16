@@ -28,6 +28,7 @@ function getToggledThemeSettings(theme: ToggledTheme, onChange: () => void): Set
     return {
         themeStartTime: {
             type: OptionType.COMPONENT,
+            default: defaultStartTime,
             onChange,
             // TimeComponent is necessary, see TimeComponent.tsx
             component: props => timeComponent(

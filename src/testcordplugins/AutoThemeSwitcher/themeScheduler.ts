@@ -10,10 +10,10 @@ import { ToggledTheme } from "./types";
  * @param time Properly formatted time string
  * @returns How many minutes after midnight the time parameter is (ex. 01:30 is 90 minutes after midnight)
  */
-function getMinutesFromMidnight(time: string) {
-    // time is necessarily in HH:MM format
+function getMinutesFromMidnight(time?: string) {
+    if (!time || typeof time !== "string" || !time.includes(":")) return 0;
     const separatedTime = time.split(":");
-    return parseInt(separatedTime[0]) * 60 + parseInt(separatedTime[1]);
+    return (parseInt(separatedTime[0], 10) || 0) * 60 + (parseInt(separatedTime[1], 10) || 0);
 }
 
 /**
@@ -21,10 +21,10 @@ function getMinutesFromMidnight(time: string) {
  * @param darkThemeStartTime The "Dark Theme Start Time" setting, in HH:MM format
  * @returns Whether the current theme should be Light or Dark
  */
-export function getExpectedTheme(lightThemeStartTime: string, darkThemeStartTime: string): ToggledTheme {
+export function getExpectedTheme(lightThemeStartTime: string = "08:00", darkThemeStartTime: string = "20:00"): ToggledTheme {
     const now = new Date().getHours() * 60 + new Date().getMinutes();
-    let lightStartDate = getMinutesFromMidnight(lightThemeStartTime);
-    let darkStartDate = getMinutesFromMidnight(darkThemeStartTime);
+    let lightStartDate = getMinutesFromMidnight(lightThemeStartTime || "08:00");
+    let darkStartDate = getMinutesFromMidnight(darkThemeStartTime || "20:00");
 
     // dates that are already in the past are sent 1 day later
     if (lightStartDate <= now) lightStartDate += 24 * 60;

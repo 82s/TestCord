@@ -697,7 +697,7 @@ export default definePlugin({
     description: "Adds a Dynamic Island for Spotify, calls, screen sharing, and notifications.",
     authors: [{ name: "irritably", id: 928787166916640838n }],
     tags: ["Media", "Voice"],
-    dependencies: ["HeaderBarAPI", "MusicControls"],
+    dependencies: ["HeaderBarAPI", "PanelLayout"],
     settings,
 
     start() {

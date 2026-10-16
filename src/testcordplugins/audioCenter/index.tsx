@@ -198,7 +198,6 @@ function injectVirtualDevice() {
 
         // Add necessary patches
         patchDiscordComponents();
-        addDirectPatch();
         createGlobalFunction();
 
         console.log("AudioCenter: Virtual device injected successfully");
@@ -257,38 +256,6 @@ function patchDiscordComponents() {
         console.log("AudioCenter: Discord components patched");
     } catch (error) {
         console.error("AudioCenter: Error patching Discord components:", error);
-    }
-}
-
-// Function to add a direct patch
-function addDirectPatch() {
-    try {
-        console.log("AudioCenter: Adding direct patch...");
-
-        // Use Vencord's patch API
-        const { Patcher } = (Vencord as any);
-
-        // Directly patch device selection components
-        const patchHandle = Patcher.addPatch({
-            plugin: "AudioCenter",
-            patches: [
-                {
-                    find: "getInputDevices",
-                    replacement: {
-                        match: /getInputDevices\(\)/g,
-                        replace: "getInputDevicesWithVirtual()",
-                    },
-                },
-            ],
-        });
-
-        if (patchHandle && typeof patchHandle.unpatch === "function") {
-            _patchRestores.push(() => patchHandle.unpatch());
-        }
-
-        console.log("AudioCenter: Direct patch added");
-    } catch (error) {
-        console.error("AudioCenter: Error adding direct patch:", error);
     }
 }
 

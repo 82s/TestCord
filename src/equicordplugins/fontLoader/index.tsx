@@ -54,8 +54,16 @@ async function searchGoogleFonts(query: string) {
                     "content-type": "application/json+protobuf",
                     "x-user-agent": "grpc-web-javascript/0.1"
                 },
-                body: JSON.stringify([[query, null, null, null, null, null, 1], [5], null, 16])
-            }).then(r => r.json()),
+            }).then(async r => {
+                if (!r.ok) return null;
+                const text = await r.text();
+                try {
+                    const clean = text.replace(/^\)\]\}'[\r\n]*/, "");
+                    return JSON.parse(clean);
+                } catch {
+                    return null;
+                }
+            }).catch(() => null),
             cacheable: value => Array.isArray((value as any)?.[1]),
         });
         if (!data?.[1]) return [];

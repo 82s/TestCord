@@ -33,8 +33,9 @@ let ignoredRaw = "";
 let ignored: string[] = [];
 
 function getIgnored() {
-    if (settings.plain.ignoredChannels !== ignoredRaw) {
-        ignoredRaw = settings.plain.ignoredChannels;
+    const raw = settings.plain.ignoredChannels ?? "";
+    if (raw !== ignoredRaw) {
+        ignoredRaw = raw;
         ignored = ignoredRaw.split(",").map(id => id.trim()).filter(Boolean);
     }
     return ignored;
@@ -59,6 +60,7 @@ const patchChannelContextMenu: NavContextMenuPatchCallback = (children, { channe
 };
 
 function computeClean(name: string, type: number): string {
+    if (!name || typeof name !== "string") return name ?? "";
     const separator = [2, 4].includes(type) ? " " : "-";
     const cleaned = name
         .normalize("NFKC")
@@ -104,7 +106,7 @@ export default definePlugin({
     },
 
     cleanChannelName(channel?: Channel) {
-        if (channel == null) return channel;
+        if (channel == null || typeof channel.name !== "string") return channel;
         const c = channel as any;
 
         if (c[ORIGINAL_NAME] !== undefined) return channel;

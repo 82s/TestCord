@@ -257,7 +257,7 @@ export default definePlugin({
     commands: [
 
         {
-            name: "spoofboost",
+            name: "spoofv2boost",
             description: "Spoof a server boost notification",
             inputType: ApplicationCommandInputType.BUILT_IN,
             options: [
@@ -343,7 +343,7 @@ export default definePlugin({
         },
 
         {
-            name: "spoofclyde",
+            name: "spoofv2clyde",
             description: "Spoof a message from Clyde (Discord's bot)",
             inputType: ApplicationCommandInputType.BUILT_IN,
             options: [
@@ -404,7 +404,7 @@ export default definePlugin({
         },
 
         {
-            name: "spoofclydeplain",
+            name: "spoofv2clydeplain",
             description: "Spoof a plain text message from Clyde (Discord's bot)",
             inputType: ApplicationCommandInputType.BUILT_IN,
             options: [
@@ -461,7 +461,7 @@ export default definePlugin({
         },
 
         {
-            name: "spoofjoin",
+            name: "spoofv2join",
             description: "Spoof a user join notification",
             inputType: ApplicationCommandInputType.BUILT_IN,
             options: [
@@ -525,7 +525,7 @@ export default definePlugin({
         },
 
         {
-            name: "spoofpin",
+            name: "spoofv2pin",
             description: "Spoof a message pin notification",
             inputType: ApplicationCommandInputType.BUILT_IN,
             options: [
@@ -591,7 +591,7 @@ export default definePlugin({
         },
 
         {
-            name: "spoofcall",
+            name: "spoofv2call",
             description: "Spoof a call start/end notification",
             inputType: ApplicationCommandInputType.BUILT_IN,
             options: [
@@ -658,7 +658,7 @@ export default definePlugin({
         },
 
         {
-            name: "spoofsystem",
+            name: "spoofv2system",
             description: "Spoof an official Discord system message",
             inputType: ApplicationCommandInputType.BUILT_IN,
             options: [
@@ -715,7 +715,7 @@ export default definePlugin({
         },
 
         {
-            name: "spoofpurchase",
+            name: "spoofv2purchase",
             description: "Spoof a purchase notification",
             inputType: ApplicationCommandInputType.BUILT_IN,
             options: [
@@ -796,7 +796,7 @@ export default definePlugin({
         },
 
         {
-            name: "spoofautomod",
+            name: "spoofv2automod",
             description: "Spoof an AutoMod action notification",
             inputType: ApplicationCommandInputType.BUILT_IN,
             options: [

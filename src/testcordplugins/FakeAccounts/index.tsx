@@ -467,15 +467,15 @@ export default definePlugin({
         {
             find: "getIsValidatingUsers",
             replacement: {
-                match: /getUsers\(\)\{return (\i)\}/,
+                match: /getUsers\(\)\{return ([^}]+)\}/,
                 replace: "getUsers(){return $self.injectFakes($1)}"
             }
         },
         {
             find: "multiAccountUsers",
             replacement: {
-                match: /(\w+)\.default\.track\((\w+)\.HAw\.MULTI_ACCOUNT_SWITCH_ATTEMPT[^)]+\),(\w+)\.Mx\((\w+),[^)]*\)/,
-                replace: "$1.default.track($2.HAw.MULTI_ACCOUNT_SWITCH_ATTEMPT,{location:{section:$2.JJy.USER_PROFILE}}),$self.handleSwitch((...a)=>$3.Mx(...a),$4)"
+                match: /(\i\.default\.track\([^)]*?\.MULTI_ACCOUNT_SWITCH_ATTEMPT[^)]*?\)),(\i)\.(\i)\((\i)(?:,[^)]*)?\)/,
+                replace: "$1,$self.handleSwitch((...a)=>$2.$3(...a),$4)"
             }
         }
     ],

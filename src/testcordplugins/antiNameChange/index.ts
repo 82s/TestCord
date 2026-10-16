@@ -79,7 +79,7 @@ export default definePlugin({
 
     commands: [
         {
-            name: "profile",
+            name: "friendprofile",
             description: "Open the profile of your friend who keeps changing accounts",
             execute() {
                 const { lSeenUserID } = settings.plain;
