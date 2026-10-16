@@ -144,8 +144,8 @@ export default definePlugin({
             predicate: () => settings.store.voiceBackground,
             replacement: [
                 {
-                    match: /function \i?\s*\((\i)(?:,\i)?\)\{(?=let[^;]+?style:)/,
-                    replace: "$&$1.style=$self.getVoiceBackgroundStyles($1);"
+                    match: /function \i?\s*\((\i)(?:,\i)?\)\{(?=.+?style:)/,
+                    replace: "$&Object.assign($1.style=$1.style||{},$self.getVoiceBackgroundStyles($1));"
                 }
             ]
         },
@@ -168,7 +168,7 @@ export default definePlugin({
                     replace: "vcAvatarDecoration=$self.useUserAvatarDecoration($1),"
                 },
                 {
-                    match: /(?<={avatarDecoration:).{1,20}?(?=,)(?<=avatarDecorationOverride:(\i).+?)/,
+                    match: /(?<={avatarDecoration:).{1,100}?(?=,)(?<=avatarDecorationOverride:(\i).+?)/,
                     replace: "$1??vcAvatarDecoration??($&)"
                 },
                 {
