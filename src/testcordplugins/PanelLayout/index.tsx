@@ -2245,16 +2245,16 @@ function ButtonsDragTab() {
                                         {userItems.map(renderDetailCard)}
                                     </div>
                                 )}
-                                {nativeItems.length > 0 && (
-                                    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                                        <SectionHeading>Native Buttons</SectionHeading>
-                                        {nativeItems.map(renderDetailCard)}
-                                    </div>
-                                )}
                                 {callItems.length > 0 && (
                                     <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                                         <SectionHeading>Call Buttons</SectionHeading>
                                         {callItems.map(renderDetailCard)}
+                                    </div>
+                                )}
+                                {nativeItems.length > 0 && (
+                                    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                                        <SectionHeading>Native Buttons</SectionHeading>
+                                        {nativeItems.map(renderDetailCard)}
                                     </div>
                                 )}
                             </>
