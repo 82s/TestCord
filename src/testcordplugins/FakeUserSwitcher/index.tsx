@@ -2228,17 +2228,19 @@ const plugin = definePlugin({
             }
         },
         {
-            find: ".banner)==null",
+            find: ":\"SHOULD_LOAD\");",
+            noWarn: true,
             replacement: {
-                match: /(?<=void 0:)\i\.getPreviewBanner\(\i,\i,\i\)/,
+                match: /\i(?:\?)?\.getPreviewBanner\(\i,\i,\i\)(?=.{0,100}"COMPLETE")/,
                 replace: "($self.bannerHook(arguments[0])??($&))"
             }
         },
         {
             find: "\"ProfileEffectStore\"",
+            noWarn: true,
             replacement: {
                 match: /getProfileEffectById\((\i)\){return null!=\i\?(\i)\[\i\]:void 0/,
-                replace: "getProfileEffectById($1){return $self.getProfileEffectById($1,$2)??(null!=$2?$2[$1]:void 0)"
+                replace: "getProfileEffectById($1){return $self.getProfileEffectById($1,$2)??(null!=$2?$2[$1]:void 0)}"
             }
         },
         {
@@ -2250,6 +2252,7 @@ const plugin = definePlugin({
         },
         {
             find: "getGuildTagBadgeURL",
+            noWarn: true,
             replacement: {
                 match: /(getGuildTagBadgeURL:)(\i),/,
                 replace: "$1$self.wrapBadge($2),"
@@ -2271,7 +2274,7 @@ const plugin = definePlugin({
             ]
         },
         {
-            find: "fromTimestamp:",
+            find: "DISCORD_EPOCH:",
             replacement: [
                 // `extractTimestamp: function(x){...}`
                 {
@@ -2309,8 +2312,8 @@ const plugin = definePlugin({
         {
             find: "multiAccountUsers",
             replacement: {
-                match: /(\w+)\.default\.track\((\w+)\.HAw\.MULTI_ACCOUNT_SWITCH_ATTEMPT[^)]+\),(\w+)\.Mx\((\w+)\)/,
-                replace: "$1.default.track($2.HAw.MULTI_ACCOUNT_SWITCH_ATTEMPT,{location:{section:$2.JJy.USER_PROFILE}}),$self.handleSwitch($3.Mx.bind($3),$4)",
+                match: /(\w+)\.default\.track\((\w+)\.HAw\.MULTI_ACCOUNT_SWITCH_ATTEMPT[^)]+\),(\w+)\.Mx\((\w+)(?:,[^)]*)?\)/,
+                replace: "$1.default.track($2.HAw.MULTI_ACCOUNT_SWITCH_ATTEMPT,{location:{section:$2.JJy.USER_PROFILE}}),$self.handleSwitch((...a)=>$3.Mx(...a),$4)",
                 noWarn: true
             }
         }
@@ -2320,7 +2323,7 @@ const plugin = definePlugin({
         return injectFakes(real);
     },
 
-    handleSwitch(originalFn: (id: string) => void, userId: string) {
+    handleSwitch(originalFn: (id: string, ...rest: any[]) => void, userId: string, ...rest: any[]) {
         if (settings.store.patchInternalAccountSwitcher) {
             const saved = getSavedIdentityForSwitcherId(userId);
             if (saved) {
@@ -2332,7 +2335,7 @@ const plugin = definePlugin({
             clearTarget();
             emitInternalAccountSwitcherChange();
         }
-        originalFn(userId);
+        originalFn(userId, ...rest);
     },
 
     getUsername(user: User) {
