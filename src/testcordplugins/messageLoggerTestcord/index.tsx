@@ -1010,8 +1010,7 @@ export default definePlugin({
         },
         // Fix pagination for channels with many deleted logs (e.g. #pending with 165) — don't drop newer messages when fetching older batches
         {
-            find: "function F(e,t)",
-            noWarn: true,
+            find: '"MessageStore"',
             replacement: {
                 match: /if\((\i)\.hasMoreAfter\)return (\i);/,
                 replace: "if(false&&$1.hasMoreAfter)return $2;"
