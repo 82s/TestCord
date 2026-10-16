@@ -92,6 +92,7 @@ export function huskiness(content: string) {
 }
 
 function reactionPath(emoji: string) {
+    if (!emoji) return "";
     return `/channels/{channel}/messages/{message}/reactions/${emoji.includes(":") ? emoji : encodeURIComponent(emoji)}/@me`;
 }
 
@@ -104,19 +105,24 @@ export default definePlugin({
 
     flux: {
         MESSAGE_CREATE({ message }) {
-            if (message.bot || !message.content) return;
+            if (message?.bot || !message?.content || !message?.author) return;
             if (message.author.id === UserStore.getCurrentUser()?.id) return;
-            if (message.content.length > settings.plain.maxChars) return;
 
-            const { channelIDs, userIDs } = settings.plain;
+            const { emoji, threshold, maxChars, channelIDs, userIDs } = settings.store;
+            if (!emoji) return;
+            if (message.content.length > maxChars) return;
+
             if (channelIDs && !channelIDs.split(",").some(id => id.trim() === message.channel_id)) return;
             if (userIDs && userIDs.split(",").some(id => id.trim() === message.author.id)) return;
-            if (huskiness(message.content) < settings.plain.threshold) return;
+            if (huskiness(message.content) < threshold) return;
+
+            const path = reactionPath(emoji)
+                .replace("{channel}", message.channel_id)
+                .replace("{message}", message.id);
+            if (!path) return;
 
             RestAPI.put({
-                url: reactionPath(settings.plain.emoji)
-                    .replace("{channel}", message.channel_id)
-                    .replace("{message}", message.id)
+                url: path
             }).catch(() => showToast("Could not add the husk reaction", Toasts.Type.FAILURE));
         }
     }

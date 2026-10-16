@@ -312,6 +312,8 @@ const CorsPassthroughDomains = [
     "dropmail.me",
     "tempmail.plus",
     "maildrop.cc",
+    "translate.googleapis.com",
+    "translate.google.com",
 ];
 
 export function initCsp() {

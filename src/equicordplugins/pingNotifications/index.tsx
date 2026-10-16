@@ -58,10 +58,11 @@ function checkIfMuted(channel) {
     if (!settings.store.ignoreMuted) return false;
     if (!channel) return false;
 
-    if (channel.isMuted()) return true;
+    if (channel.isMuted?.()) return true;
 
     const isDM = [1, 3].includes(channel.type);
     if (isDM) {
+        if (UserGuildSettingsStore.isChannelMuted(null, channel.id)) return true;
         const recipientIds = channel.recipients || [];
         for (const userId of recipientIds) {
             if (RelationshipStore.isBlocked(userId)) return true;
@@ -69,8 +70,6 @@ function checkIfMuted(channel) {
     }
 
     if (channel.guild_id) {
-        if (UserGuildSettingsStore.isMuted(channel.guild_id)) return true;
-
         if (UserGuildSettingsStore.isMuted(channel.guild_id)) return true;
         if (UserGuildSettingsStore.isChannelMuted(channel.guild_id, channel.id)) return true;
         if (UserGuildSettingsStore.isCategoryMuted(channel.guild_id, channel.id)) return true;
@@ -93,13 +92,13 @@ export default definePlugin({
     flux: {
         MESSAGE_CREATE({ message }) {
             try {
-                if (!message?.channel_id || message.state === "SENDING") return;
+                if (!message?.channel_id || message.state === "SENDING" || !message.author) return;
 
                 const channel = ChannelStore.getChannel(message.channel_id);
                 const currentUser = UserStore.getCurrentUser();
 
                 if (!channel || !currentUser) return;
-                if (message.author?.id === currentUser.id) return;
+                if (message.author.id === currentUser.id) return;
 
                 const isDM = [1, 3].includes(channel.type);
 

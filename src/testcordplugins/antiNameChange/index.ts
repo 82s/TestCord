@@ -31,7 +31,8 @@ const settings = definePluginSettings({
 }).withPrivateSettings<{ lSeenUserID: string }>();
 
 function substituteAlias(content: string) {
-    const { alias, lSeenUserID } = settings.plain;
+    const alias = settings.store.alias ?? settings.plain.alias;
+    const { lSeenUserID } = settings.plain;
     if (!alias || !lSeenUserID) return content;
     return content.replaceAll(`@${alias}`, `<@${lSeenUserID}>`);
 }
@@ -53,16 +54,19 @@ export default definePlugin({
 
     flux: {
         MESSAGE_CREATE({ message }) {
-            const authorId = message.author.id;
-            if (authorId === UserStore.getCurrentUser()?.id) return;
+            const authorId = message?.author?.id;
+            if (!authorId || authorId === UserStore.getCurrentUser()?.id) return;
 
-            const watched = settings.plain.ids.split(",").some(id => id.trim() === authorId);
+            const ids = settings.store.ids ?? settings.plain.ids ?? "";
+            if (!ids) return;
+
+            const watched = ids.split(",").some(id => id.trim() === authorId);
             if (!watched || settings.plain.lSeenUserID === authorId) return;
 
             const previous = settings.plain.lSeenUserID;
             settings.store.lSeenUserID = authorId;
 
-            if (settings.plain.notify) {
+            if (settings.store.notify) {
                 showToast(
                     previous
                         ? `Tracked account switched to ${message.author.username}`

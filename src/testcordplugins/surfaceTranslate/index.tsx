@@ -119,6 +119,7 @@ function queueTranslation(key: string, text: string, onTranslated: () => void) {
         onTranslated();
     }).catch(error => {
         if (error instanceof Error && error.name === "AbortError") return;
+        skippedTranslations.add(key);
         logger.warn("Surface translation failed", error);
     }).finally(() => {
         inProgress.delete(key);
