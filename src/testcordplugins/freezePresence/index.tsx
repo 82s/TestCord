@@ -93,19 +93,18 @@ export default definePlugin({
         {
             // Patch getStatus to return "online" for everyone when fakeAllOnline is on
             // This covers offline users not in the presence store
-            find: "isMobileOnline",
-            replacement: {
-                match: /return (\i)\[(\i)\]\?\?(\i);/,
-                replace: "return $self.fakeOnlineStatus($2) ?? $1[$2] ?? $3;"
-            }
-        },
-        {
-            // Patch getClientStatus too so the dot color matches
-            find: "isMobileOnline",
-            replacement: {
-                match: /getClientStatus\((\i)\)\{return (\i)\[(\i)\]\}/,
-                replace: 'getClientStatus($1){if($self.fakeOnlineStatus($1))return{desktop:"online"};return $2[$3]}'
-            }
+            find: "BOT_HTTP_INTERACTIONS",
+            replacement: [
+                {
+                    match: /return (\i)\[(\i)\]\?\?(\i);/,
+                    replace: "return $self.fakeOnlineStatus($2) ?? $1[$2] ?? $3;"
+                },
+                {
+                    // Patch getClientStatus too so the dot color matches
+                    match: /getClientStatus\((\i)\)\{return (\i)\[(\i)\]\}/,
+                    replace: 'getClientStatus($1){if($self.fakeOnlineStatus($1))return{desktop:"online"};return $2[$3]}'
+                }
+            ]
         }
     ],
 
