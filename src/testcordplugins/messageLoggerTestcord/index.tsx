@@ -1019,9 +1019,10 @@ export default definePlugin({
         // Restore logged deleted/edited messages when a channel history is fetched
         {
             find: "_tryFetchMessagesCached",
+            predicate: () => !isPluginEnabled("MessageLoggerEnhanced"),
             replacement: [
                 {
-                    match: /(?<=\.get\(\{url.{0,150}?\.then\()(\i)=>\(/,
+                    match: /(?<=\.get\(\{url.{0,250}?\.then\()(\i)=>\(/,
                     replace: "async $1=>(await $self.processMessageFetch($1),"
                 },
                 {
