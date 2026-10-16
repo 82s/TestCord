@@ -17,7 +17,7 @@ export default definePlugin({
             find: "AnnouncementsSpoilerIcon:",
             replacement: [
                 {
-                    match: /"data-fullscreen":\i.{0,150},\{isSidebarOpen:/,
+                    match: /"data-fullscreen":\i/,
                     replace: '...Vencord.Api.SurfaceClasses._useSurfaceProps("base"),$&'
                 },
                 {
