@@ -398,7 +398,7 @@ export default definePlugin({
             ]
         },
         {
-            find: '"HasBeenInStageChannel"',
+            find: '"StageTile"',
             replacement: [
                 {
                     // Render our HiddenChannelLockScreen component instead of the main stage channel component
@@ -419,16 +419,11 @@ export default definePlugin({
                     // Disable strange styles applied to the header for the HiddenChannelLockScreen of stage channels
                     match: /"124px".+?style:(?<=let \i,{channel:(\i).+?)/,
                     replace: (m, channel) => `${m}$self.isHiddenChannel(${channel})?void 0:`
-                }
-            ]
-        },
-        {
-            find: "#{intl::STAGE_FULL_MODERATOR_TITLE}",
-            replacement: [
+                },
                 {
                     // Remove the divider and amount of users in stage channel components for the HiddenChannelLockScreen
-                    match: /\(0,\i\.jsx\)\(\i\.\i\.Divider.+?}\)]}\)(?=.+?:(\i)\.guild_id)/,
-                    replace: (m, channel) => `$self.isHiddenChannel(${channel})?null:(${m})`
+                    match: /\(0,\i\.jsx\)\(\i\.\i\.Divider.{0,500}?}\)]}\)/,
+                    replace: "$self.isHiddenChannel(arguments[0]?.channel)?null:($&)"
                 },
                 {
                     // Remove the open chat button for the HiddenChannelLockScreen
