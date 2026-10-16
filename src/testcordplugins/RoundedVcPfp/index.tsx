@@ -11,9 +11,38 @@ import { EquicordDevs, TestcordDevs } from "@utils/constants";
 import { fetchUserProfile } from "@utils/discord";
 import { getUserAvatarUrl } from "@utils/misc";
 import definePlugin, { makeRange, OptionType } from "@utils/types";
-import { ChannelRTCStore, ChannelStore, IconUtils, UserProfileStore, UserStore, useStateFromStores,VoiceStateStore } from "@webpack/common";
+import { ChannelRTCStore, ChannelStore, IconUtils, SelectedChannelStore, UserProfileStore, UserStore, useStateFromStores, VoiceStateStore } from "@webpack/common";
 
 import style from "./style.css?managed";
+
+// VoiceVUMeters broadcasts audio activity through a window event, since
+// Discord's speaking flag never fires for stream soundshare. This store turns
+// the event into tile re-renders.
+const audioActivityListeners = new Set<() => void>();
+let audioActivityVersion = 0;
+const audioActivityStore = {
+    // useStateFromStores calls addReactChangeListener on every store it gets
+    addReactChangeListener(listener: () => void) {
+        audioActivityListeners.add(listener);
+    },
+    removeReactChangeListener(listener: () => void) {
+        void audioActivityListeners.delete(listener);
+    },
+    subscribe(listener: () => void) {
+        audioActivityListeners.add(listener);
+        return () => void audioActivityListeners.delete(listener);
+    },
+    getVersion: () => audioActivityVersion
+};
+function onAudioActivityChange() {
+    audioActivityVersion++;
+    for (const listener of audioActivityListeners) listener();
+}
+
+function audioActiveNow(userId: string) {
+    const api = (globalThis as { __testcordAudio?: { isActive(userId: string): boolean } }).__testcordAudio;
+    return api ? api.isActive(userId) === true : false;
+}
 
 // The mask is a rounded rect in a 100x100 viewbox, so its rx scales the slider
 // value with the painted picture; SVG clamps 52 to 50, which is the circle max.
@@ -43,30 +72,80 @@ function glowFilter(color: string): string | undefined {
     return `drop-shadow(0 0 14px rgba(${r}, ${g}, ${b}, 0.4)) drop-shadow(0 0 3px rgba(${r}, ${g}, ${b}, 0.6))`;
 }
 
-const bannerFetches = new Set<string>();
+// Profile fetches run one at a time. A full channel used to fire every
+// participant's fetch at once; the rate-limited ones failed, nothing re-rendered
+// the tile, and those users never got their banner. A cached profile without a
+// banner may be a stub left by a failed fetch, so each user gets one uncached
+// fetch per session, retried on failure.
+const bannerFetchAttempts = new Map<string, number>();
+const bannerFetchQueue: string[] = [];
+let bannerFetchRunning = false;
+const bannerRetryTimers = new Set<ReturnType<typeof setTimeout>>();
+
+async function runBannerFetchQueue() {
+    if (bannerFetchRunning) return;
+    bannerFetchRunning = true;
+    while (bannerFetchQueue.length) {
+        const userId = bannerFetchQueue.shift()!;
+        try {
+            await fetchUserProfile(userId, undefined, false);
+        } catch {
+            const attempts = (bannerFetchAttempts.get(userId) ?? 0) + 1;
+            bannerFetchAttempts.set(userId, attempts);
+            if (attempts < 4) {
+                const retry = setTimeout(() => {
+                    bannerRetryTimers.delete(retry);
+                    bannerFetchQueue.push(userId);
+                    void runBannerFetchQueue();
+                }, 5000 * attempts);
+                bannerRetryTimers.add(retry);
+            }
+        }
+        await new Promise(resolve => setTimeout(resolve, 300));
+    }
+    bannerFetchRunning = false;
+}
 
 function getProfileBannerUrl(userId: string): string | undefined {
-    const banner = UserProfileStore.getUserProfile(userId)?.banner;
+    const banner = UserProfileStore.getUserProfile(userId)?.banner ?? UserStore.getUser(userId)?.banner;
     if (!banner) {
-        if (!bannerFetches.has(userId)) {
-            bannerFetches.add(userId);
-            fetchUserProfile(userId).catch(() => bannerFetches.delete(userId));
+        if (!bannerFetchAttempts.has(userId)) {
+            bannerFetchAttempts.set(userId, 0);
+            bannerFetchQueue.push(userId);
+            void runBannerFetchQueue();
         }
         return undefined;
     }
     return IconUtils.getUserBannerURL({ id: userId, banner, canAnimate: false, size: 1024 }) ?? undefined;
 }
 
-// The wrapper's children carry the participant: stream participants have a
-// streamId, so a stream tile is detectable without touching the DOM.
-function childrenHaveStreamId(children: unknown, depth = 0): boolean {
-    if (!children || typeof children !== "object" || depth > 6) return false;
-    if (Array.isArray(children)) return children.some(child => childrenHaveStreamId(child, depth + 1));
-    const { props } = children as { props?: { children?: unknown; streamId?: unknown; participant?: { streamId?: unknown; }; }; };
-    if (!props) return false;
-    if (props.streamId != null) return true;
-    if (props.participant?.streamId != null) return true;
-    return childrenHaveStreamId(props.children, depth + 1);
+// Participant types: STREAM 0, HIDDEN_STREAM 1, USER 2, ACTIVITY 3. Camera tiles
+// are USER participants with a streamId, so streamId alone doesn't mean a stream.
+const STREAM_PARTICIPANT_TYPES = new Set([0, 1]);
+
+interface TileParticipant {
+    type?: number;
+    streamId?: unknown;
+}
+
+// The wrapper's children carry the participant somewhere below the tile root.
+function findParticipant(children: unknown, depth = 0): TileParticipant | undefined {
+    if (!children || typeof children !== "object" || depth > 6) return undefined;
+    if (Array.isArray(children)) {
+        for (const child of children) {
+            const found = findParticipant(child, depth + 1);
+            if (found) return found;
+        }
+        return undefined;
+    }
+    const { props } = children as { props?: { children?: unknown; participant?: TileParticipant; }; };
+    if (!props) return undefined;
+    return props.participant ?? findParticipant(props.children, depth + 1);
+}
+
+// A participant's own voice state can lag a join, so fall back to the call we are in
+function getTileChannelId(userId: string): string | undefined {
+    return VoiceStateStore.getVoiceStateForUser(userId)?.channelId ?? SelectedChannelStore.getVoiceChannelId() ?? undefined;
 }
 
 const settings = definePluginSettings({
@@ -113,7 +192,7 @@ const settings = definePluginSettings({
     },
     speakingIndicator: {
         type: OptionType.SELECT,
-        description: "Where the green speaking glow shows on call tiles. Profile picture moves it from the tile border onto the picture edge.",
+        description: "Where the green speaking glow shows on call tiles. Profile picture moves it from the tile border onto the picture edge; camera tiles keep the tile border.",
         options: [
             {
                 label: "Box border",
@@ -149,6 +228,19 @@ export default definePlugin({
     authors: [EquicordDevs.mochienya, TestcordDevs.DavidHiFi],
     settings,
     managedStyle: style,
+
+    start() {
+        window.addEventListener("testcord-vu-audio-change", onAudioActivityChange);
+    },
+
+    stop() {
+        window.removeEventListener("testcord-vu-audio-change", onAudioActivityChange);
+        for (const timer of bannerRetryTimers) clearTimeout(timer);
+        bannerRetryTimers.clear();
+        bannerFetchQueue.length = 0;
+        bannerFetchAttempts.clear();
+    },
+
     patches: [
         {
             find: "\"data-selenium-video-tile\":",
@@ -156,18 +248,31 @@ export default definePlugin({
                 // USRBG patches this component from the function head and wins the
                 // patch-order race, so a head-anchored lookahead stops matching after
                 // its Object.assign lands (notes/2026-10-08-voice-tile-avatars.md).
-                // Anchor after the destructuring like the local userplugin copy;
-                // Object.assign merges the style keys in any apply order. The hook
-                // call before the assign re-renders the tile when the participant's
+                // Anchor after the destructuring like the local userplugin copy.
+                // The styles go into a fresh object each render: the parent hands
+                // down the same style object, and mutating it in place left React
+                // comparing the object with itself, so cleared keys such as the
+                // picture-mode ring stayed in the DOM after switching to box mode.
+                // The hook call before it re-renders the tile when the participant's
                 // profile banner arrives, and stays unconditional so hook order holds.
-                match: /(?<=let\{children:(\i),className:(\i),style:(\i),noBorder:(\i)=!1,participantUserId:(\i),ref:(\i)\}=(\i);)/,
-                replace: "$self.useTileBanner($7);Object.assign($3=$3||{},$self.getVoiceBackgroundStyles($7));",
+                match: /(?<=let\{children:\i,className:\i,style:(\i),noBorder:\i=!1,participantUserId:\i,ref:\i\}=(\i);)/,
+                replace: "$self.useTileBanner($2);$1={...$1,...$self.getVoiceBackgroundStyles($2)};",
             }
         },
     ],
 
     useTileBanner({ participantUserId }: { participantUserId?: string; }) {
         useStateFromStores([UserProfileStore], () => UserProfileStore.getUserProfile(participantUserId ?? "")?.banner, [participantUserId]);
+        // getVoiceBackgroundStyles reads the speaking flag imperatively, so subscribe to re-render on changes
+        useStateFromStores([ChannelRTCStore, VoiceStateStore, SelectedChannelStore], () => {
+            const channelId = getTileChannelId(participantUserId ?? "");
+            const speaking = channelId
+                ? ChannelRTCStore.getSpeakingParticipants(channelId).some(p => p.user.id === participantUserId && p.speaking)
+                : false;
+            return speaking;
+        }, [participantUserId]);
+        // soundshare never sets Discord's speaking flag
+        useStateFromStores([audioActivityStore], audioActivityStore.getVersion, []);
     },
 
     getVoiceBackgroundStyles({ className, participantUserId, children }: { className?: string; participantUserId?: string; children?: unknown; }) {
@@ -177,12 +282,21 @@ export default definePlugin({
         if (!user) return;
         const legacyUser: typeof user & { getDefaultAvatarURL?: () => string; } = user;
 
-        const channelId = VoiceStateStore.getVoiceStateForUser(participantUserId)?.channelId;
+        const channelId = getTileChannelId(participantUserId);
         const guildId = channelId ? ChannelStore.getChannel(channelId)?.guild_id : undefined;
-        const isStream = childrenHaveStreamId(children);
-        const isSpeaking = channelId && !isStream
+        const participant = findParticipant(children);
+        const participantType = participant?.type;
+        const isStream = participantType !== undefined && STREAM_PARTICIPANT_TYPES.has(participantType);
+        // Camera tiles keep Discord's own ring, there is no picture to glow
+        const isCamera = !isStream && participant?.streamId != null;
+        // Discord's flag is mic-only, soundshare comes from the VoiceVUMeters levels
+        const isSpeaking = (channelId
             ? ChannelRTCStore.getSpeakingParticipants(channelId).some(p => p.user.id === participantUserId && p.speaking)
-            : false;
+            : false) || audioActiveNow(participantUserId);
+        // Only voice tiles showing the participant's picture glow. Like Discord's
+        // own border, the speaking glow belongs to the person, not their screen
+        // share or activity, so stream and activity tiles never light up.
+        const speakingGlow = isSpeaking && (participantType === undefined || participantType === 2);
 
         // Fallback chain from the local FullVCPFP fix: getUserAvatarUrl's guild
         // branch can return undefined, which used to render blank tiles.
@@ -205,11 +319,10 @@ export default definePlugin({
         // whether the tile box is visible or not.
         const glow = settings.store.enableGlow ? glowFilter(settings.store.glowColor ?? "") : undefined;
         const ringPic = settings.store.speakingIndicator === "picture";
-        // The speaking glow merges into the same filter string: the backdrop
-        // wrapper is unmasked, so its drop-shadow trails the picture outline.
+        // Picture mode adds the green glow to the filter, other tiles get a box from the stylesheet
         const filterParts: string[] = [];
         if (glow) filterParts.push(glow);
-        if (ringPic && isSpeaking) filterParts.push("drop-shadow(0 0 2px var(--green-360, #23a55a)) drop-shadow(0 0 8px var(--green-360, #23a55a))");
+        if (ringPic && speakingGlow) filterParts.push("drop-shadow(0 0 2px var(--green-360, #23a55a)) drop-shadow(0 0 8px var(--green-360, #23a55a))");
         return {
             "--full-res-avatar": `url("${avatarUrl}")`,
             "--vc-pfp-radius": `${Math.round(settings.store.cornerRadius)}px`,
@@ -231,11 +344,13 @@ export default definePlugin({
                 backgroundRepeat: "no-repeat"
             } : {}),
             "--vc-pfp-hide-bg": hideBg ? "1" : "",
-            "--vc-pfp-speaking": isSpeaking ? "1" : "",
+            "--vc-pfp-speaking": speakingGlow ? "1" : "",
             "--vc-pfp-ring-pic": ringPic ? "1" : "",
             // Stream tiles are not voice: their video never carries the
             // speaking ring, the stylesheet keys on this marker.
             "--vc-pfp-stream": isStream ? "1" : "",
+            // camera tiles keep the native tile border in picture mode
+            "--vc-pfp-camera": isCamera ? "1" : "",
             // Marks this plugin version for theme handoff: themes drop their own
             // fallback glow when the slot is present. The filter string carries the
             // configured color; themes and any other stylesheet consume it.
