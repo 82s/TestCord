@@ -1204,7 +1204,7 @@ export default definePlugin({
                     replace: "vcFupAvatarDecoration=$self.useUserAvatarDecoration($1),"
                 },
                 {
-                    match: /(?<={avatarDecoration:).{1,20}?(?=,)(?<=avatarDecorationOverride:(\i).+?)/,
+                    match: /(?<={avatarDecoration:).{1,100}?(?=,)(?<=avatarDecorationOverride:(\i).+?)/,
                     replace: "$1??vcFupAvatarDecoration??($&)"
                 },
                 {
