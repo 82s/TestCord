@@ -2229,18 +2229,9 @@ const plugin = definePlugin({
         },
         {
             find: ":\"SHOULD_LOAD\");",
-            noWarn: true,
             replacement: {
                 match: /\i(?:\?)?\.getPreviewBanner\(\i,\i,\i\)(?=.{0,100}"COMPLETE")/,
                 replace: "($self.bannerHook(arguments[0])??($&))"
-            }
-        },
-        {
-            find: "\"ProfileEffectStore\"",
-            noWarn: true,
-            replacement: {
-                match: /getProfileEffectById\((\i)\){return null!=\i\?(\i)\[\i\]:void 0/,
-                replace: "getProfileEffectById($1){return $self.getProfileEffectById($1,$2)??(null!=$2?$2[$1]:void 0)}"
             }
         },
         {
@@ -2251,59 +2242,14 @@ const plugin = definePlugin({
             }
         },
         {
-            find: "getGuildTagBadgeURL",
-            noWarn: true,
+            find: "DISCORD_EPOCH:",
             replacement: {
-                match: /(getGuildTagBadgeURL:)(\i),/,
-                replace: "$1$self.wrapBadge($2),"
+                match: /(extractTimestamp\s*:\s*function\s*\(\s*([A-Za-z_$][\w$]*)\s*\)\s*\{)/,
+                replace: "$1const __vcFupSpoof=$self.spoofMemberSinceTimestamp($2);if(__vcFupSpoof!=null)return __vcFupSpoof;"
             }
         },
         {
-            find: "memberSinceWrapper",
-            replacement: [
-                {
-                    match: /([A-Za-z_$][\w$]*(?:\.default)?)\.extractTimestamp\(([A-Za-z_$][\w$]*)\)/g,
-                    replace: "($self.spoofMemberSinceTimestamp($2)??$1.extractTimestamp($2))",
-                    noWarn: true
-                },
-                {
-                    match: /\(0,([A-Za-z_$][\w$]*(?:\.default)?)\.extractTimestamp\)\(([A-Za-z_$][\w$]*)\)/g,
-                    replace: "($self.spoofMemberSinceTimestamp($2)??(0,$1.extractTimestamp)($2))",
-                    noWarn: true
-                }
-            ]
-        },
-        {
-            find: "DISCORD_EPOCH:",
-            replacement: [
-                // `extractTimestamp: function(x){...}`
-                {
-                    match: /(extractTimestamp\s*:\s*function\s*\(\s*([A-Za-z_$][\w$]*)\s*\)\s*\{)/,
-                    replace: "$1const __vcFupSpoof=$self.spoofMemberSinceTimestamp($2);if(__vcFupSpoof!=null)return __vcFupSpoof;"
-                },
-                // `extractTimestamp: (x) => expr` (arrow, expression body)
-                {
-                    match: /extractTimestamp\s*:\s*\(\s*([A-Za-z_$][\w$]*)\s*\)\s*=>\s*([^,}]+)/,
-                    replace: "extractTimestamp:($1)=>{const __s=$self.spoofMemberSinceTimestamp($1);return __s!=null?__s:($2);}",
-                    noWarn: true
-                },
-                // `extractTimestamp(x){...}` (shorthand method form, most common in modern minified bundles)
-                {
-                    match: /(extractTimestamp\s*\(\s*([A-Za-z_$][\w$]*)\s*\)\s*\{)/,
-                    replace: "$1const __vcFupSpoof=$self.spoofMemberSinceTimestamp($2);if(__vcFupSpoof!=null)return __vcFupSpoof;",
-                    noWarn: true
-                },
-                // `function extractTimestamp(x){...}` (top-level function declaration form)
-                {
-                    match: /(function\s+extractTimestamp\s*\(\s*([A-Za-z_$][\w$]*)\s*\)\s*\{)/,
-                    replace: "$1const __vcFupSpoof=$self.spoofMemberSinceTimestamp($2);if(__vcFupSpoof!=null)return __vcFupSpoof;",
-                    noWarn: true
-                }
-            ]
-        },
-        {
             find: "getIsValidatingUsers",
-            noWarn: true,
             replacement: {
                 match: /getUsers\(\)\{return (\i)\}/,
                 replace: "getUsers(){return $self.injectFakes($1)}"
@@ -2313,8 +2259,7 @@ const plugin = definePlugin({
             find: "multiAccountUsers",
             replacement: {
                 match: /(\w+)\.default\.track\((\w+)\.HAw\.MULTI_ACCOUNT_SWITCH_ATTEMPT[^)]+\),(\w+)\.Mx\((\w+)(?:,[^)]*)?\)/,
-                replace: "$1.default.track($2.HAw.MULTI_ACCOUNT_SWITCH_ATTEMPT,{location:{section:$2.JJy.USER_PROFILE}}),$self.handleSwitch((...a)=>$3.Mx(...a),$4)",
-                noWarn: true
+                replace: "$1.default.track($2.HAw.MULTI_ACCOUNT_SWITCH_ATTEMPT,{location:{section:$2.JJy.USER_PROFILE}}),$self.handleSwitch((...a)=>$3.Mx(...a),$4)"
             }
         }
     ],
