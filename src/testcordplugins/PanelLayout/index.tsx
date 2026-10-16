@@ -3105,7 +3105,7 @@ function SettingModalItem({
                             <Flex flexDirection="column" alignItems="center" gap={8}>
                                 <BaseText size="xs" color="text-muted">OFF State</BaseText>
                                 <button
-                                    className={!isMute && !isDeafen && !isCamera && !isScreenShare ? `${defaultPreviewOffClasses} plateMuted__67645` : ((isCamera && !callButtonStylingCamera) || (isScreenShare && !callButtonStylingScreenShare) || (isSoundboard && !callButtonStylingSoundboard) || (isActivity && !callButtonStylingActivity)) ? `${defaultPreviewOffClasses} call-button-style` : defaultPreviewOffClasses}
+                                    className={!isTogglePluginPanel && !isMute && !isDeafen && !isCamera && !isScreenShare ? `${defaultPreviewOffClasses} plateMuted__67645` : ((isCamera && !callButtonStylingCamera) || (isScreenShare && !callButtonStylingScreenShare) || (isSoundboard && !callButtonStylingSoundboard) || (isActivity && !callButtonStylingActivity)) ? `${defaultPreviewOffClasses} call-button-style` : defaultPreviewOffClasses}
                                     data-deracul-label={cfg.label}
                                     style={{
                                         "--custom-nameplate-neutral-hovered": customNameplateNeutralHovered,
