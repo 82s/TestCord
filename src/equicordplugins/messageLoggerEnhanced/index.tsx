@@ -8,6 +8,7 @@ export const Native = getNative();
 
 import "./styles.css";
 
+import { isPluginEnabled } from "@api/PluginManager";
 import { LogsIcon } from "@components/Icons";
 import { Devs, EquicordDevs, TestcordDevs } from "@utils/constants";
 import { classNameFactory } from "@utils/css";
@@ -285,9 +286,10 @@ export default definePlugin({
     patches: [
         {
             find: "_tryFetchMessagesCached",
+            predicate: () => !isPluginEnabled("MessageLoggerTestcord"),
             replacement: [
                 {
-                    match: /(?<=\.get\({url.+?then\()(\i)=>\(/,
+                    match: /(?<=\.get\({url.{0,250}?then\()(\i)=>\(/,
                     replace: "async $1=>(await $self.processMessageFetch($1),"
                 },
                 {
