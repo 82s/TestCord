@@ -93,7 +93,7 @@ export default definePlugin({
         {
             // Patch getStatus to return "online" for everyone when fakeAllOnline is on
             // This covers offline users not in the presence store
-            find: "BOT_HTTP_INTERACTIONS",
+            find: "clientStatuses:",
             replacement: [
                 {
                     match: /return (\i)\[(\i)\]\?\?(\i);/,
