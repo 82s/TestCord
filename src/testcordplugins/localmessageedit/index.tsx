@@ -166,10 +166,10 @@ export default definePlugin({
 
     patches: [
         {
-            find: ".Messages.MESSAGE_EDITED",
+            find: ".NITRO_NOTIFICATION,[",
             replacement: {
-                match: /(function \w+\(\w+\){let{message:(\w+))/,
-                replace: "$1;if($self.checkDeleted($2))return null;"
+                match: /hideActivityInvite:\i\}=\i;/,
+                replace: "$&if($self.checkDeleted(arguments[0]?.message))return null;"
             }
         },
         {
