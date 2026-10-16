@@ -2183,7 +2183,7 @@ const plugin = definePlugin({
                     replace: "vcFusAvatarDecoration=$self.useUserAvatarDecoration($1),"
                 },
                 {
-                    match: /(?<={avatarDecoration:).{1,20}?(?=,)(?<=avatarDecorationOverride:(\i).+?)/,
+                    match: /(?<={avatarDecoration:).{1,100}?(?=,)(?<=avatarDecorationOverride:(\i).+?)/,
                     replace: "$1??vcFusAvatarDecoration??($&)"
                 },
                 {
@@ -2254,7 +2254,7 @@ const plugin = definePlugin({
         {
             find: "multiAccountUsers",
             replacement: {
-                match: /(\w+)\.default\.track\((\w+)\.HAw\.MULTI_ACCOUNT_SWITCH_ATTEMPT[^)]+\),(\w+)\.Mx\((\w+)(?:,[^)]*)?\)/,
+                match: /(\i)\.default\.track\((\i)\.HAw\.MULTI_ACCOUNT_SWITCH_ATTEMPT[^)]+\),(\i)\.Mx\((\i)(?:,[^)]*)?\)/,
                 replace: "$1.default.track($2.HAw.MULTI_ACCOUNT_SWITCH_ATTEMPT,{location:{section:$2.JJy.USER_PROFILE}}),$self.handleSwitch((...a)=>$3.Mx(...a),$4)"
             }
         }
