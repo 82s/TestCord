@@ -124,8 +124,9 @@ function MonoToggleButton({ iconForeground, hideTooltips, nameplate }: UserAreaR
 export default definePlugin({
     name: "Force Mono",
     description: "forces mono audio on audio",
+    tags: ["Voice", "legacy"],
+    legacy: true,
     authors: [{ name: "deracul", id: 1454268753629024529n }],
-    tags: ["Voice"],
     settings,
 
     // Renders the button in the bottom left panel

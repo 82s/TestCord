@@ -57,7 +57,10 @@ export const LEGACY_PLUGINS: string[] = [
     "FakeProfile",
     "fakeProfile",
     "FakeUserProfile",
-    "fakeUserProfile"
+    "fakeUserProfile",
+    "Force Mono",
+    "forcemono",
+    "ForceMono"
 ];
 
 /**
@@ -94,7 +97,10 @@ export const LEGACY_REPLACEMENTS: Record<string, string> = {
     "activitybanner": "PanelLayout",
     "DiscordDevBanner": "PanelLayout",
     "discorddevbanner": "PanelLayout",
-    "deraculpanellayout": "PanelLayout"
+    "deraculpanellayout": "PanelLayout",
+    "Force Mono": "StereoGuard",
+    "forcemono": "StereoGuard",
+    "ForceMono": "StereoGuard"
 };
 
 /**
