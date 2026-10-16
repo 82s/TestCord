@@ -548,8 +548,8 @@ export default definePlugin({
         {
             find: "#{intl::ATTACHMENT_PROCESSING}",
             replacement: {
-                match: /(renderAdjacentContent[\s\S]{0,200}\}=(\i);[\s\S]{0,200})null!=\i&&\i\(\)/,
-                replace: "$1$self.ZipAttachmentPreview({ attachment: $2 })"
+                match: /(renderAdjacentContent.{0,80}?}=(\i);[\s\S]{0,600}?)(null!=\i&&\i\(\))/,
+                replace: "$1$3,$self.ZipAttachmentPreview({ attachment: $2 })"
             }
         }
     ],
