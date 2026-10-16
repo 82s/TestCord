@@ -45,10 +45,10 @@ patches: [{
         }]
     }, {
         // Remove canvas that renders stuff like confetti etc
-        find: "\"SpriteCanvas-module_spriteCanvasHidden",
+        find: "Math.max(o.length,1)",
         replacement: {
-            match: /,\w\.createElement\("canvas",{.+?\)}\)/,
-            replace: "",
+            match: /,\i\.createElement\("canvas",\{ref:\i,className:\i,style:[^}]+\}\)/,
+            replace: ",null",
         }
     }, {
         // Remove analytics from gateway, this cost me upwards of 100ms because they JSON.stringify the entire thing
