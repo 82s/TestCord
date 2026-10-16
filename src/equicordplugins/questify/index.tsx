@@ -197,8 +197,8 @@ export default definePlugin({
             predicate: () => getQuestifySettings().disableQuestsEverything || getQuestifySettings().disableRelocationNotices,
             replacement: [
                 {
-                    match: /(GLOBAL_DISCOVERY_TABS).map/,
-                    replace: '$1.filter(tab=>tab!=="quests").map'
+                    match: /(:?\i\.GLOBAL_DISCOVERY_TABS)(\.map|;)/,
+                    replace: '$1.filter(tab=>tab!=="quests")$2'
                 }
             ]
         },
