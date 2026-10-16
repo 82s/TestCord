@@ -37,19 +37,18 @@ export default definePlugin({
     patches: [
         {
             find: "Audio codecs",
-            replacement: {
-                match: /channels:\d+(?:\.\d+)?,/g,
-                replace: "channels:1,",
-                predicate: () => settings.store.forceMono,
-            },
-        },
-        {
-            find: "stereo",
-            replacement: {
-                match: /stereo:\s*["']?\d+(?:\.\d+)?["']?/g,
-                replace: "stereo:false",
-                predicate: () => settings.store.forceMono,
-            },
+            replacement: [
+                {
+                    match: /channels:\d+(?:\.\d+)?,/g,
+                    replace: "channels:1,",
+                    predicate: () => settings.store.forceMono,
+                },
+                {
+                    match: /stereo:\s*["']?\d+(?:\.\d+)?["']?/g,
+                    replace: "stereo:false",
+                    predicate: () => settings.store.forceMono,
+                },
+            ],
         },
         {
             find: "getAudioContext()",
