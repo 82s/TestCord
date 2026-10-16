@@ -60,7 +60,10 @@ export const LEGACY_PLUGINS: string[] = [
     "fakeUserProfile",
     "Force Mono",
     "forcemono",
-    "ForceMono"
+    "ForceMono",
+    "Fake Accounts",
+    "fakeAccounts",
+    "FakeAccounts"
 ];
 
 /**
@@ -100,7 +103,10 @@ export const LEGACY_REPLACEMENTS: Record<string, string> = {
     "deraculpanellayout": "PanelLayout",
     "Force Mono": "StereoGuard",
     "forcemono": "StereoGuard",
-    "ForceMono": "StereoGuard"
+    "ForceMono": "StereoGuard",
+    "Fake Accounts": "FakeUserSwitcher",
+    "fakeAccounts": "FakeUserSwitcher",
+    "FakeAccounts": "FakeUserSwitcher"
 };
 
 /**

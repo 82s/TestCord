@@ -460,7 +460,8 @@ export default definePlugin({
     name: "Fake Accounts",
     description: "Fake accounts to larp",
     authors: [{ name: "deracul", id: 1454853467783954444n }],
-    tags: ["Utility"],
+    tags: ["Utility", "legacy"],
+    legacy: true,
     settings,
 
     patches: [
