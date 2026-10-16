@@ -166,7 +166,7 @@ export const settings = definePluginSettings({
 // ─── Selectors & Constants ────────────────────────────────────────────────────
 
 const NATIVE_BUTTON_LABELS = new Set([
-    "Mute", "Deafen", "User Settings", "Input Options", "Output Options",
+    "Toggle Plugin Panel", "Mute", "Deafen", "User Settings", "Input Options", "Output Options",
 ]);
 
 const ScreenOffIcon = getDiscordIcon(["ScreenArrowIcon"], ScreenshareIcon);
@@ -179,6 +179,8 @@ const DeafenOffIcon = getDiscordIcon(["HeadphonesIcon"]);
 const DeafenIcon = getDiscordIcon(["HeadphonesSlashIcon"]);
 const MuteOffIcon = getDiscordIcon(["MicrophoneIcon"]);
 const MuteIcon = getDiscordIcon(["MicrophoneSlashIcon"]);
+const CollapseOffIcon = getDiscordIcon(["ChevronSmallUpIcon"]);
+const CollapseIcon = getDiscordIcon(["ChevronSmallDownIcon"]);
 const SettingsIcon = getDiscordIcon(["SettingsIcon"], SettingsGearIcon);
 
 interface ButtonConfig {
@@ -1573,11 +1575,12 @@ function getBtnItems(): BtnItem[] {
 function getDragGroup(item: BtnItem): "call" | "native" | "user" {
     const canonical = getCanonicalLabel(item.label);
     if (canonical === "Camera" || canonical === "Screen Share" || canonical === "Activity" || canonical === "Soundboard") return "call";
-    if (canonical === "Mute" || canonical === "Deafen" || canonical === "User Settings") return "native";
+    if (canonical === "Toggle Plugin Panel" || canonical === "Mute" || canonical === "Deafen" || canonical === "User Settings") return "native";
     return "user";
 }
 
 function ButtonsDragTab() {
+    const pluginsCollapsed = settings.use(["userPanelLayout", "pluginsCollapsed"]);
     const [, forceUpdate] = React.useReducer(x => x + 1, 0);
     const [items, setItems] = React.useState<BtnItem[]>(() => getBtnItems());
     const [listeningId, setListeningId] = React.useState<string | null>(null);
@@ -1712,6 +1715,7 @@ function ButtonsDragTab() {
                                     const isMute = canonical === "Mute";
                                     const isDeafen = canonical === "Deafen";
                                     const isUserSettings = canonical === "User Settings";
+                                    const isHidePluginPanel = canonical === "Toggle Plugin Panel";
                                     const isPanelLayout = canonical === "Panel Layout" || item.id === "Panel Layout" || item.label === "Panel Layout";
 
                                     if (isCamera || isScreenShare || isActivity || isSoundboard) {
@@ -1719,7 +1723,7 @@ function ButtonsDragTab() {
                                         return;
                                     }
 
-                                    if (isMute || isDeafen || isUserSettings) { return; }
+                                    if (isHidePluginPanel || isMute || isDeafen || isUserSettings) { return; }
 
                                     return (
                                         <div
@@ -1950,8 +1954,9 @@ function ButtonsDragTab() {
                                     const isMute = canonical === "Mute";
                                     const isDeafen = canonical === "Deafen";
                                     const isUserSettings = canonical === "User Settings";
+                                    const isHidePluginPanel = canonical === "Toggle Plugin Panel";
 
-                                    if (!isMute && !isDeafen && !isUserSettings) { return; }
+                                    if (!isMute && !isDeafen && !isUserSettings && !isHidePluginPanel) { return; }
 
                                     return (
                                         <div
@@ -1993,6 +1998,17 @@ function ButtonsDragTab() {
                                                         pointerEvents: "none",
                                                     }}
                                                 />
+                                            )}
+                                            {isHidePluginPanel && (
+                                                <div
+                                                    className="deracul-btn-preview"
+                                                    style={{
+                                                        width: "36px", height: "36px", borderRadius: "8px", backgroundColor: "var(--background-tertiary, var(--background-surface-highest))",
+                                                        display: "flex", alignItems: "center", justifyContent: "center", color: item.id === "Game Activity" ? "var(--status-danger)" : "var(--text-default)",
+                                                        boxShadow: "0 2px 4px rgba(0,0,0,0.15)", pointerEvents: "none"
+                                                }}>
+                                                    <CollapseOffIcon width={20} height={20} size="smmd" />
+                                                </div>
                                             )}
                                             {isMute && (
                                                 <div
@@ -3395,8 +3411,8 @@ function PanelLayoutModal({ modalProps }: { modalProps: RenderModalProps; }) {
                     {tab === "panel" && <>
                         <SectionHeading>Layout Structure</SectionHeading>
                         <Card variant="primary">
+                            <FormSwitch title="Plugins Collapsed" description="Collapse/hide the plugin buttons panel row." value={s.pluginsCollapsed} onChange={v => set("pluginsCollapsed", v)} disabled={!s.userPanelLayout.startsWith("split_")} />
                             <Dropdown label="User Panel Alignment" options={PANEL_LAYOUTS} value={s.userPanelLayout} onChange={v => set("userPanelLayout", v)} />
-                            <FormSwitch title="Plugins Collapsed" description="Collapse/hide the plugin buttons panel row." value={s.pluginsCollapsed} onChange={v => set("pluginsCollapsed", v)} disabled={!s.userPanelLayout.startsWith("split_")} hideBorder />
                         </Card>
 
                         <SectionHeading>Component Dimensions</SectionHeading>
@@ -3510,14 +3526,6 @@ function PanelLayoutButton({ iconForeground, hideTooltips, nameplate }: UserArea
     );
 }
 
-function CollapseIcon({ className, pluginsCollapsed }: { className?: string; pluginsCollapsed: boolean; }) {
-    return (
-        <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <polyline points={pluginsCollapsed ? "18 15 12 9 6 15" : "6 9 12 15 18 9"} />
-        </svg>
-    );
-}
-
 function CollapseToggleButton({ iconForeground, hideTooltips, nameplate }: UserAreaRenderProps) {
     const { userPanelLayout, pluginsCollapsed } = settings.use(["userPanelLayout", "pluginsCollapsed"]);
     if (!userPanelLayout.startsWith("split_")) return null;
@@ -3531,7 +3539,7 @@ function CollapseToggleButton({ iconForeground, hideTooltips, nameplate }: UserA
             aria-checked={pluginsCollapsed}
             role="switch"
             className="vc-panel-collapse-button icon-color-fix"
-            icon={<CollapseIcon className={iconForeground} pluginsCollapsed={pluginsCollapsed} />}
+            icon={pluginsCollapsed ? <CollapseIcon style={{ color: iconForeground }} /> : <CollapseOffIcon style={{ color: iconForeground }}/>}
             plated={nameplate != null}
             onClick={() => {
                 settings.store.pluginsCollapsed = !pluginsCollapsed;

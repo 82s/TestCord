@@ -40,6 +40,7 @@ export const TOGGLE_LABELS: Record<string, string[]> = {
     "Game Activity": ["Enable Game Activity", "Disable Game Activity", "Game Activity"],
     "Spotify Activity": ["Turn on Spotify activity", "Turn off Spotify activity"],
     "Soundboard": ["Soundboard disabled when deafened", "Open Soundboard"],
+    "Toggle Plugin Panel": ["Show Plugin Panel", "Hide Plugin Panel"],
 };
 
 // Both of these used to be rebuilt inside `getCanonicalLabel`, which the 1Hz panel poll
