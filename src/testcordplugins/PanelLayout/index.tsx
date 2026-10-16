@@ -1715,7 +1715,7 @@ function ButtonsDragTab() {
                                     const isMute = canonical === "Mute";
                                     const isDeafen = canonical === "Deafen";
                                     const isUserSettings = canonical === "User Settings";
-                                    const isHidePluginPanel = canonical === "Toggle Plugin Panel";
+                                    const isTogglePluginPanel = canonical === "Toggle Plugin Panel";
                                     const isPanelLayout = canonical === "Panel Layout" || item.id === "Panel Layout" || item.label === "Panel Layout";
 
                                     if (isCamera || isScreenShare || isActivity || isSoundboard) {
@@ -1723,7 +1723,7 @@ function ButtonsDragTab() {
                                         return;
                                     }
 
-                                    if (isHidePluginPanel || isMute || isDeafen || isUserSettings) { return; }
+                                    if (isTogglePluginPanel || isMute || isDeafen || isUserSettings) { return; }
 
                                     return (
                                         <div
@@ -1954,9 +1954,9 @@ function ButtonsDragTab() {
                                     const isMute = canonical === "Mute";
                                     const isDeafen = canonical === "Deafen";
                                     const isUserSettings = canonical === "User Settings";
-                                    const isHidePluginPanel = canonical === "Toggle Plugin Panel";
+                                    const isTogglePluginPanel = canonical === "Toggle Plugin Panel";
 
-                                    if (!isMute && !isDeafen && !isUserSettings && !isHidePluginPanel) { return; }
+                                    if (!isMute && !isDeafen && !isUserSettings && !isTogglePluginPanel) { return; }
 
                                     return (
                                         <div
@@ -1999,7 +1999,7 @@ function ButtonsDragTab() {
                                                     }}
                                                 />
                                             )}
-                                            {isHidePluginPanel && (
+                                            {isTogglePluginPanel && (
                                                 <div
                                                     className="deracul-btn-preview"
                                                     style={{
@@ -2538,6 +2538,7 @@ function CustomizationRowButton({
 }) {
     const cfg = getBtnCfg(item.id);
     const canonical = getCanonicalLabel(item.label);
+    const isTogglePluginPanel = canonical === "Toggle Plugin Panel";
     const isMute = canonical === "Mute";
     const isDeafen = canonical === "Deafen";
     const isUserSettings = canonical === "User Settings";
@@ -2586,6 +2587,9 @@ function CustomizationRowButton({
                 {isCamera && (
                     <CameraIcon width={20} height={20} size="smmd" />
                 )}
+                {isTogglePluginPanel && (
+                    <CollapseOffIcon width={20} height={20} size="smmd" />
+                )}
                 {isMute && (
                     <MuteOffIcon width={20} height={20} size="smmd" />
                 )}
@@ -2595,7 +2599,7 @@ function CustomizationRowButton({
                 {isUserSettings && (
                     <SettingsIcon width={20} height={20} size="smmd" />
                 )}
-                {!isMute && !isDeafen && !isCamera && !isScreenShare && !isSoundboard && !isActivity && !isUserSettings && (
+                {!isTogglePluginPanel && !isMute && !isDeafen && !isCamera && !isScreenShare && !isSoundboard && !isActivity && !isUserSettings && (
                     <SvgPreview icon={item.iconHTML} enabled={true} />
                 )}
             </div>
@@ -2722,13 +2726,14 @@ function SettingsModal({ modalProps }: { modalProps: RenderModalProps; }) {
                                         const isSoundboard = canonical === "Soundboard";
                                         const isCamera = canonical === "Camera";
                                         const isScreenShare = canonical === "Screen Share";
+                                        const isTogglePluginPanel = canonical === "Toggle Plugin Panel";
 
                                         if (isCamera || isScreenShare || isActivity || isSoundboard) {
                                             hasCallButtons = true;
                                             return;
                                         }
 
-                                        if (isMute || isDeafen || isUserSettings || cfg.hidden) { return; }
+                                        if (isTogglePluginPanel || isMute || isDeafen || isUserSettings || cfg.hidden) { return; }
 
                                         return (
                                             <CustomizationRowButton
@@ -2812,8 +2817,9 @@ function SettingsModal({ modalProps }: { modalProps: RenderModalProps; }) {
                                         const isMute = canonical === "Mute";
                                         const isDeafen = canonical === "Deafen";
                                         const isUserSettings = canonical === "User Settings";
+                                        const isTogglePluginPanel = canonical === "Toggle Plugin Panel";
 
-                                        if (!isMute && !isDeafen && !isUserSettings) { return; }
+                                        if (!isMute && !isDeafen && !isUserSettings && !isTogglePluginPanel) { return; }
 
                                         return (
                                             <CustomizationRowButton
@@ -2881,6 +2887,7 @@ function SettingModalItem({
     const isSoundboard = canonical === "Soundboard";
     const isCamera = canonical === "Camera";
     const isScreenShare = canonical === "Screen Share";
+    const isTogglePluginPanel = canonical === "Toggle Plugin Panel";
     const isMute = canonical === "Mute";
     const isDeafen = canonical === "Deafen";
     const defaultPreviewOnClasses = "buttonPreview previewButtonOn icon-color-fix button__201d5 lookBlank__201d5";
@@ -3127,6 +3134,9 @@ function SettingModalItem({
                                     {isCamera && (
                                         <CameraOffIcon width={20} height={20} size="smmd" />
                                     )}
+                                    {isTogglePluginPanel && (
+                                        <CollapseOffIcon width={20} height={20} size="smmd" />
+                                    )}
                                     {isMute && (
                                         <MuteOffIcon width={20} height={20} size="smmd" />
                                     )}
@@ -3136,7 +3146,7 @@ function SettingModalItem({
                                     {isUserSettings && (
                                         <SettingsIcon width={20} height={20} size="smmd" />
                                     )}
-                                    {!isMute && !isDeafen && !isCamera && !isScreenShare && !isSoundboard && !isActivity && !isUserSettings && (
+                                    {!isTogglePluginPanel && !isMute && !isDeafen && !isCamera && !isScreenShare && !isSoundboard && !isActivity && !isUserSettings && (
                                         <SvgPreview icon={icon} enabled={false} />
                                     )}
                                 </button>
@@ -3180,13 +3190,16 @@ function SettingModalItem({
                                 {isUserSettings && (
                                     <SettingsIcon width={20} height={20} size="smmd" />
                                 )}
+                                {isTogglePluginPanel && (
+                                    <CollapseIcon width={20} height={20} size="smmd" />
+                                )}
                                 {isMute && (
                                     <MuteIcon width={20} height={20} size="smmd" />
                                 )}
                                 {isDeafen && (
                                     <DeafenIcon width={20} height={20} size="smmd" />
                                 )}
-                                {!isMute && !isDeafen && !isCamera && !isScreenShare && !isSoundboard && !isActivity && !isUserSettings && (
+                                {!isTogglePluginPanel && !isMute && !isDeafen && !isCamera && !isScreenShare && !isSoundboard && !isActivity && !isUserSettings && (
                                     <SvgPreview icon={icon} enabled={true} />
                                 )}
                             </button>
