@@ -1049,6 +1049,7 @@ export default definePlugin({
         // fix saved videos failing to play back from blob: urls (readyState stuck LOADING)
         {
             find: ".handleImageLoad)",
+            predicate: () => !isPluginEnabled("MessageLogger"),
             replacement: {
                 match: /(componentDidMount\(\)\{)(let\{readyState:\i\}=this\.state;if\(\i===)([\w.$]+)\.LOADING/,
                 replace: "$1if(this.props?.src?.startsWith('blob:') && this.props?.item?.type === 'VIDEO')return this.setState({readyState: $3.READY});$2$3.LOADING"
