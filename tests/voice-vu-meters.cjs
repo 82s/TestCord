@@ -9,12 +9,17 @@ function load(name, exports) {
     const writes = [];
     const React = {
         createElement: (type, props, ...children) => ({ type, props: { ...props, children } }),
-        useReducer: () => [0, () => {}], useRef: value => ({ current: value }), useEffect: () => {}
+        useReducer: () => [0, () => {}], useRef: value => ({ current: value }), useEffect: () => {},
+        useLayoutEffect: () => {}, useCallback: fn => fn, useState: value => [value, () => {}]
     };
     const settings = [];
     const sandbox = {
         console, Date, Float32Array, Map, Set, Math, Number, Object, Array,
         setInterval, clearInterval, React, VencordCreateElement: React.createElement,
+        document: { hidden: false, addEventListener: () => {}, removeEventListener: () => {} },
+        requestAnimationFrame: () => 0, cancelAnimationFrame: () => {},
+        performance: { now: () => Date.now() },
+        ResizeObserver: class { observe() {} unobserve() {} disconnect() {} },
         ErrorBoundary: { wrap: fn => fn },
         Logger: class { error() {} debug() {} warn() {} info() {} },
         definePlugin: p => p,
@@ -54,7 +59,7 @@ function load(name, exports) {
     vm.runInContext(code, sandbox);
     return { api: sandbox.test, sandbox, writes };
 }
-const vu = load('VoiceVUMeters', 'readChannel, readLevels, newMeter, meters, VoiceMeter, createWebMeter, syncSelfInput, dropAll, getPan, smooth, MeterBar, tick, readNativeLevels, readStreamLevels, setStreamAmplitude, syncDesktopMeters, setLastScan: value => { lastScanAt = value; }');
+const vu = load('VoiceVUMeters', 'readChannel, readLevels, newMeter, meters, VoiceMeter, createWebMeter, syncSelfInput, dropAll, getPan, smooth, MeterBar, tick, readNativeLevels, readStreamLevels, setStreamAmplitude, syncDesktopMeters, isAudioActive, audioActiveUsers, setLastScan: value => { lastScanAt = value; }');
 function tone(amp = .3) { return Float32Array.from({ length: 2048 }, (_, i) => amp * Math.sin(i * .1)); }
 const sound = tone();
 const silence = new Float32Array(2048);
@@ -92,28 +97,28 @@ check('Real stereo streams render separate bars and divider', () => {
 });
 check('Peak marker holds for 1500 ms', () => {
     const m = vu.api.newMeter(false);
-    vu.api.smooth(m, 0, { rms: .6, peak: .9 }, 1000);
-    vu.api.smooth(m, 0, { rms: 0, peak: 0 }, 2400);
+    vu.api.smooth(m, 0, .6, .9, 1000);
+    vu.api.smooth(m, 0, 0, 0, 2400);
     assert.equal(m.peak[0], .9);
 });
 check('Peak marker falls at 12 dB per second after hold', () => {
     const m = vu.api.newMeter(false);
-    vu.api.smooth(m, 0, { rms: .6, peak: .9 }, 1000);
-    vu.api.smooth(m, 0, { rms: 0, peak: 0 }, 3500);
+    vu.api.smooth(m, 0, .6, .9, 1000);
+    vu.api.smooth(m, 0, 0, 0, 3500);
     assert(Math.abs(m.peak[0] - .7) < 1e-9);
 });
 check('Peak fall is independent of callback cadence', () => {
     const a = vu.api.newMeter(false), b = vu.api.newMeter(false);
-    vu.api.smooth(a, 0, { rms: .6, peak: .9 }, 1000);
-    vu.api.smooth(b, 0, { rms: .6, peak: .9 }, 1000);
-    for (let t = 1050; t <= 3500; t += 50) vu.api.smooth(a, 0, { rms: 0, peak: 0 }, t);
-    vu.api.smooth(b, 0, { rms: 0, peak: 0 }, 3500);
+    vu.api.smooth(a, 0, .6, .9, 1000);
+    vu.api.smooth(b, 0, .6, .9, 1000);
+    for (let t = 1050; t <= 3500; t += 50) vu.api.smooth(a, 0, 0, 0, t);
+    vu.api.smooth(b, 0, 0, 0, 3500);
     assert(Math.abs(a.peak[0] - b.peak[0]) < 1e-9);
 });
 check('Each channel holds its own peak', () => {
     const m = vu.api.newMeter(false);
-    vu.api.smooth(m, 0, { rms: .6, peak: .9 }, 1000);
-    vu.api.smooth(m, 1, { rms: 0, peak: 0 }, 1000);
+    vu.api.smooth(m, 0, .6, .9, 1000);
+    vu.api.smooth(m, 1, 0, 0, 1000);
     assert.equal(m.peak[0], .9); assert.equal(m.peak[1], 0);
 });
 check('Full-scale peak marker remains inside the bar', () => {
@@ -193,8 +198,9 @@ const nativeConnection = { context: 'default' };
 vu.sandbox.MediaEngineStore.getMediaEngine = () => ({ connections: [nativeConnection] });
 vu.api.setConnection(nativeConnection);
 let nativeLevels = [];
+let nativeBridgeInstalled = true;
 vu.sandbox.DiscordNative = { nativeModules: { requireModule: () => ({
-    getParticipantStereoLevels: () => ({ installed: true, connection: 1, levels: nativeLevels })
+    getParticipantStereoLevels: () => ({ installed: nativeBridgeInstalled, connection: 1, levels: nativeLevels })
 }) } };
 function nativeTick() { vu.api.setLastScan(Date.now()); vu.api.tick(); }
 function nativeLevel(userId, left, right, ageMs = 0) {
@@ -222,6 +228,94 @@ check('Native simultaneous channels swap without participant identity swapping',
     nativeLevels = [nativeLevel('alice',0,.5),nativeLevel('bob',.4,0)];nativeTick();
     assert.equal(vu.api.meters.get('alice').display[0],0);assert(vu.api.meters.get('alice').display[1]>.8);
     assert(vu.api.meters.get('bob').display[0]>.8);assert.equal(vu.api.meters.get('bob').display[1],0);
+});
+check('Audio activity tracks native levels and clears when they stop', () => {
+    vu.api.meters.clear();
+    vu.api.meters.set('alice', vu.api.newMeter(true)); vu.api.meters.set('bob', vu.api.newMeter(true));
+    nativeLevels = [nativeLevel('alice', .5, 0), nativeLevel('bob', 0, .4)]; nativeTick();
+    assert.equal(vu.api.isAudioActive('alice'), true);
+    assert.equal(vu.api.isAudioActive('bob'), true);
+    assert.equal(vu.api.isAudioActive('nobody'), false);
+    vu.api.meters.get('alice').display[0] = 0; vu.api.meters.get('alice').display[1] = 0; vu.api.meters.get('alice').activeUntil = 0;
+    nativeLevels = [nativeLevel('bob', 0, .4)]; nativeTick();
+    assert.equal(vu.api.isAudioActive('alice'), false);
+    assert.equal(vu.api.isAudioActive('bob'), true);
+});
+check('Flagged speaker the bridge misses falls back to stats after the gap, covered speakers stay native', () => {
+    vu.api.meters.clear();
+    vu.api.setConnection(nativeConnection);
+    nativeConnection.localSpeakingFlags = { alice: 1, bob: 1, carl: 0 };
+    const [a, b, c] = ['alice', 'bob', 'carl'].map(id => { const m = vu.api.newMeter(true); vu.api.meters.set(id, m); return m; });
+    b.amplitude = .4; c.amplitude = .4;
+    nativeLevels = [nativeLevel('alice', .5, 0)]; nativeTick();
+    assert.equal(b.nativeGap, false); assert.equal(b.display[0], 0); // grace: hangover or first frames
+    b.nativeMissAt = Date.now() - 600; nativeTick();
+    assert.equal(b.nativeGap, true); assert(b.display[0] > 0);
+    assert.equal(a.nativeGap, false); assert(a.display[0] > .8); assert.equal(a.display[1], 0);
+    assert.equal(c.nativeGap, false); assert.equal(c.display[0], 0); // unflagged silence stays flat
+    nativeLevels = [nativeLevel('alice', .5, 0), nativeLevel('bob', 0, .4)]; nativeTick();
+    assert.equal(b.nativeGap, false); assert.equal(b.nativeMissAt, undefined); // bridge recovers, native wins again
+    delete nativeConnection.localSpeakingFlags;
+});
+check('Stream meters ignore the native bridge so soundshare moves while it is installed', () => {
+    vu.api.meters.clear();
+    nativeLevels = [];
+    vu.api.setStreamAmplitude('alice', .5); nativeTick();
+    const s = vu.api.meters.get('stream:alice');
+    assert.notEqual(s.nativeAvailable, true); assert(s.display[0] > .5);
+    assert.equal(vu.api.isAudioActive('alice'), true);
+});
+check('Received audio lights the glow before the speaking flag arrives or while a stale zero flag lingers', () => {
+    vu.api.meters.clear();
+    nativeBridgeInstalled = false; // bridge not connected yet: stats are the only level source
+    nativeConnection.localSpeakingFlags = { alice: 0 };
+    const [a, b] = ['alice', 'bob'].map(id => { const m = vu.api.newMeter(true); m.amplitude = .3; vu.api.meters.set(id, m); return m; });
+    nativeTick();
+    assert.equal(vu.api.isAudioActive('alice'), true); // flag says silent, audio says otherwise
+    assert.equal(vu.api.isAudioActive('bob'), true);   // no flag entry at all
+    assert(a.display[0] === 0); // the bar keeps following the flag, only the glow reads the raw level
+    delete nativeConnection.localSpeakingFlags;
+    nativeBridgeInstalled = true;
+});
+check('The glow follows the first audio from the bridge without waiting for smoothing', () => {
+    vu.api.meters.clear();
+    const m = vu.api.newMeter(true); vu.api.meters.set('alice', m);
+    nativeLevels = [nativeLevel('alice', .5, .5)]; nativeTick();
+    assert.equal(vu.api.isAudioActive('alice'), true);
+    assert((m.activeUntil ?? 0) > Date.now());
+});
+check('The glow ends once the audio stops, within the hold', () => {
+    vu.api.meters.clear();
+    nativeBridgeInstalled = false;
+    const m = vu.api.newMeter(true); m.amplitude = .3; vu.api.meters.set('alice', m);
+    nativeTick(); assert.equal(vu.api.isAudioActive('alice'), true);
+    m.amplitude = 0;
+    const armedUntil = m.activeUntil;
+    nativeTick();
+    assert.equal(m.activeUntil, armedUntil); // silence never extends the hold
+    assert(armedUntil - Date.now() <= 200);
+    m.activeUntil = Date.now() - 1; nativeTick();
+    assert.equal(vu.api.isAudioActive('alice'), false);
+    nativeBridgeInstalled = true;
+});
+check('Room noise below the active level does not light the glow', () => {
+    vu.api.meters.clear();
+    nativeBridgeInstalled = false;
+    const m = vu.api.newMeter(true); m.amplitude = .0005; vu.api.meters.set('alice', m);
+    nativeTick();
+    assert.equal(vu.api.isAudioActive('alice'), false);
+    nativeBridgeInstalled = true;
+});
+check('Stream meter audio activity keys on the owner id', () => {
+    vu.api.meters.clear();
+    nativeBridgeInstalled = false; // exercise the stats path, not the fake bridge
+    const voiceConn = { context: 'default' };
+    vu.api.setConnection(voiceConn);
+    vu.sandbox.MediaEngineStore.getMediaEngine = () => ({ connections: [voiceConn, { context: 'stream', streamUserId: 'self', soundshareActive: true }] });
+    vu.api.readStreamLevels({ context: 'stream', streamUserId: 'self', soundshareActive: true }, { rtp: { outbound: [{ type: 'audio', ssrc: 199, audioLevel: .5 }] } });
+    vu.api.tick();
+    nativeBridgeInstalled = true;
+    assert.equal(vu.api.isAudioActive('self'), true);
 });
 check('Stream soundshare outbound feeds the streamer stream meter, not the voice meter', () => {
     vu.api.meters.clear();
