@@ -98,17 +98,12 @@ export default definePlugin({
     settings,
     patches: [
         {
-            find: "canAnimate:",
+            find: /canAnimate:(?!\s*(?:!0|true|["']))[^,{}]+?(?=[,}](?!\s*=)(?![^;{}]*\}\s*=))/,
             predicate: () => settings.store.icons,
             all: true,
-            // Some modules match the find but the replacement is returned untouched
             replacement: {
-                match: /canAnimate:.+?([,}].*?\))/g,
-                replace: (m, rest) => {
-                    const destructuringMatch = rest.match(/}=.+/);
-                    if (destructuringMatch == null) return `canAnimate:!0${rest}`;
-                    return m;
-                }
+                match: /canAnimate:(?!\s*(?:!0|true|["']))[^,{}]+?(?=[,}](?!\s*=)(?![^;{}]*\}\s*=))/g,
+                replace: "canAnimate:!0"
             }
         },
         {
@@ -157,16 +152,11 @@ export default definePlugin({
         },
         {
             // Role Gradients
-            find: "animateGradient:",
+            find: "includeConvenienceGlow:r,animateGradient:",
             predicate: () => settings.store.roleGradients,
-            all: true,
             replacement: {
-                match: /animateGradient:.+?([,}].*?\))/g,
-                replace: (m, rest) => {
-                    const destructuringMatch = rest.match(/}=.+/);
-                    if (destructuringMatch == null) return `animateGradient:!0${rest}`;
-                    return m;
-                }
+                match: /(includeConvenienceGlow:\i,animateGradient:(\i)\}=e),(\i="username"===\i)/,
+                replace: "$1;$2=!0;let $3"
             }
         },
     ],
