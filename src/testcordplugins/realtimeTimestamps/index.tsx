@@ -147,8 +147,6 @@ function toDate(input: unknown): Date | null {
 }
 
 function renderTimestamp(input: unknown, type: "cozy" | "compact" | "tooltip"): string {
-    useGlobalTick();
-
     const date = toDate(input);
     if (!date) return "";
 
@@ -165,6 +163,7 @@ export default definePlugin({
     authors: [{ name: "Nightcord", id: 253979869n }],
     settings,
 
+    useGlobalTick,
     renderTimestamp,
 
     patches: [
@@ -173,14 +172,14 @@ export default definePlugin({
             find: "#{intl::MESSAGE_EDITED_TIMESTAMP_A11Y_LABEL}",
             replacement: [
                 {
-                    // Compact mode: the useMemo that formats with "LT"
-                    match: /(\i\.useMemo\(.{0,50}"LT".{0,30}\]\))/,
-                    replace: "$self.renderTimestamp(arguments[0].timestamp,'compact')",
+                    // Subscribe component to the 1s tick
+                    match: /(?<=\.memo\(function\(\i\)\{)/,
+                    replace: "$self.useGlobalTick();",
                 },
                 {
-                    // Cozy mode: the useMemo that calls the calendar/relative formatter
-                    match: /(\i\.useMemo\(.{0,10}\i\.\i\)\(.{0,10}\]\))/,
-                    replace: "$self.renderTimestamp(arguments[0].timestamp,'cozy')",
+                    // Message timestamps (both compact & cozy modes)
+                    match: /\i\.useMemo\(\(\)=>null!=\i\?.{0,80}?"LT".{0,40}\]\)/,
+                    replace: "$self.renderTimestamp(arguments[0].timestamp,arguments[0].compact?'compact':'cozy')",
                 },
                 {
                     // Tooltip shown when hovering a message timestamp
@@ -192,11 +191,17 @@ export default definePlugin({
 
         // ─── Timestamp markdown <t:unix:t> — hover tooltip ────────────────────
         {
-            find: /\.full,.{0,15}children:/,
-            replacement: {
-                match: /(__unsupportedReactNodeAsText:)\i\.full/,
-                replace: "$1$self.renderTimestamp(new Date(arguments[0].node.timestamp*1000),'tooltip')",
-            },
+            find: ".MINUTE],[45*",
+            replacement: [
+                {
+                    match: /(?<=function \i\(\i\)\{)(?=let\{node:\i)/,
+                    replace: "$self.useGlobalTick();",
+                },
+                {
+                    match: /(__unsupportedReactNodeAsText:)\i\.full/,
+                    replace: "$1$self.renderTimestamp(new Date(arguments[0].node.timestamp*1000),'tooltip')",
+                },
+            ],
         },
     ],
 
