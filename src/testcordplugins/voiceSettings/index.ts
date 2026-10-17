@@ -42,10 +42,10 @@ export default definePlugin({
         },
         // Extend PTT release delay slider maximum beyond 2000ms
         {
-            find: "pttReleaseDelay",
+            find: "#{intl::USER_SETTINGS_INPUT_MODE_PTT_RELEASE_DELAY_LABEL}",
             replacement: {
-                match: /(?<=pttReleaseDelay.{0,200})maxValue:2000/,
-                replace: "maxValue:$self.settings.store.pttDelayMax",
+                match: /(?<=maxValue:)\i(?:\.\i)?(?=,getInitialValue:)/,
+                replace: "$self.settings.store.pttDelayMax",
             },
         },
     ],
