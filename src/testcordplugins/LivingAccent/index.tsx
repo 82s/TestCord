@@ -144,7 +144,7 @@ async function accentFor(url: string): Promise<Accent | null> {
 }
 
 async function update() {
-    const track = SpotifyStore.track;
+    const { track } = SpotifyStore;
     const playing = SpotifyStore.isPlaying && SpotifyStore.device?.is_active;
 
     if (!track || !playing) {
