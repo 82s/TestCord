@@ -1463,8 +1463,8 @@ export default definePlugin({
         {
             find: "#{intl::QUICKSWITCHER_PLACEHOLDER}",
             replacement: {
-                match: /renderInput\(\)\{return/,
-                replace: "renderInput(){try{this.props.results=Vencord.Plugins.plugins['SearchUtility'].modifyQuickSwitcherResults(this.state.query,this.props.results)}catch(e){}return"
+                match: /renderInput\(\)\{/,
+                replace: "$&this.props.results=$self.modifyQuickSwitcherResults(this.state.query,this.props.results);"
             }
         }
     ],
