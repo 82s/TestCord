@@ -5,6 +5,7 @@
  */
 
 import { MessageSendListener } from "@api/MessageEvents";
+import { isPluginEnabled } from "@api/PluginManager";
 import { definePluginSettings } from "@api/Settings";
 import { TestcordDevs } from "@utils/constants";
 import definePlugin, { OptionType } from "@utils/types";
@@ -69,7 +70,7 @@ export default definePlugin({
     patches: [
         {
             find: 'type:"MESSAGE_LENGTH_UPSELL"',
-            predicate: () => settings.store.bypassLengthLimit,
+            predicate: () => settings.store.bypassLengthLimit && !isPluginEnabled("SplitLargeMessages"),
             replacement: {
                 match: /if\(\i\.length>\i/,
                 replace: "if(false"
@@ -77,7 +78,7 @@ export default definePlugin({
         },
         {
             find: ".onHideAutocomplete?",
-            predicate: () => settings.store.overrideDiscordConversion,
+            predicate: () => settings.store.overrideDiscordConversion && !isPluginEnabled("SplitLargeMessages"),
             replacement: {
                 match: /(?<=getData\(\i\.type\);)if\(\i\.length>\i\)/,
                 replace: "if(false)"
