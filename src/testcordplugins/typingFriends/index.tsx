@@ -305,8 +305,8 @@ export default definePlugin({
             find: '("guildsnav")',
             predicate: () => settings.store.showGuildIcons,
             replacement: {
-                match: /(\i)\.map\(\s*\((\i),\s*(\i)\)\s*=>\s*(\i)\(\2,\3,\1\.length\)\)/,
-                replace: "$1.map(($2,$3)=>$self.wrapTreeNode($4($2,$3,$1.length),$2))"
+                match: /(\i)\.map\(\s*\((\i),\s*(\i)\)\s*=>\s*(\i)\(\2,\s*\3,\s*\1\.length(.*?)\)\)/g,
+                replace: "$1.map(($2,$3)=>$self.wrapTreeNode($4($2,$3,$1.length$5),$2))"
             }
         },
     ],
