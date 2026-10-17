@@ -767,37 +767,30 @@ export default definePlugin({
 
     patches: [
         {
-            // Patch 1: Replace the Shop page (CollectiblesShop) with our TestcordAI panel
-            find: "CollectiblesShop",
-            replacement: [
-                {
-                    // Variant A: CollectiblesShop:function(){...} or CollectiblesShop:SomeVar
-                    match: /CollectiblesShop\s*:\s*(\i)/,
-                    replace: "CollectiblesShop:()=>$self.renderPanel()",
-                },
-                {
-                    // Variant B: CollectiblesShop:()=>someVar
-                    match: /CollectiblesShop\s*:\s*\(\)\s*=>\s*(\i)/,
-                    replace: "CollectiblesShop:()=>$self.renderPanel()",
-                },
-                {
-                    // Variant C: import/require of CollectiblesShop as React prop
-                    match: /([{,])CollectiblesShop:(\i)([,}])/,
-                    replace: "$1CollectiblesShop:()=>$self.renderPanel()$3",
-                },
-            ]
+            // Patch 1: Replace the Shop page with our TestcordAI panel
+            find: ".COLLECTIBLES_SHOP]:()=>",
+            replacement: {
+                match: /\[(\i)\.zgK\.COLLECTIBLES_SHOP\]:\(\)=>\(0,\i\.jsx\)\(\i,\{\}\)/,
+                replace: "[$1.zgK.COLLECTIBLES_SHOP]:()=>$self.renderPanel()",
+            }
         },
         {
-            // Patch 2: Inject the TestcordAI button in the DM sidebar (Old system reactivated with version fix)
+            // Patch 2: Inject the TestcordAI button in the DM sidebar
             find: ".FRIENDS},\"friends\"",
             replacement: {
-                // Target the injection of the Shop button in the Sidebar component
-                // Match $1 captures the selection expression (selected: ...)
-                match: /\(0,\i\.jsx\)\(\i\.\i,\{selected:(\i===\i\.BVt\.COLLECTIBLES_SHOP).{0,400}?\},"discord-shop"\)/,
+                match: /\(0,\i\.jsx\)\(\i,\{selected:(\i\.startsWith\(\i\.BVt\.COLLECTIBLES_SHOP\)).{0,400}?\},"discord-shop"\)/,
                 replace: "$self.renderNavButton($1)"
             }
         },
     ],
+
+    renderPanel() {
+        return <TestcordAIPanel />;
+    },
+
+    renderNavButton(selected?: boolean) {
+        return <TestcordAINavButton selected={selected} />;
+    },
 
     start() {
         // Auto-register with Reidverse AI in the background (no user action needed)
@@ -917,14 +910,6 @@ export default definePlugin({
             document.querySelector('a[href="/shop"]');
         const navItem = shop?.closest<HTMLElement>('[role="listitem"]') ?? shop?.parentElement;
         if (navItem) navItem.style.display = "";
-    },
-
-    renderNavButton(selected?: boolean) {
-        return <TestcordAINavButton selected={selected} />;
-    },
-
-    renderPanel() {
-        return <TestcordAIPanel />;
     },
 
     contextMenus: {
