@@ -186,15 +186,15 @@ export default definePlugin({
         {
             find: '="SYSTEM_TAG"',
             replacement: {
-                match: /(?<=colorString:\i,colorStrings:\i,colorRoleName:\i.*?}=)(\i),/,
-                replace: "$self.wrapMessageColorProps($1, arguments[0]),"
+                match: /({[^}]*?colorString:\i,colorStrings:\i,colorRoleName:\i[^}]*?}=)([^,]+),/,
+                replace: "$1$self.wrapMessageColorProps($2, arguments[0]),"
             }
         },
         {
             find: "#{intl::GUILD_OWNER}),children:",
             replacement: {
-                match: /(?<=roleName:\i,)colorString:(\i),colorStrings:(\i),/,
-                replace: "...$self.memberListColorProps(arguments[0],$1,$2),"
+                match: /function\((\i)\)\{let\{colorRoleName:/,
+                replace: "function($1){$1={...$1,...$self.memberListColorProps($1,$1.colorString,$1.colorStrings)};let{colorRoleName:"
             }
         }
     ],
