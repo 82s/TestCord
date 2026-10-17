@@ -5,8 +5,8 @@
  */
 
 import { definePluginSettings } from "@api/Settings";
-import definePlugin, { OptionType } from "@utils/types";
 import { EquicordDevs } from "@utils/constants";
+import definePlugin, { OptionType } from "@utils/types";
 
 const settings = definePluginSettings({
     inviteDuration: {

@@ -4,8 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { TestcordDevs } from "@utils/constants";
-import { Devs } from "@utils/constants";
+import { Devs,TestcordDevs } from "@utils/constants";
 import definePlugin from "@utils/types";
 
 import FriendCodesPanel from "./components/FriendCodesPanel";

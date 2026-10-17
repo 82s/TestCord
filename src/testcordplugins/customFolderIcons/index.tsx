@@ -4,9 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { TestcordDevs } from "@utils/constants";
-import { EquicordDevs } from "@utils/constants";
-
+import { EquicordDevs,TestcordDevs } from "@utils/constants";
 import definePlugin from "@utils/types";
 
 import { makeContextItem } from "./components";
