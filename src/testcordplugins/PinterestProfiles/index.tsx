@@ -54,8 +54,8 @@ export default definePlugin({
         {
             find: "DefaultCustomizationSections: user cannot be undefined",
             replacement: {
-                match: /className:R\.Q,children:\[/,
-                replace: "className:R.Q,children:[$self.renderEditProfileButton({}),",
+                match: /className:\i\.\i,children:\[/,
+                replace: "$&$self.renderEditProfileButton({}),"
             }
         },
         {
