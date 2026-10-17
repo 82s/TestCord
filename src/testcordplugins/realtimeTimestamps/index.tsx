@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { isPluginEnabled } from "@api/PluginManager";
 import { definePluginSettings } from "@api/Settings";
 import definePlugin, { OptionType } from "@utils/types";
 import { moment, useEffect, useReducer } from "@webpack/common";
@@ -170,6 +171,7 @@ export default definePlugin({
         // ─── Main Timestamp component (cozy + compact messages + hover tooltip) ─
         {
             find: "#{intl::MESSAGE_EDITED_TIMESTAMP_A11Y_LABEL}",
+            predicate: () => !isPluginEnabled("CustomTimestamps"),
             replacement: [
                 {
                     // Subscribe component to the 1s tick
@@ -192,6 +194,7 @@ export default definePlugin({
         // ─── Timestamp markdown <t:unix:t> — hover tooltip ────────────────────
         {
             find: ".MINUTE],[45*",
+            predicate: () => !isPluginEnabled("CustomTimestamps"),
             replacement: [
                 {
                     match: /(?<=function \i\(\i\)\{)(?=let\{node:\i)/,
