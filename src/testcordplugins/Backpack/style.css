@@ -1,0 +1,4 @@
+/* Backpack: when packed, hide every chat-bar plugin button except the Backpack button itself. */
+body.tc-backpack-collapsed .vc-chatbar-button:not(:has(.tc-backpack-marker)) {
+    display: none !important;
+}

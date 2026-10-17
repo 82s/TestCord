@@ -289,8 +289,8 @@ export default definePlugin({
         {
             find: '"data-window-chrome"',
             replacement: {
-                match: /onDoubleClick:(\i),children:(\i)\}\),\(0,(\i)\.jsx\)\("div",\{className:(\i\.\i),children:(\i)\}/,
-                replace: 'onDoubleClick:$1,children:$self.renderTitleBarLeading($2)}),(0,$3.jsx)("div",{className:$4,children:$self.isTitleBar()?null:$5}'
+                match: /(children:\[\(0,\i\.jsx\)\("div",\{className:.{0,60}?children:)(\i)(\}\),\(0,\i\.jsx\)\("div",\{className:.{0,60}?onDoubleClick:\i,children:)(\i)(?=\}\))/,
+                replace: "$1$self.isTitleBar()?null:$2$3$self.renderTitleBarLeading($4)"
             }
         },
         {
