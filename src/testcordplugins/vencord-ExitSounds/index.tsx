@@ -7,6 +7,7 @@
 import { NavContextMenuPatchCallback } from "@api/ContextMenu";
 import { definePluginSettings } from "@api/Settings";
 import { TestcordDevs } from "@utils/constants";
+import { Devs } from "@utils/constants";
 import definePlugin, { OptionType } from "@utils/types";
 import { Constants, Menu, RestAPI, SelectedChannelStore } from "@webpack/common";
 
@@ -45,7 +46,7 @@ export default definePlugin({
     name: "ExitSounds",
     description: "Play noises when you disconnect or swap channels.",
     tags: ["Voice", "Utility"],
-    authors: [TestcordDevs.x2b],
+    authors: [Devs.prism, TestcordDevs.x2b],
     settings,
 
     contextMenus: {

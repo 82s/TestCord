@@ -8,6 +8,7 @@ import { ChatBarButton, ChatBarButtonFactory } from "@api/ChatButtons";
 import { addChannelToolbarButton, addHeaderBarButton, ChannelToolbarButton, HeaderBarButton, removeChannelToolbarButton, removeHeaderBarButton } from "@api/HeaderBar";
 import { definePluginSettings } from "@api/Settings";
 import { TestcordDevs } from "@utils/constants";
+import { EquicordDevs } from "@utils/constants";
 import { getCurrentChannel } from "@utils/discord";
 import definePlugin, { OptionType } from "@utils/types";
 import { FluxDispatcher, React } from "@webpack/common";
@@ -212,7 +213,7 @@ export default definePlugin({
     name: "MessageFetchTimer",
     description: "Shows how long it took to fetch messages for the current channel",
     tags: ["Chat", "Utility"],
-    authors: [TestcordDevs.x2b],
+    authors: [EquicordDevs.GroupXyz, TestcordDevs.x2b],
     dependencies: ["HeaderBarAPI"],
     settings,
 

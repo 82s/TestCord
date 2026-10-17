@@ -7,7 +7,7 @@
 import { findGroupChildrenByChildId } from "@api/ContextMenu";
 import { updateMessage } from "@api/MessageUpdater";
 import { ImageInvisible, ImageVisible } from "@components/Icons";
-import { TestcordDevs } from "@utils/constants";
+import { EquicordDevs } from "@utils/constants";
 import { Logger } from "@utils/Logger";
 import { parseUrl } from "@utils/misc";
 import definePlugin from "@utils/types";
@@ -194,7 +194,7 @@ export default definePlugin({
     name: "ShowMessageEmbeds",
     description: "Adds a context menu option to show embeds for links that don't have one",
     tags: ["Chat", "Utility"],
-    authors: [TestcordDevs.x2b],
+    authors: [EquicordDevs.Suffocate],
 
     patches: [
         {

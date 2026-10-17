@@ -5,6 +5,8 @@
  */
 
 import { TestcordDevs } from "@utils/constants";
+import { EquicordDevs } from "@utils/constants";
+
 import definePlugin from "@utils/types";
 
 import { makeContextItem } from "./components";
@@ -16,7 +18,7 @@ export default definePlugin({
     name: "CustomFolderIcons",
     description: "Customize folder icons with any png",
     tags: ["Customisation", "Appearance"],
-    authors: [TestcordDevs.x2b],
+    authors: [EquicordDevs.sadan, TestcordDevs.x2b],
     patches: [
         {
             find: ".expandedFolderIconWrapper",

@@ -6,6 +6,7 @@
 
 import { definePluginSettings } from "@api/Settings";
 import { TestcordDevs } from "@utils/constants";
+import { EquicordDevs } from "@utils/constants";
 import definePlugin, { OptionType } from "@utils/types";
 import { FluxDispatcher } from "@webpack/common";
 
@@ -157,7 +158,7 @@ export default definePlugin({
     name: "Animalese",
     description: "Plays animalese (they yap a lot) on message sent",
     tags: ["Fun"],
-    authors: [TestcordDevs.x2b],
+    authors: [EquicordDevs.ryanamay, EquicordDevs.Mocha, TestcordDevs.x2b],
     settings,
 
     start() {

@@ -6,6 +6,7 @@
 
 import { definePluginSettings } from "@api/Settings";
 import definePlugin, { OptionType } from "@utils/types";
+import { EquicordDevs } from "@utils/constants";
 
 const settings = definePluginSettings({
     inviteDuration: {
@@ -45,7 +46,7 @@ export default definePlugin({
     name: "InviteDefaults",
     description: "Allows you to edit the default values when creating server invites.",
     tags: ["Utility", "Servers"],
-    authors: [{ name: "Death", id: 1003477997728313405n }],
+    authors: [EquicordDevs.VillainsRule, { name: "Death", id: 1003477997728313405n }],
     settings,
     patches: [
         {

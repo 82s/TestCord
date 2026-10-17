@@ -10,6 +10,7 @@ import { Card } from "@components/Card";
 import { FormSwitch } from "@components/FormSwitch";
 import { Heading } from "@components/Heading";
 import { Devs } from "@utils/constants";
+import { TestcordDevs } from "@utils/constants";
 import { Margins } from "@utils/margins";
 import { useForceUpdater } from "@utils/react";
 import definePlugin, { makeRange, OptionType, StartAt } from "@utils/types";
@@ -228,7 +229,7 @@ function SettingsUI() {
 export default definePlugin({
     name: "CustomSounds",
     description: "Customize Discord's sounds.",
-    authors: [Devs.ScattrdBlade, Devs.TheKodeToad],
+    authors: [TestcordDevs.x2b, Devs.ScattrdBlade, Devs.TheKodeToad],
     tags: ["Customisation"],
     settings,
     startAt: StartAt.Init,

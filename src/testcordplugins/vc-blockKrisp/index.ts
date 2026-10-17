@@ -5,13 +5,15 @@
  */
 
 import { TestcordDevs } from "@utils/constants";
+import { Devs } from "@utils/constants";
+
 import definePlugin from "@utils/types";
 
 export default definePlugin({
     name: "BlockKrisp",
     description: "Prevent Krisp from loading",
     tags: ["Voice", "Utility"],
-    authors: [TestcordDevs.x2b],
+    authors: [Devs.D3SOX, TestcordDevs.x2b],
     patches: [
         // Block loading Krisp module on Desktop
         // Uses the exact function call as anchor
