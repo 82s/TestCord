@@ -405,8 +405,8 @@ export default definePlugin({
         {
             find: "renderGIF",
             replacement: {
-                match: /(children:\[)(\i\([^)]+\)\?null:this\.renderGIF\(\))/,
-                replace: "$1$self.renderCaptionButton(this),$2"
+                match: /children:\[(?=[\s\S]{0,100}this\.renderGIF\(\))/,
+                replace: "children:[$self.renderCaptionButton(this),"
             }
         }
     ],
