@@ -1164,18 +1164,18 @@ export default definePlugin({
         // VIEW_CHANNEL and other permissions. virtualMerge with premiumType:2 corrupted
         // these calculations even with isMe() guard. DomObserver + fakeCurrentUser are enough.
         {
-            find: "DISPLAY_NAME",
+            find: "disableUserProfileLink:",
             replacement: {
-                match: /(?<=currentUser:\i,user:)(\i)/,
-                replace: "$self.fakeCurrentUser($1)"
+                match: /user:(\i),currentUser:(\i)/,
+                replace: "user:$self.fakeCurrentUser($1),currentUser:$2"
             }
         },
         {
-            find: "isHoveringOrFocusing",
+            find: '"has-animated-banner"',
             replacement: [
                 {
-                    match: /user:([A-Za-z_$][\w$]*),displayProfile:([A-Za-z_$][\w$]*),themeType/,
-                    replace: "user:$self.fakeCurrentUser($1),displayProfile:$2,themeType"
+                    match: /function\((\i)\)\{let\{user:/,
+                    replace: "function($1){$1={...$1,user:$self.fakeCurrentUser($1.user)};let{user:"
                 }
             ]
         }
