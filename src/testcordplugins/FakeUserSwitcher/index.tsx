@@ -2167,8 +2167,8 @@ const plugin = definePlugin({
         {
             find: "getAvatarDecorationURL:",
             replacement: {
-                match: /(?<=function \i\(\i\){)(?=let{avatarDecoration)/,
-                replace: "const vcFupDeco=$self.getAvatarDecorationURL(arguments[0]);if(vcFupDeco)return vcFupDeco;"
+                match: /(function \i\(\i\)\{)(?=[\s\S]{0,300}let\{avatarDecoration)/,
+                replace: "$1const vcFupDeco=$self.getAvatarDecorationURL(arguments[0]);if(vcFupDeco)return vcFupDeco;"
             }
         },
         {
