@@ -1253,13 +1253,8 @@ export default definePlugin({
         {
             find: "data-selenium-video-tile",
             replacement: {
-                // 1.0.9261 moved `ref` after participantUserId in the tile
-                // destructuring and now closes the JSX call with `})}}`. USRBG and
-                // the tile-avatar plugins inject Object.assign statements right
-                // after the destructuring when they patch first, so also skip past
-                // any of those before `return` (notes/2026-10-08-voice-tile-avatars.md).
-                match: /(?<=participantUserId:(\i).{0,40}?\}=\i;(?:[^;\n]{0,220}?Object\.assign\([^;\n]+?\);){0,3}return.{0,200}?children:)(\i)(?=\}\)\}\})/,
-                replace: "[$2,$self.renderTileMeter($1)]"
+                match: /"data-selenium-video-tile":(\i),(.{0,30}?children:)(\i)/,
+                replace: "\"data-selenium-video-tile\":$1,$2[$3,$self.renderTileMeter($1)]"
             }
         }
     ],
