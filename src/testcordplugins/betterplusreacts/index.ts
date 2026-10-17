@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { TestcordDevs } from "@utils/constants";
+import { Devs } from "@utils/constants";
 import definePlugin from "@utils/types";
 import { findByPropsLazy } from "@webpack";
 
@@ -12,7 +12,7 @@ const { getMessages } = findByPropsLazy("getMessages");
 
 export default definePlugin({
     name: "BetterPlusReacts",
-    authors: [TestcordDevs.x2b],
+    authors: [Devs.Joona],
     description: "The amount of plus before :emoji: is the message to add it to",
     tags: ["Reactions", "Utility"],
     patches: [
@@ -35,7 +35,7 @@ export default definePlugin({
         },
         {
             find: "this.props.activeCommandOption,",
-            replacement:[
+            replacement: [
                 // Enable auto complete for multiple plusses
                 // and set the message reference
                 {
