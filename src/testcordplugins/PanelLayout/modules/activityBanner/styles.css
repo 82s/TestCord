@@ -78,11 +78,18 @@
     font-variant-numeric: tabular-nums;
 }
 
+.vc-actbanner-icon-column {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
 .vc-actbanner-carousel {
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    margin-left: 6px;
     flex-shrink: 0;
 }
 

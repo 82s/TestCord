@@ -102,13 +102,67 @@ export function getUserActivities(): Activity[] {
     return unique;
 }
 
+function ActivitySwitcher({
+    index,
+    count,
+    step
+}: {
+    index: number;
+    count: number;
+    step: (dir: number) => void;
+}) {
+    if (count <= 1) return null;
+
+    const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+
+    return (
+        <div
+            className="vc-actbanner-carousel"
+            onClick={stop}
+            onMouseDown={stop}
+            role="toolbar"
+            aria-label="Activity switcher"
+        >
+            <button
+                type="button"
+                className="vc-actbanner-carousel-btn"
+                onClick={e => {
+                    stop(e);
+                    step(-1);
+                }}
+                onMouseDown={stop}
+                aria-label="Previous activity"
+                title="Previous activity"
+            >
+                ◀
+            </button>
+            <span className="vc-actbanner-carousel-count">
+                {index + 1}/{count}
+            </span>
+            <button
+                type="button"
+                className="vc-actbanner-carousel-btn"
+                onClick={e => {
+                    stop(e);
+                    step(1);
+                }}
+                onMouseDown={stop}
+                aria-label="Next activity"
+                title="Next activity"
+            >
+                ▶
+            </button>
+        </div>
+    );
+}
+
 export function ActivityIcon({
     name,
     IconComponent,
     defaultIcon
 }: Partial<ActivityIconProps> = {}) {
     const activities = useStateFromStores([LocalActivityStore, SelfPresenceStore, PresenceStore, RunningGameStore], getUserActivities);
-    const [carouselIndex] = useCarouselIndex(activities.length);
+    const [carouselIndex, stepCarousel] = useCarouselIndex(activities.length);
 
     if (activities.length === 0) {
         return <>{defaultIcon}</>;
@@ -117,56 +171,68 @@ export function ActivityIcon({
     const currentActivity = activities[carouselIndex] ?? activities[0];
     const data = resolveActivityData(currentActivity);
 
-    if (!data.largeImage?.src) {
-        if (IconComponent && currentActivity.name?.toLowerCase() !== name?.toLowerCase()) {
-            return (
-                <IconComponent
-                    name={currentActivity.name}
-                    application={data.application}
-                    game={{ id: currentActivity.application_id, name: currentActivity.name }}
-                    isStreaming={false}
-                />
-            );
-        }
-        return <>{defaultIcon}</>;
-    }
+    let icon: React.ReactNode;
 
-    return (
-        <div
-            className="vc-actbanner-icon-slot"
-            title={data.largeImage.tooltip ?? data.name}
-            style={{ position: "relative", width: 40, height: 40, minWidth: 40, minHeight: 40, maxWidth: 40, maxHeight: 40, flexShrink: 0 }}
-        >
-            <img
-                className="vc-actbanner-large-cover"
-                src={data.largeImage.src}
-                alt={data.largeImage.alt ?? data.name}
-                style={{ width: 40, height: 40, borderRadius: 8, objectFit: "cover", display: "block" }}
-                onError={e => {
-                    (e.currentTarget as HTMLImageElement).style.display = "none";
-                }}
+    if (!data.largeImage?.src) {
+        icon = IconComponent && currentActivity.name?.toLowerCase() !== name?.toLowerCase() ? (
+            <IconComponent
+                name={currentActivity.name}
+                application={data.application}
+                game={{ id: currentActivity.application_id, name: currentActivity.name }}
+                isStreaming={false}
             />
-            {data.smallImage?.src && (
+        ) : (
+            <>{defaultIcon}</>
+        );
+    } else {
+        icon = (
+            <div
+                className="vc-actbanner-icon-slot"
+                title={data.largeImage.tooltip ?? data.name}
+                style={{ position: "relative", width: 40, height: 40, minWidth: 40, minHeight: 40, maxWidth: 40, maxHeight: 40, flexShrink: 0 }}
+            >
                 <img
-                    className="vc-actbanner-small-badge"
-                    src={data.smallImage.src}
-                    alt={data.smallImage.alt ?? ""}
-                    title={data.smallImage.tooltip}
-                    style={{
-                        position: "absolute",
-                        bottom: -2,
-                        right: -2,
-                        width: 16,
-                        height: 16,
-                        borderRadius: "50%",
-                        border: "2px solid var(--background-secondary-alt, #232428)",
-                        objectFit: "cover"
-                    }}
+                    className="vc-actbanner-large-cover"
+                    src={data.largeImage.src}
+                    alt={data.largeImage.alt ?? data.name}
+                    style={{ width: 40, height: 40, borderRadius: 8, objectFit: "cover", display: "block" }}
                     onError={e => {
                         (e.currentTarget as HTMLImageElement).style.display = "none";
                     }}
                 />
-            )}
+                {data.smallImage?.src && (
+                    <img
+                        className="vc-actbanner-small-badge"
+                        src={data.smallImage.src}
+                        alt={data.smallImage.alt ?? ""}
+                        title={data.smallImage.tooltip}
+                        style={{
+                            position: "absolute",
+                            bottom: -2,
+                            right: -2,
+                            width: 16,
+                            height: 16,
+                            borderRadius: "50%",
+                            border: "2px solid var(--background-secondary-alt, #232428)",
+                            objectFit: "cover"
+                        }}
+                        onError={e => {
+                            (e.currentTarget as HTMLImageElement).style.display = "none";
+                        }}
+                    />
+                )}
+            </div>
+        );
+    }
+
+    // Single activity: nothing to switch, render the icon exactly as before
+    if (activities.length <= 1) return <>{icon}</>;
+
+    // Switcher on top, icon below
+    return (
+        <div className="vc-actbanner-icon-column">
+            <ActivitySwitcher index={carouselIndex} count={activities.length} step={stepCarousel} />
+            {icon}
         </div>
     );
 }
@@ -179,7 +245,8 @@ export function ActivityInfo({
 }: Partial<ActivityInfoProps> = {}) {
     const activities = useStateFromStores([LocalActivityStore, SelfPresenceStore, PresenceStore, RunningGameStore], getUserActivities);
     const visibleGame = useStateFromStores([RunningGameStore], () => RunningGameStore?.getVisibleGame?.());
-    const [carouselIndex, stepCarousel] = useCarouselIndex(activities.length);
+    // Subscribes to carousel changes so the text updates when the switcher is used
+    const [carouselIndex] = useCarouselIndex(activities.length);
 
     const currentActivity = activities[carouselIndex] ?? activities[0];
     const data = currentActivity ? resolveActivityData(currentActivity) : undefined;
@@ -222,45 +289,6 @@ export function ActivityInfo({
                 <div className="vc-actbanner-title-wrapper">
                     {titleElement}
                 </div>
-                {activities.length > 1 && (
-                    <div
-                        className="vc-actbanner-carousel"
-                        onClick={e => e.stopPropagation()}
-                        onMouseDown={e => e.stopPropagation()}
-                        role="toolbar"
-                        aria-label="Activity switcher"
-                    >
-                        <button
-                            type="button"
-                            className="vc-actbanner-carousel-btn"
-                            onClick={e => {
-                                e.stopPropagation();
-                                stepCarousel(-1);
-                            }}
-                            onMouseDown={e => e.stopPropagation()}
-                            aria-label="Previous activity"
-                            title="Previous activity"
-                        >
-                            ◀
-                        </button>
-                        <span className="vc-actbanner-carousel-count">
-                            {carouselIndex + 1}/{activities.length}
-                        </span>
-                        <button
-                            type="button"
-                            className="vc-actbanner-carousel-btn"
-                            onClick={e => {
-                                e.stopPropagation();
-                                stepCarousel(1);
-                            }}
-                            onMouseDown={e => e.stopPropagation()}
-                            aria-label="Next activity"
-                            title="Next activity"
-                        >
-                            ▶
-                        </button>
-                    </div>
-                )}
             </div>
 
             {data.details && (
