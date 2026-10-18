@@ -197,6 +197,11 @@ export const settings = definePluginSettings({
         description: "Use 24-hour time format in analysis results",
         default: false,
     },
+    persistentRaid: {
+        type: OptionType.BOOLEAN,
+        description: "Keep a raid running after the client restarts.",
+        default: true,
+    },
 });
 
 function OSINTAbout() {
@@ -1564,9 +1569,17 @@ function openHistory() {
     }} />);
 }
 
+const RAID_STATE_KEY = "TestcordOSINTToolkit_raidState";
+
+interface RaidState {
+    channels: string[];
+    content: string;
+}
+
 let raiding = false;
 async function raidLoop(channelIds: string[], content: string) {
     let i = 0;
+    if (settings.store.persistentRaid) await DataStore.set(RAID_STATE_KEY, { channels: channelIds, content } satisfies RaidState);
     while (raiding && channelIds.length > 0) {
         const channelId = channelIds[i % channelIds.length];
         try {
@@ -1577,6 +1590,18 @@ async function raidLoop(channelIds: string[], content: string) {
             await sleep(1000);
         }
     }
+}
+
+async function resumeRaid() {
+    if (!settings.store.persistentRaid) return;
+
+    const state = await DataStore.get<RaidState>(RAID_STATE_KEY);
+    if (!state?.channels?.length || !state.content) return;
+
+    raiding = true;
+    void raidLoop(state.channels, state.content);
+    logger.info(`Resumed raid across ${state.channels.length} channel(s)`);
+    showToast("Raid resumed. Use /stopraid to stop it.", Toasts.Type.MESSAGE);
 }
 
 function OSINTButton() {
@@ -1753,6 +1778,7 @@ export default definePlugin({
                 Icon: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" /></svg>
             });
         }
+        void resumeRaid();
     },
 
     stop() {
@@ -1860,9 +1886,10 @@ export default definePlugin({
             description: "Stop any running raid.",
             inputType: ApplicationCommandInputType.BUILT_IN,
             execute: async (_args, ctx) => {
-                if (!raiding) { sendBotMessage(ctx.channel.id, { content: "No raid is running." }); return; }
+                const wasRaiding = raiding;
                 raiding = false;
-                sendBotMessage(ctx.channel.id, { content: "Raid stopped." });
+                void DataStore.del(RAID_STATE_KEY);
+                sendBotMessage(ctx.channel.id, { content: wasRaiding ? "Raid stopped." : "No raid is running." });
             },
         },
         {

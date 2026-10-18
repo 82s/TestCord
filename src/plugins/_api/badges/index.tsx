@@ -259,6 +259,35 @@ async function ensurePronounsMarker() {
     }
 }
 
+interface BadgeDirectoryEntry {
+    badge_id: string;
+    name?: string;
+    description?: string;
+    simple_icon_url?: string;
+    owned?: boolean;
+    is_earnable?: boolean;
+    tiers?: unknown[];
+}
+
+interface BadgeDirectoryStore {
+    getBadges(userId?: string): BadgeDirectoryEntry[];
+    getBadgeById(badgeId: string, userId?: string): BadgeDirectoryEntry | undefined;
+}
+
+function getClientBadgesForDirectory(userId: string): BadgeDirectoryEntry[] {
+    return _getBadges({ userId, guildId: "" })
+        .filter(badge => badge.iconSrc)
+        .map(badge => ({
+            badge_id: badge.id,
+            name: badge.description ?? badge.id,
+            description: badge.description,
+            simple_icon_url: badge.iconSrc,
+            owned: true,
+            is_earnable: false,
+            tiers: []
+        }));
+}
+
 export function BadgeContextMenu({ badge }: { badge: Omit<ProfileBadge, "id"> & BadgeUserArgs; }) {
     return (
         <Menu.Menu
@@ -322,6 +351,21 @@ export default definePlugin({
                 match: /getBadges\(\)\{.{0,100}?return\[/,
                 replace: "$&...$self.getBadges(this),"
             }
+        },
+        {
+            // The badge directory modal (the "browse all badges" menu behind the profile badge overflow) reads
+            // straight from Discord's server-side badge catalog, which never contains client side badges
+            find: '"badge-directory-owned"',
+            replacement: [
+                {
+                    match: /(\i)\.(\i)\.getBadges\((\i)\)/g,
+                    replace: "$self.getDirectoryBadges($3,$1.$2)"
+                },
+                {
+                    match: /(\i)\.(\i)\.getBadgeById\((\i)(\.badge_id)?,(\i)\)/g,
+                    replace: "$self.getDirectoryBadgeById($3$4,$5,$1.$2)"
+                }
+            ]
         }
     ],
 
@@ -369,6 +413,14 @@ export default definePlugin({
             new Logger("BadgeAPI#getBadges").error(e);
             return [];
         }
+    },
+
+    getDirectoryBadges(userId: string, store: BadgeDirectoryStore) {
+        return [...store.getBadges(userId), ...getClientBadgesForDirectory(userId)];
+    },
+
+    getDirectoryBadgeById(badgeId: string, userId: string, store: BadgeDirectoryStore) {
+        return store.getBadgeById(badgeId, userId) ?? getClientBadgesForDirectory(userId).find(badge => badge.badge_id === badgeId);
     },
 
     renderBadgeComponent: ErrorBoundary.wrap((badge: ProfileBadge & BadgeUserArgs) => {
