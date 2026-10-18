@@ -37,7 +37,7 @@ const settings = definePluginSettings({
 
 export default definePlugin({
     name: "AntiSnitch",
-    description: "Tools to avoid snitches",
+    description: "Alerts you with a sound and toast whenever selected users start typing in your current channel.",
     tags: ["Privacy", "Utility"],
     authors: [TestcordDevs.dot],
     settings,
