@@ -38,7 +38,6 @@ export default definePlugin({
     name: "Wellbeing",
     description: "A gentle, private dashboard of how you use Discord — screen time, messages and calm controls. Everything stays on your computer.",
     authors: [TestcordDevs.sirphantom89],
-    enabledByDefault: true,
     settings,
 
     flux: {

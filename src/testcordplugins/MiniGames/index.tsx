@@ -183,7 +183,6 @@ export default definePlugin({
     description: "Play tic-tac-toe and rock-paper-scissors right inside your DMs with other Testcord users.",
     authors: [TestcordDevs.sirphantom89],
     tags: ["Fun"],
-    enabledByDefault: true,
     dependencies: ["MessageAccessoriesAPI", "MessageUpdaterAPI", "ContextMenuAPI"],
 
     toolboxActions: {
