@@ -17,7 +17,7 @@ let audioElement: HTMLAudioElement | null = null;
 
 export default definePlugin({
     name: "AntiMod",
-    description: "Tools to avoid mods",
+    description: "Alerts you with a sound and toast whenever someone with staff or mod permissions joins your voice channel.",
     tags: ["Privacy", "Utility"],
     authors: [TestcordDevs.dot],
     start() { FluxDispatcher.subscribe("VOICE_STATE_UPDATES", cb); },
@@ -90,5 +90,5 @@ function audio() {
         audioElement.volume = 1;
     }
     audioElement.currentTime = 0;
-    audioElement.play().catch(() => {});
+    audioElement.play().catch(() => { });
 }
