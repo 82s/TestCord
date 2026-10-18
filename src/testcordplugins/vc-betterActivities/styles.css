@@ -51,24 +51,6 @@
     margin-top: 10px;
 }
 
-.vc-bactivities-controls [class^="vc-activities-caret-"] {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    border-radius: 3px;
-    background-color: #ffffff4d;
-}
-
-.vc-bactivities-controls [class^="vc-activities-caret-"].disabled {
-    cursor: not-allowed;
-    opacity: 0.3;
-}
-
-.vc-bactivities-controls [class^="vc-activities-caret-"]:hover:not(.disabled) {
-    background: var(--background-modifier-accent);
-}
-
 .vc-bactivities-controls .carousel {
     display: flex;
     align-items: center;

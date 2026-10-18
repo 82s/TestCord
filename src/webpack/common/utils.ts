@@ -89,6 +89,8 @@ const ToastType = {
     CLOCK: "clock"
 } as const;
 
+type ToastTypeValue = (typeof ToastType)[keyof typeof ToastType];
+
 const ToastPosition = {
     TOP: 0,
     BOTTOM: 1
@@ -251,14 +253,24 @@ export const Toasts = {
     create: createToast
 };
 
+// the normalised entry point Discord's own toast module exposes. The legacy payload
+// below can't carry `text`/`variant`/`icon`, so object-shaped callers go straight here.
+const nativeShowToast: t.showToast = findByCodeLazy(".currentToastMap.has(");
+
 /**
  * Show a simple toast. If you need more options, use Toasts.show manually
  */
-export function showToast(message: string, type: t.ToastType = "message", options?: ToastOptions) {
+export function showToast(data: t.ToastData): void;
+export function showToast(message: string, type?: ToastTypeValue, options?: ToastOptions): void;
+export function showToast(messageOrData: string | t.ToastData, type: ToastTypeValue = "message", options?: ToastOptions) {
+    if (typeof messageOrData !== "string") {
+        nativeShowToast(messageOrData);
+        return;
+    }
     // Normalisation (and the fallback to the legacy payload) lives in Toasts.show,
     // which probes for Discord's createToast per build. See resolveToasts /
     // normalizeToast above. No try/catch needed here.
-    Toasts.show(Toasts.create(message, type, options));
+    Toasts.show(Toasts.create(messageOrData, type, options));
 }
 
 export const UserUtils = {

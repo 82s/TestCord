@@ -192,7 +192,7 @@ export function Updatable(props: CommonProps) {
                             setShowDiscardLocalChanges(false);
                             setUpdates([]);
 
-                            showToast(
+showToast(
                                 hasDiverged() ? "Local copy has diverged from remote!" : "No updates found!",
                                 "message",
                                 { position: ToastPosition.BOTTOM }

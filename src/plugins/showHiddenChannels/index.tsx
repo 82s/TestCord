@@ -398,7 +398,7 @@ export default definePlugin({
             ]
         },
         {
-            find: '"StageTile"',
+find: "audience-header-",
             replacement: [
                 {
                     // Render our HiddenChannelLockScreen component instead of the main stage channel component

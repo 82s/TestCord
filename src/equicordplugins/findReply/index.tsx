@@ -163,10 +163,10 @@ export default definePlugin({
                             jumpType: "INSTANT"
                         });
                         if (replies.length > 1) {
-                            showToast("Use the bottom panel to navigate between replies.", "message");
+                            showToast({ text: "Use the bottom panel to navigate between replies." });
                             const container = document.querySelector("[class*=channelBottomBarArea_]");
                             if (!container) {
-                                showToast("Couldn't find the container element.", "failure");
+                                showToast({ text: "Couldn't find the container element.", variant: "critical" });
                                 return;
                             }
 
@@ -179,7 +179,7 @@ export default definePlugin({
                             root!.render(<ReplyNavigator replies={replies} />);
                         }
                     } else {
-                        showToast("Couldn't find a reply.", "failure");
+                        showToast({ text: "Couldn't find a reply.", variant: "critical" });
                     }
                 }
             };

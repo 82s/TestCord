@@ -509,12 +509,12 @@ export default definePlugin({
                     onClick={async () => {
                         try {
                             if (await forceUpdate())
-                                showToast("Success! Restarting...", "success");
+                                showToast({ text: "Success! Restarting...", variant: "success" });
                             else
-                                showToast("Already up to date!");
+                                showToast({ text: "Already up to date!" });
                         } catch (e) {
                             new Logger(this.name).error("Error while updating:", e);
-                            showToast("Failed to update :(", "failure");
+                            showToast({ text: "Failed to update :(", variant: "critical" });
                         }
                     }}
                 >
@@ -540,7 +540,7 @@ export default definePlugin({
                             // If the message is exactly "/testcord-plugins", delete it to avoid showing the command text
                             if (props.message.content.trim() === "/testcord-plugins") {
                                 try {
-                                    await DiscordNative.http.delete(`${DiscordNative.http.getAPIBaseURL()}/channels/${props.channel.id}/messages/${props.message.id}`);
+await DiscordNative.http.delete(`${DiscordNative.http.getAPIBaseURL()}/channels/${props.channel.id}/messages/${props.message.id}`);
                                 } catch (e) {
                                     // Ignore if delete fails
                                 }

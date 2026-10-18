@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import "./style.css";
-
 import { ChatBarButton, ChatBarButtonFactory } from "@api/ChatButtons";
 import { TestcordDevs } from "@utils/constants";
 import definePlugin from "@utils/types";
 import { React, useState } from "@webpack/common";
+
+import backpackStyle from "./style.css?managed";
 
 const COLLAPSED_CLASS = "tc-backpack-collapsed";
 let collapsed = false;
@@ -57,6 +57,8 @@ export default definePlugin({
         icon: BackpackIcon,
         render: BackpackButton
     },
+
+    managedStyle: backpackStyle,
 
     stop() {
         applyCollapsed(false);

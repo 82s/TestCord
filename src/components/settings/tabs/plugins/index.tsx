@@ -41,7 +41,6 @@ import { isExperimentalPlugin, isLegacyPlugin } from "@utils/pluginWarnings";
 import { useAwaiter, useCleanupEffect, useIntersection } from "@utils/react";
 import { isTestcordModified } from "@utils/testcordIcons";
 import { Plugin, PluginTag, PluginTags } from "@utils/types";
-import { ToastPosition } from "@vencord/discord-types/enums";
 import { Alerts, ConfirmModal, openModal, Parser, React, SearchableSelect, Select, showToast, TextInput, Tooltip, useCallback, useEffect, useMemo, useRef, useState } from "@webpack/common";
 
 import Plugins, { ExcludedPlugins, PluginMeta } from "~plugins";
@@ -71,9 +70,11 @@ const PluginSearchPrefixes: Array<{ prefix: string; folders: string[]; modifiedO
 const PluginLoadBatchSize = 36;
 
 function showErrorToast(message: string) {
-    showToast(message, "failure", {
-            position: ToastPosition.BOTTOM
-        });
+    showToast({
+        text: message,
+        variant: "critical",
+        position: "bottom"
+    });
 }
 
 function ReloadRequiredCard({ required, enabledPlugins, openWarningModal, resetCheckAndDo }) {
@@ -100,7 +101,7 @@ function ReloadRequiredCard({ required, enabledPlugins, openWarningModal, resetC
                     <Button variant="primary" className={cl("restart-button")} onClick={() => location.reload()}>
                         Restart
                     </Button>
-                ) : enabledPlugins.length > 0 && (
+) : enabledPlugins.length > 0 && (
                     <Button
                         variant="secondary"
                         size="small"

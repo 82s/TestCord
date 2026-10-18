@@ -177,7 +177,7 @@ export function PluginCard({ plugin, disabled, onRestartNeeded, onMouseEnter, on
             setEnabledState(wasEnabled);
 
             const msg = `Error while ${wasEnabled ? "stopping" : "starting"} plugin ${plugin.name}`;
-            showToast(msg, Toasts.Type.FAILURE, {
+showToast(msg, Toasts.Type.FAILURE, {
                 position: Toasts.Position.BOTTOM,
             });
         }

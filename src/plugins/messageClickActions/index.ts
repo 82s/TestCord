@@ -260,9 +260,11 @@ export const settings = definePluginSettings({
 });
 
 function showWarning(message: string) {
-    showToast(message, "failure", {
-            duration: 3000
-        });
+    showToast({
+        text: message,
+        variant: "critical",
+        duration: 3000
+    });
 }
 
 function clearClickTimeouts() {

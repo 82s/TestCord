@@ -36,7 +36,6 @@ import { getPluginWarning } from "@utils/pluginWarnings";
 import { isTestcordModified } from "@utils/testcordIcons";
 import { OptionType, Plugin, PluginTag } from "@utils/types";
 import { RenderModalProps, User } from "@vencord/discord-types";
-import { ToastPosition } from "@vencord/discord-types/enums";
 import { findComponentByCodeLazy, findCssClassesLazy } from "@webpack";
 import { Clickable, FluxDispatcher, Modal, openModal, React, showToast, Text, Toasts, Tooltip, useEffect, useMemo, UserStore, UserUtils, useState } from "@webpack/common";
 import { Constructor } from "type-fest";
@@ -327,9 +326,8 @@ export default function PluginModal({ plugin, onRestartNeeded, onClose, transiti
                             <Tooltip text="Reset to default settings" shouldShow={!isObjectEmpty(pluginSettings)}>
                                 {({ onMouseEnter, onMouseLeave }) => (
                                     <Button
-                                        className={cl("disable-warning")}
+                                        variant="dangerPrimary"
                                         size="small"
-                                        variant="primary"
                                         onClick={handleResetClick}
                                         onMouseEnter={onMouseEnter}
                                         onMouseLeave={onMouseLeave}
@@ -436,9 +434,11 @@ function resetSettings(plugin: Plugin, onRestartNeeded?: (pluginName: string) =>
         onRestartNeeded?.(plugin.name);
     }
 
-    showToast(`Settings for ${pluginName} have been reset.`, "success", {
-            position: ToastPosition.TOP
-        });
+    showToast({
+        text: `Settings for ${pluginName} have been reset.`,
+        variant: "success",
+        position: "top"
+    });
 }
 
 export function openWarningModal(plugin?: Plugin | null, onRestartNeeded?: (pluginName: string) => void, isPlugin = true, enabledPlugins?: number | null, reset?: () => void) {

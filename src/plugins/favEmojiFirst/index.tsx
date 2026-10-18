@@ -702,10 +702,10 @@ async function removeAlias(alias: string) {
 
     try {
         await persistAliases(nextMap);
-        showToast(`Removed alias :${alias}:`, "success");
+        showToast({ text: `Removed alias :${alias}:`, variant: "success" });
     } catch (error) {
         logger.error("Failed to remove emoji alias.", error);
-        showToast("Failed to remove alias.", "failure");
+        showToast({ text: "Failed to remove alias.", variant: "critical" });
     }
 }
 
@@ -714,10 +714,10 @@ async function clearAliases() {
 
     try {
         await persistAliases({});
-        showToast("Deleted all emoji aliases.", "success");
+        showToast({ text: "Deleted all emoji aliases.", variant: "success" });
     } catch (error) {
         logger.error("Failed to clear emoji aliases.", error);
-        showToast("Failed to delete aliases.", "failure");
+        showToast({ text: "Failed to delete aliases.", variant: "critical" });
     }
 }
 
@@ -736,7 +736,7 @@ function openSetAliasModal(ref: StoredEmojiRef) {
             onSave={async input => {
                 const result = await saveAlias(input, ref);
                 if (!result.ok) return result;
-                showToast(`Alias set for ${getEmojiDisplayName(ref)}.`, "success");
+                showToast({ text: `Alias set for ${getEmojiDisplayName(ref)}.`, variant: "success" });
                 return result;
             }}
         />

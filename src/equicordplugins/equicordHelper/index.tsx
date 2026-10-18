@@ -202,6 +202,12 @@ const settings = definePluginSettings({
         restartNeeded: true,
         default: false,
     },
+    disableHolidayNotifications: {
+        type: OptionType.BOOLEAN,
+        description: "Always use Discord's default notification sounds",
+        restartNeeded: true,
+        default: false,
+    },
     jsonGateway: {
         type: OptionType.BOOLEAN,
         description: "Forces JSON on gateway reconnect",
@@ -397,6 +403,14 @@ export default definePlugin({
                 replace: "return null;$&"
             },
             predicate: () => settings.store.disableAdoptTagPrompt
+        },
+        {
+            find: 'persistKey="SoundpackStore"',
+            predicate: () => settings.store.disableHolidayNotifications,
+            replacement: {
+                match: /(?<=getSoundpack\(\)\{return )\i\.soundpack/,
+                replace: '"classic"'
+            }
         },
         {
             find: "JSONEncoding",

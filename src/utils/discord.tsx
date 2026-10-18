@@ -18,7 +18,7 @@
 
 import type { MessageObject } from "@api/MessageEvents";
 import type { BasicGuild, Channel, CloudUpload, Guild, GuildFeatures, GuildProfile, MediaModalItem, MediaModalProps, Message, User } from "@vencord/discord-types";
-import { ChannelActionCreators, ChannelStore, ComponentDispatch, Constants, FluxDispatcher, GuildStore, i18n, InviteActions, MessageActions, openMediaModal, openUserProfileModal, RestAPI, SelectedChannelStore, SelectedGuildStore, Toasts, UserProfileStore, UserSettingsActionCreators, UserUtils } from "@webpack/common";
+import { ChannelActionCreators, ChannelStore, ComponentDispatch, Constants, FluxDispatcher, GuildStore, i18n, InviteActions, MessageActions, openMediaModal, openUserProfileModal, RestAPI, SelectedChannelStore, SelectedGuildStore, showToast, UserProfileStore, UserSettingsActionCreators, UserUtils } from "@webpack/common";
 import { Except } from "type-fest";
 
 import { copyToClipboard } from "./clipboard";
@@ -116,25 +116,17 @@ export function insertTextIntoChatInputBox(text: string) {
 }
 
 export async function copyWithToast(text: string, toastMessage = "Copied to clipboard!") {
-    try {
+try {
         await copyToClipboard(text);
     } catch (e) {
         // Most callers fire this off with `void copyWithToast(...)`, so a rejection here
         // used to surface as an unhandled rejection and the button simply did nothing.
         logger.error("Failed to copy to the clipboard", e);
-        Toasts.show({
-            message: "Could not copy to the clipboard.",
-            id: Toasts.genId(),
-            type: Toasts.Type.FAILURE
-        });
+        showToast({ text: "Could not copy to the clipboard.", variant: "critical" });
         return;
     }
 
-    Toasts.show({
-        message: toastMessage,
-        id: Toasts.genId(),
-        type: Toasts.Type.SUCCESS
-    });
+    showToast({ text: toastMessage, variant: "success" });
 }
 
 export interface MessageOptions {
