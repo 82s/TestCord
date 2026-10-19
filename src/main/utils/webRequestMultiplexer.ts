@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { app, session, Session } from "electron";
+import { app, Session, session } from "electron";
 
 /**
  * Electron only keeps one listener per Session/webRequest event: every new
@@ -45,7 +45,7 @@ export function patchWebRequestMultiplexer() {
 }
 
 function patchSession(ses: Session) {
-    const webRequest = ses.webRequest;
+    const { webRequest } = ses;
     if (patched.has(webRequest)) return;
 
     patched.add(webRequest);
