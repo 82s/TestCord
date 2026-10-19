@@ -264,7 +264,14 @@ const patchCsp = (headers: PolicyMap) => {
     const header = findHeader(headers, "content-security-policy");
 
     if (header) {
-        const csp = parsePolicy(headers[header][0]);
+        const policy = headers[header][0];
+
+        // An empty policy is an explicitly stripped one (GoofcordSecurity's
+        // unstricter), rebuilding it would leave the page with only the
+        // directives pushed below
+        if (!policy) return;
+
+        const csp = parsePolicy(policy);
 
         const pushDirective = (directive: string, ...values: string[]) => {
             csp[directive] ??= [...(csp["default-src"] ?? [])];

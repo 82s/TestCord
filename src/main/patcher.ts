@@ -23,8 +23,15 @@ import { dirname, join } from "path";
 import { RendererSettings } from "./settings";
 import { patchTrayMenu } from "./trayMenu";
 import { IS_VANILLA } from "./utils/constants";
+import { patchWebRequestMultiplexer } from "./utils/webRequestMultiplexer";
 
 console.log("[Testcord] Starting up...");
+
+// Electron replaces the previous listener on every webRequest registration, which lets
+// Discord's own development-only onHeadersReceived listener (allowDevHosts) clobber our
+// CSP patches. This hooks session creation, so every session is multiplexed before any
+// code can register on it.
+if (!IS_VANILLA) patchWebRequestMultiplexer();
 
 // Our injector file at app/index.js
 const injectorPath = require.main!.filename;
