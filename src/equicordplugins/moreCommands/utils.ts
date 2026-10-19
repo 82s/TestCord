@@ -33,11 +33,47 @@ export function rand(min, max) {
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-export async function getCuteAnimeBoys(sub: string) {
+async function redditRandom(sub: string) {
     const res = await fetch(`https://www.reddit.com/r/${sub}/top.json?limit=100&t=all`);
     const { children } = (await res.json()).data;
-    const r = rand(0, children.length - 1);
-    return children[r].data.url ?? "";
+    if (!children.length) return "";
+    return children[rand(0, children.length - 1)].data.url ?? "";
+}
+
+async function nekosBestRandom(category: string) {
+    const res = await fetch(`https://nekos.best/api/v2/${category}`);
+    const { results } = await res.json();
+    return results[0]?.url ?? "";
+}
+
+async function waifuImRandom(tag: string) {
+    const res = await fetch(`https://api.waifu.im/images?IncludedTags=${tag}`);
+    const { items } = await res.json();
+    return items[0]?.url ?? "";
+}
+
+const animeBoyProviders = [
+    () => redditRandom("cuteanimeboys"),
+    () => redditRandom("animeboys"),
+    () => redditRandom("bishounen"),
+    () => nekosBestRandom("husbando"),
+    () => waifuImRandom("husbando")
+];
+
+const animeCatBoyProviders = [
+    () => redditRandom("animecatboys")
+];
+
+export async function getCuteAnimeBoys(cat: boolean) {
+    const providers = cat ? animeCatBoyProviders : animeBoyProviders;
+    const start = rand(0, providers.length - 1);
+
+    for (let i = 0; i < providers.length; i++) {
+        const url = await providers[(start + i) % providers.length]().catch(() => "");
+        if (url) return url;
+    }
+
+    throw new Error("Couldn't find a cute anime boy right now");
 }
 
 export async function getCuteNeko(): Promise<string> {
