@@ -153,6 +153,7 @@ export const CspPolicies: PolicyMap = {
     "api.spicylyrics.org": ConnectSrc,
     "spicylyrics.org": ConnectSrc,
     "nekos.best": ConnectSrc,
+    "api.waifu.im": ConnectSrc, // anime image API (anime-boys command)
     "openpgpjs.org": ConnectSrc,
     "keys.openpgp.org": ConnectSrc,
     "keyserver.ubuntu.com": ConnectSrc,
