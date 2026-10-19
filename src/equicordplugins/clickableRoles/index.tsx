@@ -143,8 +143,6 @@ function ClickableRole({ roleId, guildId, children }: { roleId: string; guildId:
 
 const WrappedClickableRole = ErrorBoundary.wrap(ClickableRole, { noop: true });
 
-const wrapRoleSectionCache = new WeakMap<React.ComponentType<any>, React.ComponentType<any>>();
-
 export default definePlugin({
     name: "ClickableRoles",
     description: "Click on roles in user profiles and the member list to see which members have them.",
@@ -162,42 +160,20 @@ export default definePlugin({
         {
             find: 'tutorialId:"whos-online"',
             replacement: {
-                // The member list builds each section header from a memo'd `em` component
-                // that destructures `{id, label, count, guildId}`, and renders it through
-                // `renderSection`. Wrapping the component rather than the call site keeps
-                // every render path covered with one edit.
-                //
-                // The previous pattern interpolated #{intl::CHANNEL_MEMBERS_A11Y_LABEL} and
-                // wrapped a `(function(i){let{id:...}})` IIFE. Discord dropped both that
-                // intl key and the IIFE, so `find` still matched the module while `match`
-                // matched nothing usable, and the replacement it did emit was unbalanced.
-                match: /return\(0,(\i\.jsx)\)\((\i),\{id:(\i)\.id,label:/,
-                replace: "return(0,$1)($self.wrapRoleSection($2),{id:$3.id,label:",
+                match: /(\i\.\i),\{(?=\.\.\.\i,key:`section-)/g,
+                replace: "$self.RoleGroup,{Original:$1,",
             },
         },
     ],
 
-    wrapRoleSection(Component: React.ComponentType<any>) {
-        // The patch runs inside Discord's render, so this is called on every render of
-        // every section header. Caching per component keeps the returned identity stable,
-        // otherwise React unmounts and remounts the subtree on each pass.
-        const cache = wrapRoleSectionCache.get(Component);
-        if (cache) return cache;
-
-        const Wrapped: React.ComponentType<any> = props => {
-            const roleId = props?.id;
-            const guildId = props?.guildId;
-            if (typeof roleId !== "string" || typeof guildId !== "string") return <Component {...props} />;
-            if (!GuildRoleStore.getRole(guildId, roleId)) return <Component {...props} />;
-            return (
-                <WrappedClickableRole roleId={roleId} guildId={guildId}>
-                    <Component {...props} />
-                </WrappedClickableRole>
-            );
-        };
-
-        wrapRoleSectionCache.set(Component, Wrapped);
-        return Wrapped;
+    RoleGroup({ Original, ...props }: { Original: React.ComponentType<{ id: string; guildId: string; }>; id: string; guildId: string; }) {
+        const result = <Original {...props} />;
+        if (!GuildRoleStore.getRole(props.guildId, props.id)) return result;
+        return (
+            <WrappedClickableRole roleId={props.id} guildId={props.guildId}>
+                {result}
+            </WrappedClickableRole>
+        );
     },
 
     wrapRolePill(props: { role: Role; guildId: string; }, renderOriginal: () => React.ReactNode) {

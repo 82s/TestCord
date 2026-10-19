@@ -84,7 +84,7 @@ export function PluginListModal({ modalProps }: { modalProps: ModalProps; }) {
             body: (
                 <>
                     <p>The following plugins require a restart:</p>
-                    <div>{changes.map((s, i) => (
+                    <div>{[...changes].map((s, i) => (
                         <>
                             {i > 0 && ", "}
                             {Parser.parse("`" + s + "`")}

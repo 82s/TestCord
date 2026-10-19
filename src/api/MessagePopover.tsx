@@ -22,11 +22,11 @@ import ErrorBoundary from "@components/ErrorBoundary";
 import { ChevronSmallLeftIcon, ChevronSmallRightIcon } from "@components/Icons";
 import { Logger } from "@utils/Logger";
 import { classes } from "@utils/misc";
-import { IconComponent } from "@utils/types";
+import { IconComponent, IconProps } from "@utils/types";
 import { Channel, Message } from "@vencord/discord-types";
 import { findCssClassesLazy } from "@webpack";
 import { Clickable, useEffect, useLayoutEffect, useMemo, useRef, useState } from "@webpack/common";
-import type { ComponentType, MouseEventHandler, ReactNode } from "react";
+import type { ComponentType, HTMLProps, MouseEventHandler, ReactElement, ReactNode } from "react";
 
 import { SettingsStore, useSettings } from "./Settings";
 
@@ -35,16 +35,25 @@ const logger = new Logger("MessagePopover");
 const ToolbarClasses = findCssClassesLazy("wrapper", "button", "selected", "separator", "disabled", "dangerous");
 const HoverBarClasses = findCssClassesLazy("popover", "hoverBarButton", "icon", "buttonContent");
 
-export interface MessagePopoverButtonItem {
+export interface MessagePopoverButtonItem extends HTMLProps<HTMLDivElement> {
     key?: string,
     label: string,
     icon: ComponentType<any>,
-    message: Message,
-    channel: Channel,
+    message?: Message,
+    channel?: Channel,
     // HTMLElement: the button is Discord's on a native build and a Clickable div on
     // the fallback path, and these handlers never touch the event target type.
     onClick?: MouseEventHandler<HTMLElement>,
     onContextMenu?: MouseEventHandler<HTMLElement>;
+    ariaLabel?: string,
+    buttonClassName?: string
+    dangerous?: boolean,
+    disabled?: boolean,
+    iconProps?: IconProps,
+    onTooltipShow?: () => void,
+    onTooltipHide?: () => void,
+    separator?: boolean,
+    tooltipText?: ReactElement,
 }
 
 export type MessagePopoverButtonFactory = (message: Message) => MessagePopoverButtonItem | null;
