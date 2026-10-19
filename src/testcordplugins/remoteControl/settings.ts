@@ -41,12 +41,12 @@ export const settings = definePluginSettings({
     },
     responseDeleteDelay: {
         type: OptionType.NUMBER,
-        description: "Seconds before short replies are deleted. 0 keeps them.",
+        description: "Seconds before success and error replies are deleted. 0 keeps them.",
         default: 5
     },
     infoDeleteDelay: {
         type: OptionType.NUMBER,
-        description: "Seconds before help, lists, and settings output is deleted. 0 keeps it.",
+        description: "Seconds before command output like help, lists, and system info is deleted. 0 keeps it.",
         default: 30
     },
     deleteCommandMessages: {
