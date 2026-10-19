@@ -330,6 +330,7 @@ export function replyInfo(ctx: RemoteContext, content: string) {
 }
 
 export function replyDone(ctx: RemoteContext, content = "Done.") {
+    if (!settings.store.sendConfirmations) return Promise.resolve();
     return reply(ctx, `✅ ${content}`);
 }
 

@@ -34,6 +34,11 @@ export const settings = definePluginSettings({
         description: "Accept commands in every channel instead of only DMs and the channels above.",
         default: false
     },
+    sendConfirmations: {
+        type: OptionType.BOOLEAN,
+        description: "Send a ✅ reply when a command succeeds. Errors and command output still show up.",
+        default: true
+    },
     responseDeleteDelay: {
         type: OptionType.NUMBER,
         description: "Seconds before short replies are deleted. 0 keeps them.",
