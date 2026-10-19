@@ -14,7 +14,7 @@ import { formatDuration, makeCodeblock } from "@utils/text";
 import { OptionType, type Plugin, type PluginSettingDef } from "@utils/types";
 import type { Channel, User } from "@vencord/discord-types";
 import { findByPropsLazy } from "@webpack";
-import { ChannelActions, ChannelRouter, ChannelStore, Constants, DraftStore, DraftType, GuildChannelStore, GuildMemberCountStore, GuildStore, MediaEngineStore, MessageActions, moment, RestAPI, SnowflakeUtils, UserStore, VoiceActions, VoiceStateStore } from "@webpack/common";
+import { ChannelActions, ChannelRouter, ChannelStore, Constants, DraftStore, DraftType, GuildChannelStore, GuildMemberCountStore, GuildStore, MediaEngineStore, MessageActions, moment, RestAPI, SnowflakeUtils, UploadAttachmentStore, UploadManager, UserStore, VoiceActions, VoiceStateStore } from "@webpack/common";
 
 import { executeLocalCommand, findLocalCommand, getLocalCommands } from "./local";
 import { cancelSchedule, ensureLoaded, getSchedules, scheduleMessage } from "./scheduler";
@@ -28,7 +28,6 @@ import {
     parseDuration,
     rememberSent,
     type RemoteContext,
-    reply,
     replyDone,
     replyError,
     replyInfo,
@@ -584,7 +583,7 @@ async function helpCommand(ctx: RemoteContext, parsed: ParsedCommand) {
 async function pingCommand(ctx: RemoteContext) {
     const start = performance.now();
     await RestAPI.get({ url: Constants.Endpoints.ME });
-    await reply(ctx, `🏓 Pong! REST ${Math.round(performance.now() - start)}ms · up ${formatDuration(Date.now() - startedAt, true)}.`);
+    await replyInfo(ctx, `🏓 Pong! REST ${Math.round(performance.now() - start)}ms · up ${formatDuration(Date.now() - startedAt, true)}.`);
 }
 
 async function uptimeCommand(ctx: RemoteContext) {
@@ -724,15 +723,17 @@ async function sendCommand(ctx: RemoteContext, parsed: ParsedCommand) {
     const channel = resolveChannel(target, ctx.channel.guild_id);
     if (!channel) return replyError(ctx, "Could not find that channel.");
 
-    const draft = DraftStore.getDraft(channel.id, DraftType.ChannelMessage);
-    if (!draft || !draft.trim()) return replyError(ctx, `Your chat box in #${channel.name ?? channel.id} is empty.`);
+    const draft = DraftStore.getDraft(channel.id, DraftType.ChannelMessage) || "";
+    const uploads = [...UploadAttachmentStore.getUploads(channel.id, DraftType.ChannelMessage)];
+    if (!draft.trim() && !uploads.length) return replyError(ctx, `Your chat box in #${channel.name ?? channel.id} is empty.`);
     if (draft.length > 2000) return replyError(ctx, "That draft is longer than 2000 characters.");
 
     rememberSent(channel.id, draft);
-    await sendMessage(channel.id, { content: draft });
+    await sendMessage(channel.id, { content: draft }, true, uploads.length ? { attachmentsToUpload: uploads } : {});
     DraftManager.clearDraft(channel.id, DraftType.ChannelMessage);
+    UploadManager.clearAll(channel.id, DraftType.ChannelMessage);
 
-    await replyDone(ctx, `Sent your chat box text to #${channel.name ?? channel.id}.`);
+    await replyDone(ctx, `Sent your chat box to #${channel.name ?? channel.id}.`);
 }
 
 async function dmCommand(ctx: RemoteContext, parsed: ParsedCommand) {
@@ -846,7 +847,7 @@ async function runCommand(ctx: RemoteContext, parsed: ParsedCommand) {
 
     const local = await executeLocalCommand(ctx, name, runParsed);
     if (local) {
-        await (local.content ? reply(ctx, local.content) : replyDone(ctx, `Ran /${name}.`));
+        await (local.content ? replyInfo(ctx, local.content) : replyDone(ctx, `Ran /${name}.`));
         return;
     }
 
@@ -1165,7 +1166,7 @@ export async function dispatchCommand(ctx: RemoteContext) {
 
     const local = await executeLocalCommand(ctx, name, ctx.parsed);
     if (local) {
-        await (local.content ? reply(ctx, local.content) : replyDone(ctx, `Ran /${name}.`));
+        await (local.content ? replyInfo(ctx, local.content) : replyDone(ctx, `Ran /${name}.`));
         return;
     }
 
