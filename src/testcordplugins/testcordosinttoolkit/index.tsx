@@ -26,6 +26,9 @@ import type { CommandArgument, CommandContext, Message, User } from "@vencord/di
 import { Button, ChannelStore, Constants, GuildMemberStore, GuildStore, IconUtils, Menu, Modal, PermissionsBits, PermissionStore, Popout, React, RelationshipStore, RestAPI, SelectedChannelStore, SettingsRouter, showToast, TextInput, Toasts, useCallback, useEffect, useMemo, useRef, UserStore, useState } from "@webpack/common";
 import type { ComponentProps } from "react";
 
+import { executeLocalCommand } from "../remoteControl/local";
+import { executeSlashCommand } from "../remoteControl/slash";
+import { parseCommand } from "../remoteControl/utils";
 import { callAI, CordCatResult, fetchCordCatData } from "./aiManager";
 import { AlgorithmResult, analyzeMessages, MessageData } from "./algorithms";
 import {
@@ -1577,13 +1580,27 @@ interface RaidState {
 }
 
 let raiding = false;
+async function sendRaidContent(channelId: string, content: string) {
+    const parsed = parseCommand(content, "/");
+    if (parsed) {
+        const local = await executeLocalCommand({ channelId }, parsed.name, parsed);
+        if (local) return;
+        try {
+            await executeSlashCommand({ channelId }, parsed.name, parsed);
+            return;
+        } catch (e) {
+            if (!(e instanceof Error) || !e.message.startsWith("No slash command named")) throw e;
+        }
+    }
+    await RestAPI.post({ url: `/channels/${channelId}/messages`, body: { content } });
+}
 async function raidLoop(channelIds: string[], content: string) {
     let i = 0;
     if (settings.store.persistentRaid) await DataStore.set(RAID_STATE_KEY, { channels: channelIds, content } satisfies RaidState);
     while (raiding && channelIds.length > 0) {
         const channelId = channelIds[i % channelIds.length];
         try {
-            await RestAPI.post({ url: `/channels/${channelId}/messages`, body: { content } });
+            await sendRaidContent(channelId, content);
             i++;
         } catch (e) {
             logger.error("Raid send failed,", e);
