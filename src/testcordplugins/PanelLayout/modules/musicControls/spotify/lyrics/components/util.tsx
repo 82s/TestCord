@@ -103,12 +103,17 @@ export function getCurrentAttribution(lyricsInfo: LyricsData | null): LyricsAttr
     return lyricsInfo.attributions[use];
 }
 
-function AttributionPersonLine({ label, person }: { label: string; person: LyricsAttributionPerson; }) {
+function sourceLabel(source: string): string {
+    if (source === "spicy_lyrics") return "Community lyrics";
+    return humanizeSource(source);
+}
+
+function AttributionHandle({ person }: { person: LyricsAttributionPerson; }) {
     const href = person.url ?? (person.id ? `https://discord.com/users/${person.id}` : undefined);
+    const handle = `@${person.username}`;
 
     return (
-        <div className={cl("attribution-line")}>
-            <span className={cl("attribution-label")}>{label} </span>
+        <>
             {person.avatar && (
                 <img
                     src={person.avatar}
@@ -117,11 +122,11 @@ function AttributionPersonLine({ label, person }: { label: string; person: Lyric
                 />
             )}
             {href ? (
-                <MaskedLink href={href}>{person.username}</MaskedLink>
+                <MaskedLink href={href}>{handle}</MaskedLink>
             ) : (
-                <span>{person.username}</span>
+                <span className={cl("attribution-bright")}>{handle}</span>
             )}
-        </div>
+        </>
     );
 }
 
@@ -137,30 +142,42 @@ export function LyricsAttributionFooter({
     const attr = getCurrentAttribution(lyricsInfo);
     if (!attr) return null;
 
-    const hasCredit = !!attr.uploader || !!attr.maker;
+    const credited = attr.maker ?? attr.uploader;
+    const uploadedBy = attr.maker && attr.uploader && attr.uploader.username !== attr.maker.username
+        ? attr.uploader
+        : undefined;
     const hasWriters = !!attr.songWriters?.length;
     const hasProvider = !!attr.provider;
 
-    if (!hasCredit && !hasWriters && !hasProvider) return null;
+    if (!credited && !hasWriters && !hasProvider) return null;
 
     return (
         <div className={[cl("attribution"), className].filter(Boolean).join(" ")}>
-            {hasProvider && (
-                <div className={cl("attribution-line")}>
-                    <span className={cl("attribution-label")}>Source: </span>
-                    <span>{humanizeSource(attr.provider)}</span>
-                </div>
-            )}
             {hasWriters && (
-                <div className={cl("attribution-line")}>
-                    <span className={cl("attribution-label")}>
-                        {attr.songWriters!.length > 1 ? "Writers: " : "Writer: "}
-                    </span>
-                    <span>{attr.songWriters!.join(", ")}</span>
+                <div className={cl("attribution-writers")}>
+                    <span className={cl("attribution-dim")}>Written by </span>
+                    <span className={cl("attribution-bright")}>{attr.songWriters!.join(", ")}</span>
                 </div>
             )}
-            {attr.uploader && <AttributionPersonLine label="Uploaded by: " person={attr.uploader} />}
-            {attr.maker && <AttributionPersonLine label="Synced by: " person={attr.maker} />}
+            {(hasProvider || credited) && (
+                <div className={cl("attribution-meta")}>
+                    {hasProvider && <span className={cl("attribution-dim")}>{sourceLabel(`Provided by ${attr.provider}`)}</span>}
+                    {hasProvider && credited && <span className={cl("attribution-dim")}>·</span>}
+                    {credited && (
+                        <>
+                            <span className={cl("attribution-dim")}>Made by</span>
+                            <AttributionHandle person={credited} />
+                        </>
+                    )}
+                    {uploadedBy && (
+                        <>
+                            <span className={cl("attribution-dim")}>·</span>
+                            <span className={cl("attribution-dim")}>Uploaded by</span>
+                            <AttributionHandle person={uploadedBy} />
+                        </>
+                    )}
+                </div>
+            )}
         </div>
     );
 }
