@@ -367,10 +367,8 @@ export default definePlugin({
                 },
             ],
             execute: async opts => {
-                let sub = "cuteanimeboys";
                 const cat = findOption(opts, "cat") as boolean | undefined;
-                if (cat) sub = "animecatboys";
-                return { content: await getCuteAnimeBoys(sub) };
+                return { content: await getCuteAnimeBoys(!!cat) };
             },
         },
         {
