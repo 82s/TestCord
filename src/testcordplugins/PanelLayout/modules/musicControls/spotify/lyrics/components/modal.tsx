@@ -6,7 +6,7 @@
 
 import { BaseText } from "@components/BaseText";
 import { Provider } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/providers/types";
-import { getBgRefs, getLineWordRefs, LineRegistry, useSpicyLinesFrame } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/spicyAnimator/useSpicyLinesFrame";
+import { getBgRefs, getLineWordRefs, LineRegistry, rowRef, useSpicyLinesFrame } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/spicyAnimator/useSpicyLinesFrame";
 import { SpotifyStore, Track } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/SpotifyStore";
 import { openImageModal } from "@utils/discord";
 import { RenderModalProps } from "@vencord/discord-types";
@@ -91,11 +91,11 @@ export function LyricsModal({ props }: { props: RenderModalProps; }) {
                             const hasWordTiming = !isUntimed && !!line.words?.length;
 
                             return (
-                                <div ref={lyricRefs[i]} key={i} className={cl("line-row")}>
+                                <div ref={rowRef(lyricRefs[i], refs)} key={i} className={cl("line-row")}>
                                     <BaseText
                                         size="md"
                                         weight="semibold"
-                                        className={[modalLine, cl("line"), stateCl, alignCl, isSpicyProvider && !isUntimed && cl("line-seekable")].filter(Boolean).join(" ")}
+                                        className={[modalLine, cl("line"), !hasWordTiming && cl("line-plain"), stateCl, alignCl, isSpicyProvider && !isUntimed && cl("line-seekable")].filter(Boolean).join(" ")}
                                         onClick={seekTo(line.time)}
                                     >
                                         {!isUntimed && (

@@ -361,55 +361,82 @@
     max-width: calc(var(--modal-width-large, 440px) + 300px);
 }
 
-.vc-spotify-lyrics-line {
-    --vc-line-idle-scale: 0.86;
+/*
+ * Line styling ported from Spicy Lyrics (src/css/Lyrics/Mixed.css, AGPL-3.0).
+ *
+ * Text is painted transparent. Idle lines are drawn by a text-shadow whose blur is
+ * --BlurAmount (set per line row by the animator from its distance to the active line),
+ * and the active line is painted by a gradient clipped to the text, which the animator moves.
+ */
+.vc-spotify-lyrics-line-row {
+    --BlurAmount: 0px;
+}
 
-    scale: var(--vc-line-idle-scale);
-    opacity: 0.55;
+.vc-spotify-lyrics-line-row:hover {
+    --BlurAmount: 0px !important;
+}
+
+.vc-spotify-lyrics-line {
+    --gradient-position: -20%;
+    --gradient-color: 255;
+    --gradient-alpha: 0.85;
+    --gradient-alpha-end: 0.35;
+    /* Spicy paints line-synced lines top to bottom; use 90deg for left to right. */
+    --gradient-degrees: 180deg;
+    --text-shadow-blur-radius: 0.1em;
+    --text-shadow-opacity: 0%;
+    --Vocal-NotSung-opacity: 0.51;
+    --Vocal-Active-opacity: 1;
+    --Vocal-Sung-opacity: 0.497;
+
+    scale: 1;
+    opacity: var(--Vocal-NotSung-opacity);
     color: var(--text-muted);
-    transition:
-        scale 0.55s cubic-bezier(0.22, 1, 0.36, 1),
-        opacity 0.45s ease,
-        color 0.45s ease;
+    font-weight: 700;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    -webkit-background-clip: text;
+    text-shadow: 0 0 var(--BlurAmount) rgb(var(--gradient-color) var(--gradient-color) var(--gradient-color) / var(--gradient-alpha-end));
+    transition: opacity 0.2s cubic-bezier(0.61, 1, 0.88, 1);
 }
 
 .vc-spotify-lyrics-line.vc-spotify-lyrics-line-bg {
-    --vc-line-idle-scale: 0.83;
-}
-
-.vc-spotify-lyrics-modal-line.vc-spotify-lyrics-line {
-    --vc-line-idle-scale: 0.875;
-}
-
-.vc-spotify-lyrics-modal-line.vc-spotify-lyrics-line.vc-spotify-lyrics-line-bg {
-    --vc-line-idle-scale: 0.86;
+    --gradient-alpha: 0.6;
+    --gradient-alpha-end: 0.3;
 }
 
 .vc-spotify-lyrics-line.vc-spotify-lyrics-line-next {
-    opacity: 0.6;
+    opacity: var(--Vocal-NotSung-opacity);
 }
 
 .vc-spotify-lyrics-line.vc-spotify-lyrics-line-sung {
-    opacity: 0.42;
+    opacity: var(--Vocal-Sung-opacity);
+    --gradient-position: 100%;
+    text-shadow: 0 0 var(--BlurAmount) rgb(var(--gradient-color) var(--gradient-color) var(--gradient-color) / var(--gradient-alpha));
 }
 
 .vc-spotify-lyrics-line.vc-spotify-lyrics-line-active {
-    scale: 0.94;
+    opacity: var(--Vocal-Active-opacity);
+    text-shadow: 0 0 var(--text-shadow-blur-radius) rgb(255 255 255 / var(--text-shadow-opacity));
+}
+
+/* Line-synced lyrics: the line itself carries the gradient. Word-synced lines don't,
+   their words paint their own (see spicyWordAnimation.css). */
+.vc-spotify-lyrics-line.vc-spotify-lyrics-line-plain.vc-spotify-lyrics-line-active {
+    background-image: linear-gradient(
+        var(--gradient-degrees),
+        rgb(255 255 255 / var(--gradient-alpha)) var(--gradient-position),
+        rgb(255 255 255 / var(--gradient-alpha-end)) calc(var(--gradient-position) + 20%)
+    );
+}
+
+.vc-spotify-lyrics-line:hover {
     opacity: 1;
-    color: var(--text-strong, var(--text-default));
 }
 
-.vc-spotify-lyrics-line.vc-spotify-lyrics-line-bg.vc-spotify-lyrics-line-active {
-    opacity: 0.85;
-}
-
-/* Line-synced lyrics (LRCLIB, Spotify) have no per-word wipe, so a long colour/opacity
-   fade between lines reads as a gradient. Switch lines quickly instead. */
-.vc-spotify-lyrics-line.vc-spotify-lyrics-line-plain {
-    transition:
-        scale 0.3s cubic-bezier(0.22, 1, 0.36, 1),
-        opacity 0.15s ease-out,
-        color 0.15s ease-out;
+.vc-spotify-lyrics-modal-timestamp {
+    -webkit-text-fill-color: currentcolor;
+    text-shadow: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -448,10 +475,6 @@
 
 .vc-spotify-lyrics-line-seekable {
     cursor: pointer;
-}
-
-.vc-spotify-lyrics-line-seekable:hover {
-    opacity: 0.85;
 }
 
 .vc-spotify-lyrics-spicy .vc-spotify-lyrics-line-seekable {

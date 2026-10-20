@@ -217,6 +217,11 @@ function getCenteredScrollTop(container: HTMLElement, el: HTMLElement, offset: n
     return top - (container.clientHeight / 2 - el.offsetHeight / 2) - offset;
 }
 
+function getScrollGoal(container: HTMLElement, el: HTMLElement, index: number, lineCount: number, offset: number): number {
+    if (index === lineCount - 1) return Math.max(0, container.scrollHeight - container.clientHeight);
+    return getCenteredScrollTop(container, el, offset);
+}
+
 function isInView(container: HTMLElement, el: HTMLElement) {
     const c = container.getBoundingClientRect();
     const e = el.getBoundingClientRect();
@@ -432,7 +437,7 @@ export function useLyrics({ scroll = true, containerRef, centerOffset = 0 }: {
         jumpedRef.current = false;
         lastScrolledRef.current = currLrcIndex;
 
-        getScroller(container).scrollTo(() => getCenteredScrollTop(container, el, centerOffset), instant);
+        getScroller(container).scrollTo(() => getScrollGoal(container, el, currLrcIndex, lyricRefs.length, centerOffset), instant);
     }, [currLrcIndex, lyricRefs, scroll, containerRef, lineTimes, centerOffset, smoothScroll]);
 
     useEffect(() => {
@@ -444,8 +449,8 @@ export function useLyrics({ scroll = true, containerRef, centerOffset = 0 }: {
             const line = index === null ? null : refs[index]?.current;
             const container = getContainer(el);
             if (!line || !container) return;
-            if (Math.abs(getCenteredScrollTop(container, line, centerOffset) - container.scrollTop) < 2) return;
-            getScroller(container).scrollTo(() => getCenteredScrollTop(container, line, centerOffset), true);
+            if (Math.abs(getScrollGoal(container, line, index!, refs.length, centerOffset) - container.scrollTop) < 2) return;
+            getScroller(container).scrollTo(() => getScrollGoal(container, line, index!, refs.length, centerOffset), true);
         });
 
         observer.observe(el);

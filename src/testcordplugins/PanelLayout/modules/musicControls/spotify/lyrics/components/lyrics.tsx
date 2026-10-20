@@ -9,7 +9,7 @@ import { TooltipContainer } from "@components/TooltipContainer";
 import { settings } from "@testcordplugins/PanelLayout/modules/musicControls/settings";
 import { SpotifyLrcStore } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/providers/store";
 import { Provider } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/providers/types";
-import { getBgRefs, getLineWordRefs, LineRegistry, useSpicyLinesFrame } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/spicyAnimator/useSpicyLinesFrame";
+import { getBgRefs, getLineWordRefs, LineRegistry, rowRef, useSpicyLinesFrame } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/spicyAnimator/useSpicyLinesFrame";
 import { SpotifyStore } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/SpotifyStore";
 import { ContextMenuApi, openModalLazy, React, useEffect, useState, useStateFromStores } from "@webpack/common";
 
@@ -42,6 +42,7 @@ function LyricsDisplay({ scroll = true, style }: { scroll?: boolean; style?: Rea
 
     const isSpicyProvider = lyricsInfo?.useLyric === Provider.SpicyLyrics || lyricsInfo?.useLyric === Provider.SpicyRomanized;
 
+    // Spicy Lyrics only: clicking a line jumps to it, clicking empty space opens the modal
     const seekTo = (seconds: number) => (e: React.MouseEvent) => {
         if (!isSpicyProvider || isUntimed) return;
         e.stopPropagation();
@@ -73,7 +74,7 @@ function LyricsDisplay({ scroll = true, style }: { scroll?: boolean; style?: Rea
                             const hasWordTiming = !isUntimed && !!line.words?.length;
 
                             return (
-                                <div ref={lyricRefs[i]} key={i} className={cl("line-row")}>
+                                <div ref={rowRef(lyricRefs[i], refs)} key={i} className={cl("line-row")}>
                                     <BaseText
                                         size="sm"
                                         className={[cl("line"), !hasWordTiming && cl("line-plain"), stateCl, alignCl, isSpicyProvider && !isUntimed && cl("line-seekable")].filter(Boolean).join(" ")}

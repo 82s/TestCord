@@ -8,6 +8,8 @@ import { LineTimes } from "@testcordplugins/PanelLayout/modules/musicControls/sp
 import { LyricWord, SyncedLyric } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/providers/types";
 import { React } from "@webpack/common";
 
+import { Spline } from "./Splines";
+import { Spring } from "./Spring";
 import { getWordProgress, getWordState, resetWord, stepWord } from "./WordAnimator";
 
 type WordRefs = { current: (HTMLSpanElement | null)[]; };
@@ -15,6 +17,7 @@ type WordRefs = { current: (HTMLSpanElement | null)[]; };
 export interface LineWordRefs {
     lead: WordRefs;
     bg: WordRefs[];
+    row: HTMLElement | null;
 }
 
 export type LineRegistry = Map<number, LineWordRefs>;
@@ -22,7 +25,7 @@ export type LineRegistry = Map<number, LineWordRefs>;
 export function getLineWordRefs(registry: LineRegistry, index: number): LineWordRefs {
     let refs = registry.get(index);
     if (!refs) {
-        refs = { lead: { current: [] }, bg: [] };
+        refs = { lead: { current: [] }, bg: [], row: null };
         registry.set(index, refs);
     }
     return refs;
@@ -30,6 +33,72 @@ export function getLineWordRefs(registry: LineRegistry, index: number): LineWord
 
 export function getBgRefs(refs: LineWordRefs, bgIndex: number): WordRefs {
     return (refs.bg[bgIndex] ??= { current: [] });
+}
+
+export function rowRef(base: { current: HTMLDivElement | null; } | undefined, refs: LineWordRefs) {
+    return (el: HTMLDivElement | null) => {
+        if (base) base.current = el;
+        refs.row = el;
+    };
+}
+
+const LineGlowSpline = new Spline([
+    { Time: 0, Value: 0 },
+    { Time: 0.5, Value: 1 },
+    { Time: 1, Value: 0 },
+]);
+
+const GLOW_REFERENCE_PX = 40;
+const LINE_GLOW_FREQUENCY = 1;
+const LINE_GLOW_DAMPING = 0.5;
+
+const lineSprings = new WeakMap<HTMLElement, Spring>();
+
+function lineElOf(refs: LineWordRefs): HTMLElement | null {
+    return (refs.row?.firstElementChild as HTMLElement | null) ?? null;
+}
+
+function setVar(el: HTMLElement, name: string, value: string) {
+    if (el.style.getPropertyValue(name) !== value) el.style.setProperty(name, value);
+}
+
+function lineTargets(state: string, progress: number) {
+    if (state === "a") return { glow: LineGlowSpline.at(progress), gradient: progress * 100 };
+    if (state === "s") return { glow: LineGlowSpline.at(1), gradient: 100 };
+    return { glow: LineGlowSpline.at(0), gradient: -20 };
+}
+
+function stepLine(el: HTMLElement, state: string, progress: number, dt: number, snap: boolean) {
+    const t = lineTargets(state, progress);
+    let spring = lineSprings.get(el);
+    if (!spring) {
+        spring = new Spring(t.glow, LINE_GLOW_FREQUENCY, LINE_GLOW_DAMPING);
+        lineSprings.set(el, spring);
+    }
+    spring.SetGoal(t.glow, snap);
+    const glow = Math.min(Math.max(spring.Step(dt), 0), 1);
+
+    setVar(el, "--gradient-position", `${t.gradient.toFixed(1)}%`);
+    setVar(el, "--text-shadow-blur-radius", `${((4 + 8 * glow) / GLOW_REFERENCE_PX).toFixed(3)}em`);
+    setVar(el, "--text-shadow-opacity", `${Math.round(glow * 50)}%`);
+}
+
+function isPlainLine(line: SyncedLyric) {
+    return line.text !== null && !line.words?.length;
+}
+
+const BLUR_MULTIPLIER = 1.25;
+const BLUR_MAX = BLUR_MULTIPLIER * 5 + BLUR_MULTIPLIER * 0.465;
+const BLUR_SCALE = 0.22;
+
+function applyBlur(lines: SyncedLyric[], registry: LineRegistry, states: string, activeIndex: number) {
+    for (let i = 0; i < lines.length; i++) {
+        const row = registry.get(i)?.row;
+        if (!row) continue;
+        const distance = Math.abs(i - activeIndex);
+        const px = states[i] === "a" || distance === 0 ? 0 : Math.min(BLUR_MULTIPLIER * distance, BLUR_MAX) * BLUR_SCALE;
+        setVar(row, "--BlurAmount", `${px.toFixed(2)}px`);
+    }
 }
 
 const SETTLE_MS = 1600;
@@ -50,10 +119,20 @@ function forEachWord(line: SyncedLyric, refs: LineWordRefs, fn: (el: HTMLSpanEle
     });
 }
 
-function resetAll(lines: SyncedLyric[], registry: LineRegistry, posSec: number) {
+function resetAll(lines: SyncedLyric[], registry: LineRegistry, posSec: number, lineTimes: LineTimes[]) {
     for (let i = 0; i < lines.length; i++) {
         const refs = registry.get(i);
         if (!refs) continue;
+        if (isPlainLine(lines[i])) {
+            const el = lineElOf(refs);
+            if (el) {
+                const { start, end } = lineTimes[i];
+                const state = posSec < start ? "n" : posSec >= end ? "s" : "a";
+                const progress = end > start ? Math.min(Math.max((posSec - start) / (end - start), 0), 1) : 0;
+                stepLine(el, state, progress, 0, true);
+            }
+            continue;
+        }
         forEachWord(lines[i], refs, (el, w) =>
             resetWord(el, getWordState(posSec, w.startTime, w.endTime), getWordProgress(posSec, w.startTime, w.endTime))
         );
@@ -71,7 +150,10 @@ export function useSpicyLinesFrame({ lines, lineTimes, registry, statesRef, posi
 }) {
     React.useLayoutEffect(() => {
         if (!lines || !lineTimes) return;
-        resetAll(lines, registry, positionRef.current / 1000);
+        resetAll(lines, registry, positionRef.current / 1000, lineTimes);
+        const states = statesRef.current;
+        const activeIndex = states.indexOf("a");
+        if (activeIndex !== -1) applyBlur(lines, registry, states, activeIndex);
     }, [lines, lineTimes, registry]);
 
     React.useEffect(() => {
@@ -82,6 +164,7 @@ export function useSpicyLinesFrame({ lines, lineTimes, registry, statesRef, posi
         let prevStates = "";
         let prevPos = positionRef.current / 1000;
         let needsReset = true;
+        let blurIndex = -1;
         const settleUntil = new Map<number, number>();
 
         const frame = (now: number) => {
@@ -94,7 +177,7 @@ export function useSpicyLinesFrame({ lines, lineTimes, registry, statesRef, posi
             if (needsReset || Math.abs(posSec - prevPos) > JUMP_SEC) {
                 needsReset = false;
                 settleUntil.clear();
-                resetAll(lines, registry, posSec);
+                resetAll(lines, registry, posSec, lineTimes);
             } else {
                 for (let i = 0; i < lines.length; i++) {
                     const state = states[i];
@@ -108,10 +191,25 @@ export function useSpicyLinesFrame({ lines, lineTimes, registry, statesRef, posi
 
                     const refs = registry.get(i);
                     if (!refs) continue;
+                    if (isPlainLine(lines[i])) {
+                        const el = lineElOf(refs);
+                        if (el) {
+                            const { start, end } = lineTimes[i];
+                            const progress = end > start ? Math.min(Math.max((posSec - start) / (end - start), 0), 1) : 0;
+                            stepLine(el, state, progress, dt, false);
+                        }
+                        continue;
+                    }
                     forEachWord(lines[i], refs, (el, w) =>
                         stepWord(el, getWordState(posSec, w.startTime, w.endTime), getWordProgress(posSec, w.startTime, w.endTime), dt)
                     );
                 }
+            }
+
+            const activeIndex = states.indexOf("a");
+            if (activeIndex !== -1 && (activeIndex !== blurIndex || states !== prevStates)) {
+                blurIndex = activeIndex;
+                applyBlur(lines, registry, states, activeIndex);
             }
 
             prevStates = states;

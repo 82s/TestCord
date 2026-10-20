@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { Spline } from "./Splines";
 import { Spring } from "./Spring";
 
 export type WordState = "NotSung" | "Active" | "Sung";
@@ -32,49 +33,38 @@ const ScaleSpring = { frequency: 0.88, damping: 0.64 };
 const YOffsetSpring = { frequency: 1.45, damping: 0.4 };
 const GlowSpring = { frequency: 1.18, damping: 0.56 };
 
-function easeOutQuad(t: number): number { return t * (2 - t); }
-function easeOutCubic(t: number): number { return 1 - Math.pow(1 - t, 3); }
+const ScaleSpline = new Spline([
+    { Time: 0, Value: 0.95 },
+    { Time: 0.7, Value: 1.0505 },
+    { Time: 1, Value: 1 },
+]);
 
-function scaleTarget(progress: number): number {
-    if (progress <= 0.7) {
-        return 0.95 + (1.0505 - 0.95) * easeOutQuad(progress / 0.7);
-    }
-    return 1.0505 - (1.0505 - 1.0) * easeOutCubic((progress - 0.7) / 0.3);
-}
+const YOffsetSpline = new Spline([
+    { Time: 0, Value: 1 / 100 },
+    { Time: 0.9, Value: -(1 / 60) },
+    { Time: 1, Value: 0 },
+]);
 
-function yOffsetTarget(progress: number): number {
-    if (progress <= 0.9) {
-        return 1/100 + (-(1/60) - 1/100) * easeOutQuad(progress / 0.9);
-    }
-
-    return -(1/60) + (1/60) * easeOutCubic((progress - 0.9) / 0.1);
-}
-
-function glowTarget(progress: number): number {
-    if (progress <= 0.15) {
-        return progress / 0.15;
-    }
-
-    if (progress <= 0.6) {
-        return 1;
-    }
-
-    return 1 - easeOutCubic((progress - 0.6) / 0.4);
-}
+const GlowSpline = new Spline([
+    { Time: 0, Value: 0 },
+    { Time: 0.15, Value: 1 },
+    { Time: 0.6, Value: 1 },
+    { Time: 1, Value: 0 },
+]);
 
 function targetsFor(state: WordState, progress: number): { scale: number; yOffset: number; glow: number; gradientPos: number; } {
     if (state === "Active") {
         return {
-            scale: scaleTarget(progress),
-            yOffset: yOffsetTarget(progress),
-            glow: glowTarget(progress),
+            scale: ScaleSpline.at(progress),
+            yOffset: YOffsetSpline.at(progress),
+            glow: GlowSpline.at(progress),
             gradientPos: -20 + 120 * progress,
         };
     }
     if (state === "Sung") {
-        return { scale: 1.0, yOffset: 0, glow: 0, gradientPos: 100 };
+        return { scale: ScaleSpline.at(1), yOffset: YOffsetSpline.at(1), glow: GlowSpline.at(1), gradientPos: 100 };
     }
-    return { scale: 0.95, yOffset: 1 / 100, glow: 0, gradientPos: -20 };
+    return { scale: ScaleSpline.at(0), yOffset: YOffsetSpline.at(0), glow: GlowSpline.at(0), gradientPos: -20 };
 }
 
 function createSprings(state: WordState, progress: number): WordSprings {
@@ -94,9 +84,6 @@ function getOrCreateSprings(el: HTMLElement, state: WordState, progress: number)
     }
     return springs;
 }
-
-const MAX_SCALE = 1.08;
-const MIN_SCALE = 0.9;
 
 interface WrittenStyle {
     scale: string;
@@ -122,10 +109,10 @@ function applyStyle(el: HTMLElement, scale: number, yOffset: number, gradientPos
         el.style.scale = scaleStr;
     }
 
-    const translateStr = `0 ${yOffset.toFixed(3)}em`;
+    const translateStr = `translate3d(0, ${yOffset.toFixed(4)}em, 0)`;
     if (translateStr !== w.translate) {
         w.translate = translateStr;
-        el.style.translate = translateStr;
+        el.style.transform = translateStr;
     }
 
     const gradientStr = `${gradientPos.toFixed(1)}%`;
@@ -140,8 +127,9 @@ function applyStyle(el: HTMLElement, scale: number, yOffset: number, gradientPos
         el.classList.toggle("vc-spicy-glow", glowing);
     }
     if (glowing) {
-        const blurStr = `${(4 + 2 * glow).toFixed(1)}px`;
-        const opacityStr = `${Math.min(glow * 35, 100).toFixed(0)}%`;
+        // Spicy's radii are px values tuned for ~40px lyrics; em keeps the glow in proportion to this panel's text.
+        const blurStr = `${((4 + 2 * Math.min(glow, 1)) / 40).toFixed(3)}em`;
+        const opacityStr = `${(Math.min(glow, 1) * 35).toFixed(0)}%`;
         if (blurStr !== w.shadowBlur) {
             w.shadowBlur = blurStr;
             el.style.setProperty("--spicy-shadow-blur", blurStr);
@@ -161,7 +149,7 @@ export function stepWord(el: HTMLElement, state: WordState, progress: number, de
     springs.yOffset.SetGoal(targets.yOffset);
     springs.glow.SetGoal(targets.glow);
 
-    const currentScale = Math.min(Math.max(springs.scale.Step(deltaTimeSec), MIN_SCALE), MAX_SCALE);
+    const currentScale = springs.scale.Step(deltaTimeSec);
     const currentYOffset = springs.yOffset.Step(deltaTimeSec);
     const currentGlow = Math.max(springs.glow.Step(deltaTimeSec), 0);
 
