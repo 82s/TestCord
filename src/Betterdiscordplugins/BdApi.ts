@@ -7,7 +7,7 @@
 import { Settings } from "@api/Settings";
 import { Logger } from "@utils/Logger";
 import { wreq } from "@webpack";
-import { FluxDispatcher, React, ReactDOM } from "@webpack/common";
+import { FluxDispatcher, React, ReactDOM, showToast } from "@webpack/common";
 
 const bdLogger = new Logger("BdApi", "#7289da");
 
@@ -1023,27 +1023,11 @@ const BdUI = {
     },
 
     showToast(message: string, options: any = {}): void {
-        // Try to use Discord's native toast
-        try {
-            const toastModule = BdWebpack.getModule((m: any) => m.createToast && m.showToast);
-            if (toastModule) {
-                let type = 1;
-                if (typeof options === "number") {
-                    type = [0, 1, 2, 3, 4, 5].includes(options) ? options : 1;
-                } else if (options && typeof options === "object") {
-                    const typeMap: Record<string, number> = {
-                        "": 1, info: 1, success: 0, warn: 3, warning: 3, error: 4, danger: 4
-                    };
-                    type = typeMap[String(options.type || "").toLowerCase()] ?? 1;
-                }
-                toastModule.showToast(toastModule.createToast(message || "Success!", type));
-                return;
-            }
-        } catch (e) {
-            bdLogger.warn("Failed to show toast via Discord API:", e);
-        }
-        // Fallback
-        console.log("[Toast]", message);
+        const type = typeof options === "object" ? options?.type : options;
+        const variant = type === "success"
+            ? "success"
+            : ["error", "danger", "warning", "warn"].includes(type) ? "critical" : "default";
+        showToast({ text: message || "Success!", variant });
     },
 
     showConfirmationModal(title: string, content: any, options: any = {}): string {

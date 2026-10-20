@@ -44,6 +44,20 @@ const settings = definePluginSettings({
         ],
         onChange() { applySmoothCSS(); }
     },
+    motionBlur: {
+        type: OptionType.BOOLEAN,
+        description: "Smooth typing: blur the caret while it moves.",
+        default: true,
+        onChange() { applySmoothCSS(); }
+    },
+    motionBlurAmount: {
+        type: OptionType.SLIDER,
+        description: "Smooth typing: caret motion blur strength (px).",
+        markers: [1, 2, 3, 4, 6],
+        default: 2,
+        stickToMarkers: false,
+        onChange() { applySmoothCSS(); }
+    },
     smoothCaret: {
         type: OptionType.BOOLEAN,
         description: "Enable smooth caret (cursor) animation",
@@ -337,6 +351,7 @@ function buildSmoothCSS(): string {
     const color = toHex(settings.store.caretColor ?? 0xffffff);
     const ms = settings.store.transitionDelay ?? 60;
     const easing = settings.store.animationType ?? "ease";
+    const blur = settings.store.motionBlur ? settings.store.motionBlurAmount ?? 2 : 0;
     return `
 @keyframes vc-blink {
     0%, 100% { opacity: 1; }
@@ -355,12 +370,18 @@ function buildSmoothCSS(): string {
     pointer-events: none;
     z-index: 99999;
     display: none;
-    transition: transform ${ms}ms ${easing}, height ${ms}ms ${easing};
+    transition: transform ${ms}ms ${easing}, height ${ms}ms ${easing}, filter 160ms ease-out;
 }
+${blur > 0 ? `#${SMOOTH_CARET_ID}.is-moving {
+    filter: blur(${blur}px);
+    transition: transform ${ms}ms ${easing}, height ${ms}ms ${easing}, filter 40ms linear;
+}
+` : ""}
 /* Children are covered too: Discord's own stylesheets re-color the caret on
    inner editor nodes (.editor__*, slate leaves), which brings the native
    blinking caret back on top of ours while smooth typing is active. */
 [data-slate-editor], [data-slate-editor] * { caret-color: transparent !important; }
+::highlight(vc-smoothtype-hide) { color: transparent; }
 `;
 }
 
@@ -375,6 +396,7 @@ function getSmoothCaret(): HTMLDivElement {
 }
 
 let blinkTimer: ReturnType<typeof setTimeout> | null = null;
+let motionBlurTimer: ReturnType<typeof setTimeout> | null = null;
 
 function startBlink() { getSmoothCaret().classList.add("is-blinking"); }
 
@@ -382,6 +404,16 @@ function stopBlink() {
     getSmoothCaret().classList.remove("is-blinking");
     if (blinkTimer) clearTimeout(blinkTimer);
     blinkTimer = setTimeout(startBlink, 1000);
+}
+
+function markCaretMoving(el: HTMLElement) {
+    if (!settings.store.motionBlur || !(settings.store.motionBlurAmount > 0)) return;
+    el.classList.add("is-moving");
+    if (motionBlurTimer) clearTimeout(motionBlurTimer);
+    motionBlurTimer = setTimeout(() => {
+        motionBlurTimer = null;
+        el.classList.remove("is-moving");
+    }, Math.max(60, settings.store.transitionDelay ?? 60) + 30);
 }
 
 function applyCaretPosition() {
@@ -407,7 +439,10 @@ function applyCaretPosition() {
     if (!rect || rect.height === 0) { el.style.display = "none"; return; }
     const newTransform = `translate3d(${rect.right}px, ${rect.top}px, 0)`;
     if (el.style.transform !== newTransform) {
-        if (el.style.display !== "none") stopBlink();
+        if (el.style.display !== "none") {
+            stopBlink();
+            markCaretMoving(el);
+        }
     }
     el.style.display = "block";
     el.style.transform = newTransform;
@@ -505,6 +540,165 @@ function restoreInlineHiddenEditors() {
     inlineHiddenEditors.clear();
 }
 
+const CHAR_HIDE_HIGHLIGHT = "vc-smoothtype-hide";
+const supportsCharHighlight = typeof Highlight !== "undefined" && "highlights" in CSS;
+// A single typed grapheme. Pastes and IME bursts are not animated: they would need a
+// range spanning several characters with a different layout per line.
+const MAX_FADE_CHARS = 2;
+
+let hideHighlight: Highlight | null = null;
+let charOverlay: HTMLSpanElement | null = null;
+let charHiddenRange: Range | null = null;
+let charOverlayAnimation: Animation | null = null;
+let charFadeCleanup: ReturnType<typeof setTimeout> | null = null;
+let charRangeFrame: number | null = null;
+let charFadeAttempts = 0;
+let pendingChars = 0;
+
+function getHideHighlight() {
+    if (!hideHighlight) {
+        hideHighlight = new Highlight();
+        CSS.highlights.set(CHAR_HIDE_HIGHLIGHT, hideHighlight);
+    }
+    return hideHighlight;
+}
+
+function getCharOverlay() {
+    if (!charOverlay) {
+        charOverlay = document.createElement("span");
+        charOverlay.setAttribute("aria-hidden", "true");
+        charOverlay.style.cssText = [
+            "position: fixed",
+            "left: 0",
+            "top: 0",
+            "margin: 0",
+            "padding: 0",
+            "white-space: pre",
+            "pointer-events: none",
+            "z-index: 99998",
+            "opacity: 0",
+            "will-change: opacity, transform"
+        ].join(";");
+        document.body.appendChild(charOverlay);
+    }
+    return charOverlay;
+}
+
+function stopCharFade() {
+    charOverlayAnimation?.cancel();
+    charOverlayAnimation = null;
+    if (charFadeCleanup) {
+        clearTimeout(charFadeCleanup);
+        charFadeCleanup = null;
+    }
+    charHiddenRange = null;
+    hideHighlight?.clear();
+    if (supportsCharHighlight) CSS.highlights.delete(CHAR_HIDE_HIGHLIGHT);
+    hideHighlight = null;
+    charOverlay?.remove();
+    charOverlay = null;
+    pendingChars = 0;
+    charFadeAttempts = 0;
+}
+
+// A leaf keeps all of its text in one text node, so the typed character cannot be
+// styled on its own. It is hidden with a custom highlight while a positioned copy
+// fades in on top. The copy is reused because creating a node and animation per
+// keystroke forces the compositor to build a new layer, which stutters badly.
+function fadeInTypedRange(range: Range) {
+    const duration = settings.store.fadeSpeed;
+    if (!(duration > 0)) return;
+    const rects = range.getClientRects();
+    const rect = rects[rects.length - 1];
+    const parent = range.startContainer.parentElement;
+    if (!rect || !parent) return;
+
+    // Finish the previous letter early; only the newest character needs to fade.
+    if (charHiddenRange) hideHighlight?.delete(charHiddenRange);
+    charOverlayAnimation?.cancel();
+    charOverlayAnimation = null;
+    if (charFadeCleanup) {
+        clearTimeout(charFadeCleanup);
+        charFadeCleanup = null;
+    }
+
+    const style = getComputedStyle(parent);
+    const overlay = getCharOverlay();
+    overlay.textContent = range.toString();
+    // individual properties instead of the `font` shorthand: browsers hand back an
+    // empty string for it on some elements, which dropped the copy to the body font
+    overlay.style.fontFamily = style.fontFamily;
+    overlay.style.fontSize = style.fontSize;
+    overlay.style.fontWeight = style.fontWeight;
+    overlay.style.fontStyle = style.fontStyle;
+    overlay.style.lineHeight = `${rect.height}px`;
+    overlay.style.color = style.color;
+    overlay.style.letterSpacing = style.letterSpacing;
+    overlay.style.height = `${rect.height}px`;
+    overlay.style.transform = `translate3d(${rect.left}px, ${rect.top}px, 0)`;
+
+    getHideHighlight().add(range);
+    charHiddenRange = range;
+
+    const animation = overlay.animate(
+        [{ opacity: 0 }, { opacity: 1 }],
+        { duration, easing: "ease-out", fill: "forwards" }
+    );
+    charOverlayAnimation = animation;
+    const finish = () => {
+        if (charOverlayAnimation !== animation) return;
+        if (charFadeCleanup) {
+            clearTimeout(charFadeCleanup);
+            charFadeCleanup = null;
+        }
+        charOverlayAnimation = null;
+        hideHighlight?.delete(range);
+        if (charHiddenRange === range) charHiddenRange = null;
+        animation.cancel();
+        overlay.style.opacity = "0";
+        overlay.textContent = "";
+    };
+    animation.onfinish = finish;
+    // a paused page never finishes the animation, which would leave the glyph
+    // hidden forever; clean up regardless
+    charFadeCleanup = setTimeout(finish, duration + 300);
+}
+
+// Returns false while the selection has not caught up with the typed character yet,
+// so the caller can retry on a later frame.
+function applyCharFade() {
+    const count = pendingChars;
+    if (!count) return true;
+    const sel = window.getSelection();
+    const node = sel?.focusNode;
+    if (!sel?.rangeCount || !node || node.nodeType !== Node.TEXT_NODE) return false;
+    const editor = (node as Text).parentElement?.closest("[data-slate-editor]");
+    if (!editor || !editor.contains(document.activeElement)) return false;
+    if (sel.focusOffset < count) return false;
+
+    pendingChars = 0;
+    const range = document.createRange();
+    range.setStart(node, sel.focusOffset - count);
+    range.setEnd(node, sel.focusOffset);
+    fadeInTypedRange(range);
+    return true;
+}
+
+function scheduleCharFade() {
+    if (charRangeFrame !== null) return;
+    charRangeFrame = requestAnimationFrame(() => {
+        charRangeFrame = null;
+        if (applyCharFade()) {
+            charFadeAttempts = 0;
+        } else if (pendingChars && ++charFadeAttempts < 3) {
+            scheduleCharFade();
+        } else {
+            charFadeAttempts = 0;
+            pendingChars = 0;
+        }
+    });
+}
+
 function closestSlateEditor(target: EventTarget | null): HTMLElement | null {
     if (!(target instanceof Element)) return null;
     const fromTarget = target.closest<HTMLElement>("[data-slate-editor]");
@@ -512,7 +706,22 @@ function closestSlateEditor(target: EventTarget | null): HTMLElement | null {
 }
 
 const smoothHandlers = {
-    sel: () => scheduleApplyCaretPosition(),
+    sel: () => {
+        scheduleApplyCaretPosition();
+        if (pendingChars) scheduleCharFade();
+    },
+    char: (e: InputEvent) => {
+        if (!settings.store.smoothChars || !supportsCharHighlight) return;
+        if (e.inputType !== "insertText" || !e.data || e.data.length > MAX_FADE_CHARS) return;
+        if (!(e.target instanceof Element) || !e.target.closest("[data-slate-editor]")) return;
+        // Measuring the range is left to the next frame: doing it here forced a style
+        // recalc and layout inside the input handler, and that is what made fast typing
+        // stutter. The frame still runs before the browser paints, so the character is
+        // hidden before it is ever shown un-animated.
+        pendingChars = e.data.length;
+        charFadeAttempts = 0;
+        scheduleCharFade();
+    },
     focus: (e: FocusEvent) => {
         const editor = closestSlateEditor(e.target);
         if (editor) hideNativeCaretInline(editor);
@@ -548,6 +757,8 @@ const smoothHandlers = {
 
 function startListeners() {
     document.addEventListener("selectionchange", smoothHandlers.sel);
+    document.addEventListener("beforeinput", smoothHandlers.char, true);
+    document.addEventListener("input", smoothHandlers.char, true);
     document.addEventListener("focusin", smoothHandlers.focus);
     document.addEventListener("focusout", smoothHandlers.blur);
     document.addEventListener("keyup", smoothHandlers.key, true);
@@ -556,6 +767,8 @@ function startListeners() {
 
 function stopListeners() {
     document.removeEventListener("selectionchange", smoothHandlers.sel);
+    document.removeEventListener("beforeinput", smoothHandlers.char, true);
+    document.removeEventListener("input", smoothHandlers.char, true);
     document.removeEventListener("focusin", smoothHandlers.focus);
     document.removeEventListener("focusout", smoothHandlers.blur);
     document.removeEventListener("keyup", smoothHandlers.key, true);
@@ -581,7 +794,9 @@ function startSmoothTyping() {
         if (i > 0) el.remove();
     });
     getSmoothCaret();
+    if (settings.store.smoothChars && supportsCharHighlight) getCharOverlay();
     startObserver();
+    observeEditor();
     startListeners();
     // The editor may already be focused when the toggle flips on.
     const editor = closestSlateEditor(document.activeElement);
@@ -593,6 +808,15 @@ function stopSmoothTyping() {
     stopListeners();
     removeSmoothCSS();
     restoreInlineHiddenEditors();
+    stopCharFade();
+    if (charRangeFrame !== null) {
+        cancelAnimationFrame(charRangeFrame);
+        charRangeFrame = null;
+    }
+    if (motionBlurTimer) {
+        clearTimeout(motionBlurTimer);
+        motionBlurTimer = null;
+    }
     if (blinkTimer) clearTimeout(blinkTimer);
     document.getElementById(SMOOTH_CARET_ID)?.remove();
 }
