@@ -7,6 +7,7 @@
 import * as DataStore from "@api/DataStore";
 import { ChannelToolbarButton } from "@api/HeaderBar";
 import { definePluginSettings } from "@api/Settings";
+import { BackupRestoreIcon } from "@components/Icons";
 import definePlugin, { OptionType } from "@utils/types";
 import { Constants, React, RestAPI, UserStore } from "@webpack/common";
 
@@ -128,12 +129,9 @@ async function resendMessage(cached: CachedMessage) {
     }
 }
 
-function AntiDeleteIcon({ size = 18 }: { size?: number; }) {
-    const { isEnabled } = settings.store;
-    const color = isEnabled ? "#3ba55c" : "#72767d";
-    return React.createElement("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: color },
-        React.createElement("path", { d: "M19.73 4.87l-1.52-1.52L12 9.43 5.79 3.35 4.27 4.87 10.41 11H2v2h20V9h-8.41l6.14-6.13zM4 15h16v2H4v-2z" })
-    );
+function AntiDeleteIcon({ size = 18, width, height, className }: { size?: number; width?: number; height?: number; className?: string; } = {}) {
+    const s = size ?? width ?? height ?? 18;
+    return React.createElement(BackupRestoreIcon, { width: s, height: s, className });
 }
 
 export default definePlugin({
@@ -155,7 +153,8 @@ export default definePlugin({
                 onClick: () => {
                     settings.store.isEnabled = !settings.store.isEnabled;
                 },
-                selected: settings.store.isEnabled
+                selected: settings.store.isEnabled,
+                style: settings.store.isEnabled ? { color: "var(--status-positive)" } : undefined
             });
         }
     },

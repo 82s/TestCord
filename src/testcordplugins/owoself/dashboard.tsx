@@ -5,7 +5,7 @@
  */
 
 import { copyWithToast, getCurrentChannel } from "@utils/discord";
-import { ModalCloseButton, ModalContent, ModalHeader, ModalRoot, ModalSize, openModal, type RenderModalProps } from "@utils/modal";
+import { ModalCloseButton, ModalContent, ModalFooter, ModalHeader, ModalRoot, ModalSize, openModal, type RenderModalProps } from "@utils/modal";
 import { OptionType } from "@utils/types";
 import { Button, Forms, Text, TextInput, useEffect, useState } from "@webpack/common";
 import type { ReactNode } from "react";
@@ -687,6 +687,11 @@ function OwoDashboardModal({ rootProps }: { rootProps: RenderModalProps; }) {
                 {tab === "settings" && <SettingsTab bump={bump} />}
                 {tab === "logs" && <LogsTab refreshKey={refreshKey} />}
             </ModalContent>
+            <ModalFooter>
+                <Button onClick={rootProps.onClose} color={Button.Colors.PRIMARY}>
+                    Close
+                </Button>
+            </ModalFooter>
         </ModalRoot>
     );
 }

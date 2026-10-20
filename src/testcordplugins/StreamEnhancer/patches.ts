@@ -593,7 +593,7 @@ export const streamEnhancerPatches: Array<Omit<Patch, "plugin">> = [
         replacement: [
             {
                 match: /showParticipants:(\i)=!0,className:(\i),width:(\i),height:(\i),layout:(\i),idle:(\i)\}=e,/,
-                replace: "showParticipants:$1=!0,className:$2,width:$3,height:$4,layout:$5,idle:$6}=e,vcShowParticipants=$self.useShowStreamParticipants($1),vcSelectedRootClassName=$self.useSelectedRootClassName(),"
+                replace: "showParticipants:$1=!0,className:$2,width:$3,height:$4,layout:$5,idle:$6}=e,vcShowParticipants=globalThis.vcShowParticipants=$self.useShowStreamParticipants($1),vcSelectedRootClassName=$self.useSelectedRootClassName(),"
             },
             {
                 match: /className:(\i)\(\)\((\i)\.zr,(\i)\.tR,(\i)\),children:/,
@@ -613,9 +613,7 @@ export const streamEnhancerPatches: Array<Omit<Patch, "plugin">> = [
         find: "Q=D<=2*b+144,J=M&&!Q",
         replacement: {
             match: /J=(\i)&&!(\i)/,
-            // vcShowParticipants is only bound after a writer patch has rendered, so read it
-            // with typeof and fall back to the stock prop until then.
-            replace: 'J=(typeof vcShowParticipants<"u"?vcShowParticipants:$1)&&!$2'
+            replace: "J=(globalThis.vcShowParticipants??$1)&&!$2"
         }
     },
     {
