@@ -6,13 +6,14 @@
 
 import { BaseText } from "@components/BaseText";
 import { Provider } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/providers/types";
-import { useSpicyWordFrame } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/spicyAnimator/useSpicyWordFrame";
+import { getBgRefs, getLineWordRefs, LineRegistry, useSpicyLinesFrame } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/spicyAnimator/useSpicyLinesFrame";
 import { SpotifyStore, Track } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/SpotifyStore";
 import { openImageModal } from "@utils/discord";
 import { RenderModalProps } from "@vencord/discord-types";
 import { Modal, React } from "@webpack/common";
 
-import { cl, leadAlignCl, LyricsAttributionFooter, MAX_BACKGROUND_GROUPS, NoteSvg, scrollClasses, SpicyWordSpans, useLyrics } from "./util";
+import { DynamicBackground } from "./DynamicBackground";
+import { cl, leadAlignCl, lineStateClass, LyricsAttributionFooter, NoteSvg, scrollClasses, SpicyWordSpans, useLyrics } from "./util";
 
 const formatTime = (time: number) => {
     const minutes = Math.floor(time / 60);
@@ -47,81 +48,80 @@ function getTitleNode(track: Track | null) {
     );
 }
 
-const modalCurrentLine = cl("modal-line-current");
 const modalLine = cl("modal-line");
 
 export function LyricsModal({ props }: { props: RenderModalProps; }) {
-    const { track, lyricsInfo, lyricRefs, currLrcIndex, trailingLrcIndex, isPlaying, positionRef, isUntimed } = useLyrics({ scroll: true });
+    const containerRef = React.useRef<HTMLDivElement>(null);
+    const {
+        track, lyricsInfo, lyricRefs, statesKey, statesRef, lineTimes,
+        isPlaying, positionRef, storePosition, isUntimed
+    } = useLyrics({ scroll: true, containerRef });
     const currentLyrics = lyricsInfo?.lyricsVersions[lyricsInfo.useLyric];
-    const wordRefsRef = React.useRef<(HTMLSpanElement | null)[]>([]);
-    const bgWordRefs0 = React.useRef<(HTMLSpanElement | null)[]>([]);
-    const bgWordRefs1 = React.useRef<(HTMLSpanElement | null)[]>([]);
-    const bgWordRefs2 = React.useRef<(HTMLSpanElement | null)[]>([]);
-    const bgWordRefs3 = React.useRef<(HTMLSpanElement | null)[]>([]);
-    const bgWordRefsBySlot = [bgWordRefs0, bgWordRefs1, bgWordRefs2, bgWordRefs3];
-    const trailingWordRefsRef = React.useRef<(HTMLSpanElement | null)[]>([]);
-    const trailingBgWordRefs0 = React.useRef<(HTMLSpanElement | null)[]>([]);
-    const trailingBgWordRefs1 = React.useRef<(HTMLSpanElement | null)[]>([]);
-    const trailingBgWordRefs2 = React.useRef<(HTMLSpanElement | null)[]>([]);
-    const trailingBgWordRefs3 = React.useRef<(HTMLSpanElement | null)[]>([]);
-    const trailingBgWordRefsBySlot = [trailingBgWordRefs0, trailingBgWordRefs1, trailingBgWordRefs2, trailingBgWordRefs3];
+    const registry = React.useMemo<LineRegistry>(() => new Map(), [currentLyrics]);
 
-    const activeLine = currLrcIndex != null ? currentLyrics?.[currLrcIndex] : undefined;
-    const trailingLine = trailingLrcIndex != null ? currentLyrics?.[trailingLrcIndex] : undefined;
-    const getPositionMs = () => positionRef.current;
-
-    useSpicyWordFrame(activeLine?.words, wordRefsRef, getPositionMs, isPlaying);
-    useSpicyWordFrame(trailingLine?.words, trailingWordRefsRef, getPositionMs, isPlaying);
-    for (let bI = 0; bI < MAX_BACKGROUND_GROUPS; bI++) {
-        useSpicyWordFrame(activeLine?.background?.[bI]?.words, bgWordRefsBySlot[bI], getPositionMs, isPlaying);
-        useSpicyWordFrame(trailingLine?.background?.[bI]?.words, trailingBgWordRefsBySlot[bI], getPositionMs, isPlaying);
-    }
+    useSpicyLinesFrame({
+        lines: currentLyrics,
+        lineTimes,
+        registry,
+        statesRef,
+        positionRef,
+        isPlaying,
+        pausedPosition: storePosition
+    });
 
     const isSpicyProvider = lyricsInfo?.useLyric === Provider.SpicyLyrics || lyricsInfo?.useLyric === Provider.SpicyRomanized;
 
+    const seekTo = (seconds: number) => () => {
+        if (isSpicyProvider && !isUntimed) SpotifyStore.seekToLine(seconds * 1000);
+    };
+
     return (
         <Modal {...props} size="md" title={getTitleNode(track)}>
-            <div className={`${cl("lyrics-modal-container")} ${scrollClasses.auto}`}>
+            <div className={isSpicyProvider ? cl("modal-spicy") : undefined}>
+                {isSpicyProvider && (
+                    <DynamicBackground imageUrl={track?.album?.image?.url} isPlaying={isPlaying} lite />
+                )}
+            <div ref={containerRef} className={`${cl("lyrics-modal-container")} ${scrollClasses.auto}`}>
                 {currentLyrics ? (
                     <>
                         {currentLyrics.map((line, i) => {
-                            const isCurrentLine = !isUntimed && currLrcIndex === i;
-                            const isTrailingLine = !isUntimed && trailingLrcIndex === i;
-                            const isActiveWordLine = isCurrentLine || isTrailingLine;
-                            const hasWordTiming = isActiveWordLine && !!line.words?.length;
-                            const rowWordRefs = isCurrentLine ? wordRefsRef : trailingWordRefsRef;
-                            const rowBgRefs = isCurrentLine ? bgWordRefsBySlot : trailingBgWordRefsBySlot;
+                            const stateCl = lineStateClass(statesKey, i, isUntimed);
+                            const alignCl = leadAlignCl(line, isSpicyProvider);
+                            const refs = getLineWordRefs(registry, i);
+                            const hasWordTiming = !isUntimed && !!line.words?.length;
 
                             return (
                                 <div ref={lyricRefs[i]} key={i} className={cl("line-row")}>
                                     <BaseText
-                                        size={isActiveWordLine ? "md" : "sm"}
-                                        weight={isActiveWordLine ? "semibold" : "normal"}
-                                        className={[isActiveWordLine ? modalCurrentLine : modalLine, leadAlignCl(line, isSpicyProvider)].join(" ")}
+                                        size="md"
+                                        weight="semibold"
+                                        className={[modalLine, cl("line"), stateCl, alignCl, isSpicyProvider && !isUntimed && cl("line-seekable")].filter(Boolean).join(" ")}
+                                        onClick={seekTo(line.time)}
                                     >
                                         {!isUntimed && (
-                                            <span className={cl("modal-timestamp")} onClick={() => SpotifyStore.seek(line.time * 1000)}>
+                                            <span className={cl("modal-timestamp")} onClick={() => SpotifyStore.seekToLine(line.time * 1000)}>
                                                 {formatTime(line.time)}
                                             </span>
                                         )}
                                         {hasWordTiming
-                                            ? <SpicyWordSpans words={line.words!} refsArray={rowWordRefs} />
+                                            ? <SpicyWordSpans words={line.words!} refsArray={refs.lead} />
                                             : (line.text || NoteSvg())}
                                     </BaseText>
                                     {line.background?.map((bg, bI) => (
                                         <BaseText
                                             key={bI}
-                                            size={isActiveWordLine ? "sm" : "xs"}
-                                            weight={isActiveWordLine ? "normal" : "light"}
-                                            className={[isActiveWordLine ? modalCurrentLine : modalLine, leadAlignCl(line, isSpicyProvider)].join(" ")}
+                                            size="sm"
+                                            weight="semibold"
+                                            className={[modalLine, cl("line"), cl("line-bg"), stateCl, alignCl, isSpicyProvider && !isUntimed && cl("line-seekable")].filter(Boolean).join(" ")}
+                                            onClick={seekTo(bg.startTime)}
                                         >
                                             {!isUntimed && (
-                                                <span className={cl("modal-timestamp")} onClick={() => SpotifyStore.seek(bg.startTime * 1000)}>
+                                                <span className={cl("modal-timestamp")} onClick={() => SpotifyStore.seekToLine(bg.startTime * 1000)}>
                                                     {formatTime(bg.startTime)}
                                                 </span>
                                             )}
-                                            {isActiveWordLine && bI < MAX_BACKGROUND_GROUPS
-                                                ? <SpicyWordSpans words={bg.words} refsArray={rowBgRefs[bI]} variant="bg" />
+                                            {!isUntimed && bg.words.length
+                                                ? <SpicyWordSpans words={bg.words} refsArray={getBgRefs(refs, bI)} variant="bg" />
                                                 : bg.text}
                                         </BaseText>
                                     ))}
@@ -138,6 +138,7 @@ export function LyricsModal({ props }: { props: RenderModalProps; }) {
                         No lyrics available :(
                     </BaseText>
                 )}
+            </div>
             </div>
         </Modal>
     );

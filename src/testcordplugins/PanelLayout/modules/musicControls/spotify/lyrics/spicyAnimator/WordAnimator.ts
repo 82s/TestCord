@@ -98,6 +98,61 @@ function getOrCreateSprings(el: HTMLElement, state: WordState, progress: number)
 const MAX_SCALE = 1.08;
 const MIN_SCALE = 0.9;
 
+interface WrittenStyle {
+    scale: string;
+    translate: string;
+    gradient: string;
+    shadowBlur: string;
+    shadowOpacity: string;
+    glowing: boolean;
+}
+
+const writtenByElement = new WeakMap<HTMLElement, WrittenStyle>();
+
+function applyStyle(el: HTMLElement, scale: number, yOffset: number, gradientPos: number, glow: number): void {
+    let w = writtenByElement.get(el);
+    if (!w) {
+        w = { scale: "", translate: "", gradient: "", shadowBlur: "", shadowOpacity: "", glowing: false };
+        writtenByElement.set(el, w);
+    }
+
+    const scaleStr = scale.toFixed(3);
+    if (scaleStr !== w.scale) {
+        w.scale = scaleStr;
+        el.style.scale = scaleStr;
+    }
+
+    const translateStr = `0 ${yOffset.toFixed(3)}em`;
+    if (translateStr !== w.translate) {
+        w.translate = translateStr;
+        el.style.translate = translateStr;
+    }
+
+    const gradientStr = `${gradientPos.toFixed(1)}%`;
+    if (gradientStr !== w.gradient) {
+        w.gradient = gradientStr;
+        el.style.setProperty("--spicy-gradient-position", gradientStr);
+    }
+
+    const glowing = glow > 0.02;
+    if (glowing !== w.glowing) {
+        w.glowing = glowing;
+        el.classList.toggle("vc-spicy-glow", glowing);
+    }
+    if (glowing) {
+        const blurStr = `${(4 + 2 * glow).toFixed(1)}px`;
+        const opacityStr = `${Math.min(glow * 35, 100).toFixed(0)}%`;
+        if (blurStr !== w.shadowBlur) {
+            w.shadowBlur = blurStr;
+            el.style.setProperty("--spicy-shadow-blur", blurStr);
+        }
+        if (opacityStr !== w.shadowOpacity) {
+            w.shadowOpacity = opacityStr;
+            el.style.setProperty("--spicy-shadow-opacity", opacityStr);
+        }
+    }
+}
+
 export function stepWord(el: HTMLElement, state: WordState, progress: number, deltaTimeSec: number): void {
     const springs = getOrCreateSprings(el, state, progress);
     const targets = targetsFor(state, progress);
@@ -110,11 +165,7 @@ export function stepWord(el: HTMLElement, state: WordState, progress: number, de
     const currentYOffset = springs.yOffset.Step(deltaTimeSec);
     const currentGlow = Math.max(springs.glow.Step(deltaTimeSec), 0);
 
-    el.style.scale = String(currentScale);
-    el.style.translate = `0 ${currentYOffset.toFixed(4)}em`;
-    el.style.setProperty("--spicy-gradient-position", `${targets.gradientPos}%`);
-    el.style.setProperty("--spicy-shadow-blur", `${(4 + 2 * currentGlow).toFixed(2)}px`);
-    el.style.setProperty("--spicy-shadow-opacity", `${Math.min(currentGlow * 35, 100).toFixed(1)}%`);
+    applyStyle(el, currentScale, currentYOffset, targets.gradientPos, currentGlow);
 }
 
 export function resetWord(el: HTMLElement, state: WordState, progress: number): void {
@@ -122,10 +173,5 @@ export function resetWord(el: HTMLElement, state: WordState, progress: number): 
     springsByElement.set(el, springs);
 
     const targets = targetsFor(state, progress);
-
-    el.style.scale = String(targets.scale);
-    el.style.translate = `0 ${targets.yOffset.toFixed(4)}em`;
-    el.style.setProperty("--spicy-gradient-position", `${targets.gradientPos}%`);
-    el.style.setProperty("--spicy-shadow-blur", `${(4 + 2 * targets.glow).toFixed(2)}px`);
-    el.style.setProperty("--spicy-shadow-opacity", `${Math.min(targets.glow * 35, 100).toFixed(1)}%`);
+    applyStyle(el, targets.scale, targets.yOffset, targets.gradientPos, targets.glow);
 }

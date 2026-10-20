@@ -9,8 +9,6 @@
     position: relative;
     font-weight: 600;
     transform-origin: center center;
-    backface-visibility: hidden;
-    will-change: scale, translate, background-image, text-shadow;
 
     background-image: linear-gradient(
         90deg,
@@ -23,7 +21,9 @@
     -webkit-background-clip: text;
     color: transparent;
     -webkit-text-fill-color: transparent;
+}
 
+.vc-spicy-word.vc-spicy-glow {
     text-shadow: 0 0 var(--spicy-shadow-blur, 4px)
         color-mix(in srgb, var(--text-strong, #fff) var(--spicy-shadow-opacity, 0%), transparent);
 }

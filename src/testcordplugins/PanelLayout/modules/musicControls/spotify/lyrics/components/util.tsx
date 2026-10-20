@@ -6,6 +6,7 @@
 
 import * as DataStore from "@api/DataStore";
 import { settings } from "@testcordplugins/PanelLayout/modules/musicControls/settings";
+import { computeLineStates, computeLineTimes, LineTimes, pickScrollIndex } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/lineTiming";
 import { SpotifyLrcStore } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/providers/store";
 import {
     LyricsAttribution,
@@ -15,6 +16,7 @@ import {
     Provider,
     SyncedLyric,
 } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/providers/types";
+import { SmoothScroller } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/smoothScroll";
 import { SpotifyStore } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/SpotifyStore";
 import { classNameFactory } from "@utils/css";
 import { findCssClassesLazy } from "@webpack";
@@ -35,12 +37,6 @@ DataStore.get<Record<string, number>>(DATASTORE_KEY).then(saved => {
 });
 
 export const MAX_BACKGROUND_GROUPS = 4;
-
-function getLineEndTime(line: SyncedLyric): number {
-    let end = line.words?.length ? line.words[line.words.length - 1].endTime : line.time;
-    for (const bg of line.background ?? []) end = Math.max(end, bg.endTime);
-    return end;
-}
 
 export function SpicyWordSpans({ words, refsArray, variant = "lead" }: {
     words: LyricWord[];
@@ -161,7 +157,7 @@ export function LyricsAttributionFooter({
             )}
             {(hasProvider || credited) && (
                 <div className={cl("attribution-meta")}>
-                    {hasProvider && <span className={cl("attribution-dim")}>{sourceLabel(`Provided by ${attr.provider}`)}</span>}
+                    {hasProvider && <span className={cl("attribution-dim")}>{sourceLabel(attr.provider)}</span>}
                     {hasProvider && credited && <span className={cl("attribution-dim")}>·</span>}
                     {credited && (
                         <>
@@ -182,51 +178,56 @@ export function LyricsAttributionFooter({
     );
 }
 
-const getIndexes = (lyrics: SyncedLyric[], position: number, delay: number) => {
-    const posInSec = (position + delay) / 1000;
-
-    let left = 0, right = lyrics.length - 1;
-    let currentIndex: number | null = null;
-
-    while (left <= right) {
-        const mid = Math.floor((left + right) / 2);
-        const curr = lyrics[mid];
-        const next = lyrics[mid + 1];
-
-        if (curr.time <= posInSec && (!next || next.time > posInSec)) {
-            currentIndex = mid;
-            break;
-        }
-
-        if (curr.time > posInSec) {
-            right = mid - 1;
-        } else {
-            left = mid + 1;
-        }
-    }
-
-    const nextIdx = currentIndex !== null ? currentIndex + 1 : left;
-    const nextLyricIdx = nextIdx < lyrics.length ? nextIdx : null;
-
-    if (currentIndex !== null && posInSec - lyrics[currentIndex].time > 8) {
-        return [null, nextLyricIdx];
-    }
-
-    return [currentIndex, nextLyricIdx];
-};
-
-function scrollLineIntoContainer(
-    container: HTMLElement | null,
-    el: HTMLElement | null
-) {
-    if (!container || !el) return;
-    const cRect = container.getBoundingClientRect();
-    const eRect = el.getBoundingClientRect();
-    const target = container.scrollTop + (eRect.top - cRect.top) - (cRect.height - eRect.height) / 2;
-    container.scrollTo({ top: target, behavior: "smooth" });
+export function lineStateClass(statesKey: string, index: number, isUntimed: boolean): string {
+    if (isUntimed) return "";
+    const state = statesKey[index];
+    return cl(state === "a" ? "line-active" : state === "s" ? "line-sung" : "line-next");
 }
 
-export function useLyrics({ scroll = true, containerRef }: { scroll?: boolean; containerRef?: React.RefObject<HTMLElement | null>; } = {}) {
+const USER_SCROLL_COOLDOWN_MS = 750;
+const CLOCK_SNAP_MS = 2500;
+const CLOCK_EASE = 0.04;
+const CLOCK_MAX_SLOW = 0.5;
+const CLOCK_MAX_FAST = 1;
+
+function resolveScroller(el: HTMLElement | null): HTMLElement | null {
+    for (let node = el; node; node = node.parentElement) {
+        const { overflowY } = getComputedStyle(node);
+        if ((overflowY === "auto" || overflowY === "scroll" || overflowY === "hidden") && node.scrollHeight > node.clientHeight) {
+            return node;
+        }
+    }
+    return el;
+}
+
+function getCenteredScrollTop(container: HTMLElement, el: HTMLElement, offset: number): number {
+    let top = 0;
+    let node: HTMLElement | null = el;
+    while (node && node !== container) {
+        top += node.offsetTop;
+        node = node.offsetParent as HTMLElement | null;
+    }
+
+    if (node !== container) {
+        const c = container.getBoundingClientRect();
+        const e = el.getBoundingClientRect();
+        top = container.scrollTop + (e.top - c.top);
+    }
+
+    return top - (container.clientHeight / 2 - el.offsetHeight / 2) - offset;
+}
+
+function isInView(container: HTMLElement, el: HTMLElement) {
+    const c = container.getBoundingClientRect();
+    const e = el.getBoundingClientRect();
+    return e.bottom > c.top + 5 && e.top < c.bottom - 5;
+}
+
+export function useLyrics({ scroll = true, containerRef, centerOffset = 0 }: {
+    scroll?: boolean;
+    containerRef?: React.RefObject<HTMLElement | null>;
+    centerOffset?: number;
+} = {}) {
     const [track, storePosition, isPlaying] = useStateFromStores(
         [SpotifyStore], () => [
             SpotifyStore.track,
@@ -235,14 +236,27 @@ export function useLyrics({ scroll = true, containerRef }: { scroll?: boolean; c
         ]);
     const lyricsInfo = useStateFromStores([SpotifyLrcStore], () => SpotifyLrcStore.lyricsInfo);
 
-    const { lyricDelay } = settings.use(["lyricDelay"]);
+    const { lyricDelay, smoothScroll } = settings.use(["lyricDelay", "smoothScroll"]);
 
     const [currLrcIndex, setCurrLrcIndex] = useState<number | null>(null);
-    const [trailingLrcIndex, setTrailingLrcIndex] = useState<number | null>(null);
-    const [nextLyric, setNextLyric] = useState<number | null>(null);
+    const [statesKey, setStatesKey] = useState("");
     const [lyricRefs, setLyricRefs] = useState<React.RefObject<HTMLDivElement | null>[]>([]);
     const [, forceUpdate] = useState({});
     const positionRef = React.useRef(0);
+    const statesRef = React.useRef("");
+
+    const scrollerRef = React.useRef<SmoothScroller | null>(null);
+    const lastScrolledRef = React.useRef<number | null>(null);
+    const lastTickPosRef = React.useRef<number | null>(null);
+    const lastSeekEpochRef = React.useRef(-1);
+    const clockRef = React.useRef<{ pos: number; t: number; } | null>(null);
+    const scrollContainerRef = React.useRef<HTMLElement | null>(null);
+    const targetIndexRef = React.useRef<number | null>(null);
+    const jumpedRef = React.useRef(true);
+    const lastUserScrollRef = React.useRef(0);
+    const userScrolledRef = React.useRef(false);
+    const latestRef = React.useRef({ index: currLrcIndex, refs: lyricRefs });
+    latestRef.current = { index: currLrcIndex, refs: lyricRefs };
 
     const trackKey = track?.id || track?.name;
     const songCustomDelay = (trackKey && customSongDelays[trackKey]) || 0;
@@ -268,6 +282,11 @@ export function useLyrics({ scroll = true, containerRef }: { scroll?: boolean; c
     const currentLyrics = lyricsInfo?.lyricsVersions[lyricsInfo.useLyric];
     const isUntimed = !!currentLyrics?.[0]?.untimed;
 
+    const lineTimes = React.useMemo<LineTimes[] | null>(
+        () => currentLyrics && !isUntimed ? computeLineTimes(currentLyrics) : null,
+        [currentLyrics, isUntimed]
+    );
+
     useEffect(() => {
         if (currentLyrics) {
             setLyricRefs(currentLyrics.map(() => React.createRef()));
@@ -275,29 +294,75 @@ export function useLyrics({ scroll = true, containerRef }: { scroll?: boolean; c
     }, [currentLyrics]);
 
     useEffect(() => {
+        lastScrolledRef.current = null;
+        lastTickPosRef.current = null;
+        clockRef.current = null;
+        scrollContainerRef.current = null;
+        targetIndexRef.current = null;
+        jumpedRef.current = true;
+        userScrolledRef.current = false;
+        scrollerRef.current?.stop();
+        setCurrLrcIndex(null);
+    }, [currentLyrics]);
+
+    useEffect(() => {
         let rafId: number | undefined;
 
         const tick = () => {
-            if (currentLyrics && !isUntimed) {
-                const pos = SpotifyStore.position;
-                const [currentIndex, nextLyricIndex] = getIndexes(currentLyrics, pos, totalDelay);
+            if (lineTimes) {
+                const prev = lastTickPosRef.current;
+                const sought = lastSeekEpochRef.current !== SpotifyStore.seekEpoch;
+                lastSeekEpochRef.current = SpotifyStore.seekEpoch;
 
-                setCurrLrcIndex(prev => prev === currentIndex ? prev : currentIndex);
-                setNextLyric(prev => prev === nextLyricIndex ? prev : nextLyricIndex);
+                const now = performance.now();
+                const target = SpotifyStore.lyricsPosition(SpotifyStore.position);
+                const clock = clockRef.current;
+                let pos = target;
+                if (isPlaying && clock && !sought && !SpotifyStore.isLineHeld) {
+                    const elapsed = now - clock.t;
+                    const predicted = clock.pos + elapsed;
+                    const drift = target - predicted;
+                    if (Math.abs(drift) < CLOCK_SNAP_MS) {
+                        const correction = Math.min(
+                            Math.max(drift * CLOCK_EASE, -elapsed * CLOCK_MAX_SLOW),
+                            elapsed * CLOCK_MAX_FAST
+                        );
+                        pos = Math.max(clock.pos, predicted + correction);
+                    }
+                }
+                clockRef.current = { pos, t: now };
+
+                const jumped = sought || prev === null || Math.abs(pos - prev) > 1000;
+                if (jumped) jumpedRef.current = true;
+                lastTickPosRef.current = pos;
 
                 positionRef.current = pos + totalDelay;
-                const posInSec = positionRef.current / 1000;
 
-                let trailingIndex: number | null = null;
-                if (currentIndex != null && currentIndex > 0) {
-                    const prevLine = currentLyrics[currentIndex - 1];
-                    if (posInSec < getLineEndTime(prevLine)) trailingIndex = currentIndex - 1;
+                const states = computeLineStates(lineTimes, positionRef.current / 1000);
+                statesRef.current = states;
+                setStatesKey(prevStates => prevStates === states ? prevStates : states);
+
+                let index = pickScrollIndex(states, lineTimes);
+
+                if (index !== null && SpotifyStore.isLineHeld) {
+                    let best = -1;
+                    for (let i = 0; i < states.length; i++) {
+                        if (states[i] === "a" && (best === -1 || lineTimes[i].start >= lineTimes[best].start)) best = i;
+                    }
+                    if (best !== -1) index = best;
                 }
-                setTrailingLrcIndex(prev => prev === trailingIndex ? prev : trailingIndex);
+
+                if (index !== null) {
+                    const target = targetIndexRef.current;
+                    if (jumped || target === null || index >= target) targetIndexRef.current = index;
+                    else index = target;
+                }
+
+                if (index !== null) setCurrLrcIndex(prevIndex => prevIndex === index ? prevIndex : index);
             } else {
-                setCurrLrcIndex(prev => prev === null ? prev : null);
-                setTrailingLrcIndex(prev => prev === null ? prev : null);
-                setNextLyric(prev => prev === null ? prev : null);
+                statesRef.current = "";
+                setStatesKey(prevStates => prevStates === "" ? prevStates : "");
+                setCurrLrcIndex(prevIndex => prevIndex === null ? prevIndex : null);
             }
 
             if (isPlaying) {
@@ -310,31 +375,96 @@ export function useLyrics({ scroll = true, containerRef }: { scroll?: boolean; c
         return () => {
             if (rafId !== undefined) cancelAnimationFrame(rafId);
         };
-    }, [currentLyrics, isUntimed, totalDelay, isPlaying, storePosition]);
+    }, [lineTimes, totalDelay, isPlaying, storePosition]);
 
     useEffect(() => {
-        if (!scroll || currLrcIndex === null) return;
-        const idx = currLrcIndex >= 0 ? currLrcIndex : nextLyric;
-        if (idx == null || idx < 0) return;
+        const el = containerRef?.current;
+        if (!el || !scroll) return;
 
-        const el = lyricRefs[idx]?.current;
+        const onUserScroll = () => {
+            lastUserScrollRef.current = performance.now();
+            userScrolledRef.current = true;
+            scrollerRef.current?.stop();
+        };
+
+        el.addEventListener("wheel", onUserScroll, { passive: true });
+        el.addEventListener("touchmove", onUserScroll, { passive: true });
+        return () => {
+            el.removeEventListener("wheel", onUserScroll);
+            el.removeEventListener("touchmove", onUserScroll);
+        };
+    }, [containerRef, scroll]);
+
+    const getContainer = (el: HTMLElement | null) => {
+        const cached = scrollContainerRef.current;
+        if (cached && cached.isConnected && el && cached.contains(el)) return cached;
+        const found = resolveScroller(el);
+        scrollContainerRef.current = found;
+        return found;
+    };
+
+    const getScroller = (container: HTMLElement) => {
+        let scroller = scrollerRef.current;
+        if (!scroller || scroller.container !== container) {
+            scroller?.stop();
+            scroller = scrollerRef.current = new SmoothScroller(container);
+        }
+        return scroller;
+    };
+
+    useEffect(() => {
+        if (!scroll || currLrcIndex === null || !lineTimes) return;
+
+        const el = lyricRefs[currLrcIndex]?.current;
         if (!el) return;
 
-        if (containerRef) {
-            const container = containerRef.current;
-            if (!container) return;
-
-            const isLastLine = idx === lyricRefs.length - 1;
-            if (isLastLine) {
-                container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
-                return;
-            }
-
-            scrollLineIntoContainer(container, el);
-        } else {
-            el.scrollIntoView({ behavior: "smooth", block: "center" });
+        const container = getContainer(containerRef?.current ?? null);
+        if (!container) {
+            el.scrollIntoView({ behavior: smoothScroll ? "smooth" : "instant", block: "center" });
+            return;
         }
-    }, [currLrcIndex, nextLyric, scroll, lyricRefs, containerRef]);
 
-    return { track, lyricsInfo, lyricRefs, currLrcIndex, trailingLrcIndex, nextLyric, isPlaying, positionRef, isUntimed };
+        if (performance.now() - lastUserScrollRef.current < USER_SCROLL_COOLDOWN_MS) return;
+        if (userScrolledRef.current && !isInView(container, el)) return;
+        userScrolledRef.current = false;
+
+        const instant = !smoothScroll || lastScrolledRef.current === null || jumpedRef.current;
+        jumpedRef.current = false;
+        lastScrolledRef.current = currLrcIndex;
+
+        getScroller(container).scrollTo(() => getCenteredScrollTop(container, el, centerOffset), instant);
+    }, [currLrcIndex, lyricRefs, scroll, containerRef, lineTimes, centerOffset, smoothScroll]);
+
+    useEffect(() => {
+        const el = containerRef?.current;
+        if (!el || !scroll || typeof ResizeObserver === "undefined") return;
+
+        const observer = new ResizeObserver(() => {
+            const { index, refs } = latestRef.current;
+            const line = index === null ? null : refs[index]?.current;
+            const container = getContainer(el);
+            if (!line || !container) return;
+            if (Math.abs(getCenteredScrollTop(container, line, centerOffset) - container.scrollTop) < 2) return;
+            getScroller(container).scrollTo(() => getCenteredScrollTop(container, line, centerOffset), true);
+        });
+
+        observer.observe(el);
+        return () => observer.disconnect();
+    }, [containerRef, scroll, centerOffset]);
+
+    useEffect(() => () => scrollerRef.current?.stop(), []);
+
+    return {
+        track,
+        lyricsInfo,
+        lyricRefs,
+        currLrcIndex,
+        statesKey,
+        statesRef,
+        lineTimes,
+        isPlaying,
+        positionRef,
+        storePosition,
+        isUntimed,
+    };
 }

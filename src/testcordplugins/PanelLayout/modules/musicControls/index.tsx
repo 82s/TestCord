@@ -232,6 +232,7 @@ export function MusicControlsSettingsModal({ modalProps, onClose }: { modalProps
         "showSpotifyLyrics",
         "useSpotifyUris",
         "previousButtonRestartsTrack",
+        "seekFadeCompensation",
         "showTidalControls",
         "showTidalLyrics",
         "showStrawberryControls",
@@ -245,6 +246,7 @@ export function MusicControlsSettingsModal({ modalProps, onClose }: { modalProps
         "lyricsProvider",
         "fallbackProvider",
         "showFailedToasts",
+        "smoothScroll",
         "fiveMinuteHide",
     ]);
 
@@ -327,6 +329,12 @@ export function MusicControlsSettingsModal({ modalProps, onClose }: { modalProps
                                 description="Restart playing track when pressing previous if playtime is over 3s."
                                 value={s.previousButtonRestartsTrack}
                                 onChange={v => { settings.store.previousButtonRestartsTrack = v; forceUpdate(); }}
+                            />
+                            <FormSwitch
+                                title="Seek Fade-in Compensation"
+                                description="Clicking a lyric line starts 300 ms before it, so Spotify's fade-in doesn't clip the first word. Best for rap and fast songs."
+                                value={s.seekFadeCompensation}
+                                onChange={v => { settings.store.seekFadeCompensation = v; forceUpdate(); }}
                             />
                             <FormSwitch
                                 title="Five Minute Hide"
@@ -463,6 +471,12 @@ export function MusicControlsSettingsModal({ modalProps, onClose }: { modalProps
                                 description="Show a toast notification when lyrics cannot be found."
                                 value={s.showFailedToasts}
                                 onChange={v => { settings.store.showFailedToasts = v; forceUpdate(); }}
+                            />
+                            <FormSwitch
+                                title="Smooth Lyrics Scrolling"
+                                description="Glide to the active line. Turn off to snap straight to it instead."
+                                value={s.smoothScroll}
+                                onChange={v => { settings.store.smoothScroll = v; forceUpdate(); }}
                             />
                             <div style={{ padding: "10px 0" }}>
                                 <Paragraph style={{ fontSize: "12px", color: "var(--text-muted)", marginBottom: "4px" }}>

@@ -67,6 +67,12 @@ interface Device {
 }
 
 type Repeat = "off" | "track" | "context";
+const RESYNC_INTERVAL_MS = 8000;
+const RESYNC_THRESHOLD_MS = 700;
+const SEEK_FADE_COMPENSATION_MS = 300;
+const SEEK_HOLD_TIMEOUT_MS = 3000;
+const SEEK_LAND_BEFORE_MS = SEEK_FADE_COMPENSATION_MS + 300;
+const SEEK_LAND_AFTER_MS = 1500;
 
 // Don't wanna run before Flux and Dispatcher are ready!
 export const SpotifyStore = proxyLazyWebpack(() => {
@@ -90,6 +96,48 @@ export const SpotifyStore = proxyLazyWebpack(() => {
         public volume = 0;
 
         public isSettingPosition = false;
+        public seekEpoch = 0;
+        private lineHold: { startMs: number; expires: number; landed: boolean; } | null = null;
+
+        private _resyncTimer: ReturnType<typeof setInterval> | null = null;
+        private _resyncing = false;
+
+        public startResync() {
+            if (this._resyncTimer) return;
+            this._resyncTimer = setInterval(() => void this.resync(), RESYNC_INTERVAL_MS);
+        }
+
+        public stopResync() {
+            if (!this._resyncTimer) return;
+            clearInterval(this._resyncTimer);
+            this._resyncTimer = null;
+        }
+
+        public async resync() {
+            if (this._resyncing || !this.isPlaying || !this.track || !this.device?.is_active || this.isSettingPosition) return;
+
+            this._resyncing = true;
+            try {
+                const { socket } = SpotifySocket.getActiveSocketAndDevice();
+                const sentAt = Date.now();
+                const res = await SpotifyAPI.get(socket.accountId, socket.accessToken, { url: API_BASE });
+                const receivedAt = Date.now();
+
+                const body = res?.body;
+                if (!body || typeof body.progress_ms !== "number" || body.is_playing !== true) return;
+
+                if (body.item?.id && this.track?.id && body.item.id !== this.track.id) return;
+                if (!this.isPlaying || this.isSettingPosition) return;
+
+                const actual = body.progress_ms + (receivedAt - sentAt) / 2;
+                if (Math.abs(actual - this.position) > RESYNC_THRESHOLD_MS) {
+                    this.position = actual;
+                    this.emitChange();
+                }
+            } finally {
+                this._resyncing = false;
+            }
+        }
 
         public openExternal(path: string) {
             const url = settings.store.useSpotifyUris || isPluginEnabled(OpenInAppPlugin.name)
@@ -155,6 +203,8 @@ export const SpotifyStore = proxyLazyWebpack(() => {
         seek(ms: number) {
             if (this.isSettingPosition) return Promise.resolve();
 
+            this.seekEpoch++;
+
             this.isSettingPosition = true;
 
             return this._req("put", "/seek", {
@@ -165,6 +215,40 @@ export const SpotifyStore = proxyLazyWebpack(() => {
                 console.error("[VencordSpotifyControls] Failed to seek", e);
                 this.isSettingPosition = false;
             });
+        }
+
+        seekToLine(ms: number) {
+            if (!settings.store.seekFadeCompensation) return this.seek(ms);
+
+            if (this.isPlaying && !this.isSettingPosition)
+                this.lineHold = { startMs: ms, expires: performance.now() + SEEK_HOLD_TIMEOUT_MS, landed: false };
+
+            return this.seek(Math.max(0, ms - SEEK_FADE_COMPENSATION_MS));
+        }
+
+        lyricsPosition(pos: number) {
+            const hold = this.lineHold;
+            if (!hold) return pos;
+
+            if (performance.now() > hold.expires) {
+                this.lineHold = null;
+                return pos;
+            }
+
+            if (!this.isSettingPosition
+                && pos >= hold.startMs - SEEK_LAND_BEFORE_MS
+                && pos <= hold.startMs + SEEK_LAND_AFTER_MS)
+                hold.landed = true;
+
+            if (hold.landed && pos >= hold.startMs) {
+                this.lineHold = null;
+                return pos;
+            }
+            return hold.startMs;
+        }
+
+        get isLineHeld() {
+            return this.lineHold !== null;
         }
 
         _req(method: "post" | "get" | "put", route: string, data: any = {}) {
@@ -189,6 +273,10 @@ export const SpotifyStore = proxyLazyWebpack(() => {
             store.shuffle = e.shuffle ?? false;
             store.position = e.position ?? 0;
             store.isSettingPosition = false;
+
+            if (store.isPlaying && store.track) store.startResync();
+            else store.stopResync();
+
             store.emitChange();
         },
         SPOTIFY_SET_DEVICES({ devices }: { devices: Device[]; }) {

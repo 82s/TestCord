@@ -79,6 +79,10 @@
     padding-bottom: 4px;
 }
 
+.vc-spotify-lyrics-inner {
+    position: relative;
+}
+
 .vc-spotify-lyrics-modal-attribution {
     margin-top: 16px;
     padding-top: 12px;
@@ -104,11 +108,6 @@
     margin: 3px;
 }
 
-.vc-spotify-lyrics-next,
-.vc-spotify-lyrics-prev {
-    color: var(--text-muted) !important;
-}
-
 .vc-spotify-lyrics-line-row {
     display: flex;
     flex-direction: column;
@@ -122,14 +121,17 @@
 
 .vc-spotify-lyrics-align-left {
     text-align: left !important;
+    transform-origin: left center;
 }
 
 .vc-spotify-lyrics-align-right {
     text-align: right !important;
+    transform-origin: right center;
 }
 
 .vc-spotify-lyrics-align-center {
     text-align: center !important;
+    transform-origin: center center;
 }
 
 @keyframes side-to-side {
@@ -357,4 +359,135 @@
 
 .customLyricsModal [data-mana-component="modal"] {
     max-width: calc(var(--modal-width-large, 440px) + 300px);
+}
+
+.vc-spotify-lyrics-line {
+    --vc-line-idle-scale: 0.86;
+
+    scale: var(--vc-line-idle-scale);
+    opacity: 0.55;
+    color: var(--text-muted);
+    transition:
+        scale 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+        opacity 0.45s ease,
+        color 0.45s ease;
+}
+
+.vc-spotify-lyrics-line.vc-spotify-lyrics-line-bg {
+    --vc-line-idle-scale: 0.83;
+}
+
+.vc-spotify-lyrics-modal-line.vc-spotify-lyrics-line {
+    --vc-line-idle-scale: 0.875;
+}
+
+.vc-spotify-lyrics-modal-line.vc-spotify-lyrics-line.vc-spotify-lyrics-line-bg {
+    --vc-line-idle-scale: 0.86;
+}
+
+.vc-spotify-lyrics-line.vc-spotify-lyrics-line-next {
+    opacity: 0.6;
+}
+
+.vc-spotify-lyrics-line.vc-spotify-lyrics-line-sung {
+    opacity: 0.42;
+}
+
+.vc-spotify-lyrics-line.vc-spotify-lyrics-line-active {
+    scale: 0.94;
+    opacity: 1;
+    color: var(--text-strong, var(--text-default));
+}
+
+.vc-spotify-lyrics-line.vc-spotify-lyrics-line-bg.vc-spotify-lyrics-line-active {
+    opacity: 0.85;
+}
+
+/* Line-synced lyrics (LRCLIB, Spotify) have no per-word wipe, so a long colour/opacity
+   fade between lines reads as a gradient. Switch lines quickly instead. */
+.vc-spotify-lyrics-line.vc-spotify-lyrics-line-plain {
+    transition:
+        scale 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+        opacity 0.15s ease-out,
+        color 0.15s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vc-spotify-lyrics-line {
+        transition: none;
+    }
+}
+
+.vc-spotify-lyrics.vc-spotify-lyrics-dynbg::after {
+    display: none;
+}
+
+.vc-spotify-dynbg {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+    contain: strict;
+    border-radius: inherit;
+    background: #151515;
+}
+
+.vc-spotify-dynbg > canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+.vc-spotify-dynbg-fallback {
+    position: absolute;
+    inset: -15%;
+    background: center / cover no-repeat;
+    filter: blur(36px) saturate(3.75) brightness(0.65);
+}
+
+.vc-spotify-lyrics-line-seekable {
+    cursor: pointer;
+}
+
+.vc-spotify-lyrics-line-seekable:hover {
+    opacity: 0.85;
+}
+
+.vc-spotify-lyrics-spicy .vc-spotify-lyrics-line-seekable {
+    width: fit-content;
+    max-width: 70%;
+}
+
+.vc-spotify-lyrics-spicy .vc-spotify-lyrics-align-right.vc-spotify-lyrics-line-seekable {
+    align-self: flex-end;
+}
+
+.vc-spotify-lyrics-spicy .vc-spotify-lyrics-align-left.vc-spotify-lyrics-line-seekable {
+    align-self: flex-start;
+}
+
+.vc-spotify-lyrics-modal-spicy {
+    position: relative;
+    height: 60vh;
+    overflow: hidden;
+    border-radius: 8px;
+    background: #000;
+}
+
+.vc-spotify-lyrics-modal-spicy > .vc-spotify-dynbg {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+    contain: strict;
+    border-radius: inherit;
+}
+
+.vc-spotify-lyrics-modal-spicy > .vc-spotify-lyrics-lyrics-modal-container {
+    position: relative;
+    z-index: 1;
+    height: 100%;
+    overflow-y: auto;
 }

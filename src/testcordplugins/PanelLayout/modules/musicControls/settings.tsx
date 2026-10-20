@@ -230,7 +230,16 @@ export const settings = defineModuleSettings("MusicControls", {
         description: "Restart currently playing track when pressing the previous button if playtime is >3s",
         default: true
     },
-
+    smoothScroll: {
+        type: OptionType.BOOLEAN,
+        description: "Smooth lyrics scrolling: glide to the active line. When off, the lyrics snap to it instead",
+        default: true
+    },
+    seekFadeCompensation: {
+        type: OptionType.BOOLEAN,
+        description: "Seek Fade-in Compensation: clicking a lyric line starts 300 ms before it, so Spotify's fade-in doesn't clip the first word. Best for rap and fast songs",
+        default: true
+    },
     tdalSectionTitle: {
         type: OptionType.COMPONENT,
         component: () => (
