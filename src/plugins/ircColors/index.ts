@@ -121,7 +121,7 @@ export default definePlugin({
         const colorString = context?.author?.colorString;
         const color = calculateNameColorForUser(userId);
 
-        if (Settings.plugins.CustomUserColors.enabled) {
+        if (Settings.plugins.CustomUserColors?.enabled) {
             const customColor = getCustomColorString(userId, true);
             if (customColor) return customColor;
         }
@@ -160,7 +160,7 @@ export default definePlugin({
             const colorString = context?.colorString;
             const color = calculateNameColorForUser(id);
 
-            if (Settings.plugins.CustomUserColors.enabled) {
+            if (Settings.plugins.CustomUserColors?.enabled) {
                 const customColor = getCustomColorString(id, true);
                 if (customColor) return customColor;
             }

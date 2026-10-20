@@ -781,6 +781,7 @@ export const settings = definePluginSettings({
         onChange(value) {
             const p = Plugins.OrchestratorAPI;
             if (!p) return;
+            Settings.plugins.OrchestratorAPI ??= {} as any;
             if (value) {
                 Settings.plugins.OrchestratorAPI.enabled = true;
                 if (!p.started) startPlugin(p);
@@ -797,6 +798,7 @@ export const settings = definePluginSettings({
         onChange(value) {
             const p = Plugins.OrchestratorAPI;
             if (!p) return;
+            Settings.plugins.OrchestratorAPI ??= {} as any;
             if (value) {
                 Settings.plugins.OrchestratorAPI.enabled = true;
                 Settings.plugins.OrchestratorAPI.messageCoalesce = true;
@@ -821,6 +823,7 @@ export const settings = definePluginSettings({
         default: false,
         onChange(value) {
             const p = Plugins.TestcordOptimizer;
+            Settings.plugins.TestcordOptimizer ??= {} as any;
             const op = Settings.plugins.TestcordOptimizer;
             if (!op) return;
             op.freezeMemberList = value;
@@ -2021,6 +2024,7 @@ export default definePlugin({
         if (settings.store.orchestrator || settings.store.messageCoalesce) {
             const p = Plugins.OrchestratorAPI;
             if (p && !p.started) {
+                Settings.plugins.OrchestratorAPI ??= {} as any;
                 Settings.plugins.OrchestratorAPI.enabled = true;
                 if (settings.store.messageCoalesce) {
                     Settings.plugins.OrchestratorAPI.messageCoalesce = true;
@@ -2031,6 +2035,7 @@ export default definePlugin({
         if (settings.store.bigChatMode) {
             const p = Plugins.TestcordOptimizer;
             if (p && !p.started) {
+                Settings.plugins.TestcordOptimizer ??= {} as any;
                 Settings.plugins.TestcordOptimizer.enabled = true;
                 Settings.plugins.TestcordOptimizer.freezeMemberList = true;
                 Settings.plugins.TestcordOptimizer.forcePassiveListeners = true;

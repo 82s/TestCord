@@ -64,7 +64,7 @@ export function QuickActionsSection({ fileInputRef, onFileUpload, refreshLocalTh
                 action={() => VencordNative.quickCss.openEditor()}
                 Icon={PaintbrushIcon}
             />
-            {Settings.plugins.ClientTheme.enabled && (
+            {Settings.plugins.ClientTheme?.enabled && (
                 <QuickAction
                     text="Edit ClientTheme"
                     action={() => openPluginModal(Plugins.ClientTheme)}

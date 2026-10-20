@@ -143,6 +143,7 @@ function NewPluginsModal({ modalProps, newPlugins, newSettings }: ModalComponent
                 {
                     text: "Don't show this again",
                     onClick: () => {
+                        Settings.plugins.NewPluginsManager ??= {} as any;
                         Settings.plugins.NewPluginsManager.enabled = !settings?.plugins?.NewPluginsManager?.enabled;
                     },
                     variant: "secondary"

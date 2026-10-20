@@ -62,7 +62,7 @@ export const ThemeCard: React.FC<ThemeCardProps> = ({ theme, themeLinks, likedTh
     const handleThemeAttributesCheck = () => {
         const requiresThemeAttributes = theme.requiresThemeAttributes ?? false;
 
-        if (requiresThemeAttributes && !Settings.plugins.ThemeAttributes.enabled) {
+        if (requiresThemeAttributes && !Settings.plugins.ThemeAttributes?.enabled) {
             openModal(modalProps => (
                 <Modal
                     {...modalProps}
@@ -73,6 +73,7 @@ export const ThemeCard: React.FC<ThemeCardProps> = ({ theme, themeLinks, likedTh
                             text: "Enable Plugin",
                             variant: "primary",
                             onClick: () => {
+                                Settings.plugins.ThemeAttributes ??= {} as any;
                                 Settings.plugins.ThemeAttributes.enabled = true;
                                 modalProps.onClose();
                                 handleAddRemoveTheme();

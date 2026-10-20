@@ -49,7 +49,7 @@ export default definePlugin({
             if (!currentUser) return;
 
             if (message.author.id !== currentUser.id) return;
-            if (Settings.plugins.ReactionLogger.ignoreSelf && userId === currentUser.id) return;
+            if (settings.store.ignoreSelf && userId === currentUser.id) return;
 
             const name = emoji.name.toLowerCase();
             const reactedUser = UserStore.getUser(userId);
@@ -82,7 +82,7 @@ export default definePlugin({
 
                 reactions = {};
                 timeoutId = null;
-            }, Settings.plugins.ReactionLogger.delay * 1000);
+            }, settings.store.delay * 1000);
         },
     },
 

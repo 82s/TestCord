@@ -93,7 +93,7 @@ function cap(textInput: string): string {
 
     const sentences = textInput.split(/(?<=\w\.)\s/);
 
-    const blockedWordsArray: string[] = Settings.plugins.Grammar.blockedWords.split(", ");
+    const blockedWordsArray: string[] = (settings.store.blockedWords || "").split(", ");
 
     return sentences.map(element => {
 

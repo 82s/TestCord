@@ -126,7 +126,7 @@ function Controls() {
                 <Shuffle />
             </Button>
             <Button onClick={() => {
-                Settings.plugins.MusicControls.previousButtonRestartsTrack && TidalStore.position > 3000 ? TidalStore.seek(0) : TidalStore.previous();
+                Settings.plugins.MusicControls?.previousButtonRestartsTrack && TidalStore.position > 3000 ? TidalStore.seek(0) : TidalStore.previous();
             }
             }>
                 <SkipPrev />

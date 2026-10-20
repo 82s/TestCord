@@ -126,6 +126,7 @@ export async function applyMode(mode: Mode): Promise<{ restartNeeded: boolean; }
             if (!p || p.required) continue;
             if (isPluginEnabled(name) === want) continue;
 
+            Settings.plugins[name] ??= {} as any;
             Settings.plugins[name].enabled = want;
             if (pluginRequiresRestart(p)) restartNeeded = true;
             else if (!(want ? startPlugin(p) : stopPlugin(p))) restartNeeded = true;

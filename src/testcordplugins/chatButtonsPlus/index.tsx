@@ -368,7 +368,7 @@ export default definePlugin({
                 enabled: true
             });
 
-            Settings.plugins.Woof.enabled = false;
+            if (Settings.plugins.Woof) Settings.plugins.Woof.enabled = false;
         }
 
         if (Settings.plugins?.Meow?.enabled) {
@@ -380,7 +380,7 @@ export default definePlugin({
                 enabled: true
             });
 
-            Settings.plugins.Meow.enabled = false;
+            if (Settings.plugins.Meow) Settings.plugins.Meow.enabled = false;
         }
 
         await DataStore.set(BUTTON_ENTRIES_KEY, storedEntries);

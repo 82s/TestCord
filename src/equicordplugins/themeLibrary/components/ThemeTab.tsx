@@ -62,7 +62,7 @@ function ThemeTab() {
     const [themeLinks, setThemeLinks] = useState(Settings.themeLinks);
     const [likedThemes, setLikedThemes] = useState<ThemeLikeProps>();
     const [searchValue, setSearchValue] = useState({ value: "", status: SearchStatus.ALL });
-    const [hideWarningCard, setHideWarningCard] = useState(Settings.plugins.ThemeLibrary.hideWarningCard);
+    const [hideWarningCard, setHideWarningCard] = useState(Settings.plugins.ThemeLibrary?.hideWarningCard);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(false);
 
@@ -178,6 +178,7 @@ function ThemeTab() {
                                 </Paragraph>
                                 <Button
                                     onClick={() => {
+                                        Settings.plugins.ThemeLibrary ??= {} as any;
                                         Settings.plugins.ThemeLibrary.hideWarningCard = true;
                                         setHideWarningCard(true);
                                     }}

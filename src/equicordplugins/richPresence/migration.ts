@@ -77,7 +77,7 @@ function setStoreValue(key: SettingsKey, value: boolean | string | number) {
 }
 
 export function migrateOldSettings() {
-    if (Settings.plugins.RichPresence._migrated) return;
+    if (Settings.plugins.RichPresence?._migrated) return;
 
     migratePluginSettings("RichPresence", "AudioBookShelfRichPresence", "GensokyoRadioRPC", "JellyfinRichPresence", "StatsfmPresence", "TosuRPC");
 
@@ -103,5 +103,6 @@ export function migrateOldSettings() {
         setStoreValue("tosu_enabled", true);
     }
 
+    Settings.plugins.RichPresence ??= {} as any;
     Settings.plugins.RichPresence._migrated = true;
 }

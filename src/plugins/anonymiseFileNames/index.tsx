@@ -142,7 +142,7 @@ export default definePlugin({
         let ext = extIdx !== -1 ? originalFileName.slice(extIdx) : "";
         const addSpoilerPrefix = (str: string) => settings.store.spoilerMessages ? "SPOILER_" + str : str;
 
-        if (Settings.plugins.FixFileExtensions.enabled) {
+        if (Settings.plugins.FixFileExtensions?.enabled) {
             ext = reverseExtensionMap[ext] || ext;
         }
 

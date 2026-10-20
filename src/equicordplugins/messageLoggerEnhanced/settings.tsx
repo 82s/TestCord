@@ -89,6 +89,7 @@ export const settings = definePluginSettings({
         default: false,
         onChange() {
             // we will be handling the ignoreBots now (enabled or not) so the original messageLogger shouldnt
+            Settings.plugins.MessageLogger ??= {} as any;
             Settings.plugins.MessageLogger.ignoreBots = false;
         }
     },
@@ -104,6 +105,7 @@ export const settings = definePluginSettings({
         description: "Whether to ignore messages by yourself",
         default: false,
         onChange() {
+            Settings.plugins.MessageLogger ??= {} as any;
             Settings.plugins.MessageLogger.ignoreSelf = false;
         }
     },

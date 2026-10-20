@@ -80,7 +80,7 @@ const channelContextMenuPatch: NavContextMenuPatchCallback = (children, { channe
 
 export function getCustomColorString(id: string | undefined, withHash?: boolean): string | undefined {
     if (!id) return;
-    if (!colors[id] || !Settings.plugins.CustomUserColors.enabled) return;
+    if (!colors[id] || !Settings.plugins.CustomUserColors?.enabled) return;
     if (withHash) return `#${colors[id]}`;
     return colors[id];
 }
@@ -120,7 +120,7 @@ export default definePlugin({
                 match: /(?<=colorString:\i,colorStrings:\i,colorRoleName:\i.*?}=)(\i),/,
                 replace: "$self.wrapMessageColorProps($1, arguments[0]),"
             },
-            predicate: () => !Settings.plugins.IrcColors.enabled,
+            predicate: () => !Settings.plugins.IrcColors?.enabled,
             noWarn: true
         },
         {

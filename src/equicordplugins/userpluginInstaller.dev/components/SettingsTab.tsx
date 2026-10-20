@@ -79,7 +79,7 @@ function UserPluginsTab() {
     return (
         <STab
             // @ts-ignore
-            title={`UserPlugins${pluginsLoaded ? ` (${plugins.length}, ${plugins.filter(p => Vencord.Settings.plugins[p.name].enabled).length} enabled)` : ""}`}
+            title={`UserPlugins${pluginsLoaded ? ` (${plugins.length}, ${plugins.filter(p => Vencord.Settings.plugins[p.name]?.enabled).length} enabled)` : ""}`}
         >
             <div className={cl("update-check-container")}>
                 {isObjectEmpty(pluginsWithUpdates) ? (
@@ -234,6 +234,7 @@ function UserPluginsTab() {
                                         <DeleteIcon />
                                     </button>}
                                     setEnabled={t => {
+                                        Vencord.Settings.plugins[pl.name] ??= {} as any;
                                         Vencord.Settings.plugins[pl.name].enabled = t;
                                         if (pluginRequiresRestart(pl)) {
                                             showToast({ text: "Restart to apply changes!" });

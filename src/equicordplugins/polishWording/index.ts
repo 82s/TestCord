@@ -233,7 +233,7 @@ function capitalize(textInput: string): string {
     const parts = textInput.split(sentenceSplitRegex);
     const filteredParts = parts.filter(part => part !== undefined && part !== null);
 
-    const blockedWordsArray: string[] = (Settings.plugins.PolishWording.blockedWords || "")
+    const blockedWordsArray: string[] = (settings.store.blockedWords || "")
         .split(/,\s?/)
         .filter(bw => bw)
         .map(bw => bw.toLowerCase());

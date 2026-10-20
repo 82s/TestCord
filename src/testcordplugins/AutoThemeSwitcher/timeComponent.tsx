@@ -47,7 +47,7 @@ export function timeComponent({ setValue }: PluginSettingComponentProps, id: str
 
     // Hide the setting if we're using the system theme rather than time of day
     // This was the whole purpose of making a component setting!
-    if (Settings.plugins.AutoThemeSwitcher.ChangeBasedOnSystemAppearance)
+    if (Settings.plugins.AutoThemeSwitcher?.ChangeBasedOnSystemAppearance)
         return null;
 
     return (

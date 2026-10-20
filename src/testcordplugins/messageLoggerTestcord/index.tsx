@@ -1226,13 +1226,14 @@ export default definePlugin({
         renderApi = await import("./render");
 
         if (isPluginEnabled("MessageLoggerEnhanced")) {
+            Settings.plugins.MessageLoggerEnhanced = Settings.plugins.MessageLoggerEnhanced ?? {} as any;
             Settings.plugins.MessageLoggerEnhanced.enabled = false;
             showToast("MessageLoggerEnhanced was disabled. Restart to activate MessageLoggerTestcord safely.", Toasts.Type.FAILURE);
             return;
         }
 
         if (!isPluginEnabled("MessageLogger")) {
-            Settings.plugins.MessageLogger = Settings.plugins.MessageLogger ?? {};
+            Settings.plugins.MessageLogger = Settings.plugins.MessageLogger ?? {} as any;
             Settings.plugins.MessageLogger.enabled = true;
             showToast("MessageLogger is required by MessageLoggerTestcord. Restart to activate safely.", Toasts.Type.FAILURE);
             return;

@@ -80,7 +80,7 @@ interface TypingUserProps {
 function typingUserColor(guildId: string, userId: string): string | undefined {
     if (!settings.store.showRoleColors) return;
 
-    if (Settings.plugins.CustomUserColors.enabled) {
+    if (Settings.plugins.CustomUserColors?.enabled) {
         const customColor = getCustomColorString(userId, true);
         if (customColor) return customColor;
     }

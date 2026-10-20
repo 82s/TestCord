@@ -162,7 +162,7 @@ export const actions: ButtonAction[] = [
 ];
 
 function togglePlugin(plugin: ButtonAction, enabled: boolean) {
-
+    Settings.plugins[plugin.id] ??= {} as any;
     Settings.plugins[plugin.id].enabled = enabled;
 
     showToast({

@@ -59,7 +59,7 @@ export const UserSettingsDefinitions: Record<PropertyKey, UserSettingDefinition<
  * @param name The name of the setting
  */
 export function getUserSettingDefinition<T = any>(group: string, name: string): UserSettingDefinition<T> | undefined {
-    if (!Settings.plugins.UserSettingDefinitionsAPI.enabled) throw new Error("Cannot use UserSettingDefinitionsAPI without setting as dependency.");
+    if (!Settings.plugins.UserSettingDefinitionsAPI?.enabled) throw new Error("Cannot use UserSettingDefinitionsAPI without setting as dependency.");
 
     for (const key in UserSettingsDefinitions) {
         const userSettingDefinition = UserSettingsDefinitions[key];
