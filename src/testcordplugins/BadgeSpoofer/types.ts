@@ -61,3 +61,19 @@ export interface SpooferStats {
     usedGames: string[];
     fingerprint: string;
 }
+
+export interface SpoofJob {
+    version: 1;
+    id: string;
+    createdAt: number;
+    updatedAt: number;
+    games: Game[];
+    nextIndex: number;
+    options: {
+        hours: number;
+        streamHours: number;
+        batchSize: number;
+        batchDelay: number;
+        fingerprint?: string;
+    };
+}

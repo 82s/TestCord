@@ -29,6 +29,16 @@ export default definePlugin({
 
     async start() {
         await badgeSpooferEngine.init();
+
+        const job = badgeSpooferEngine.getPendingJob();
+        if (job) {
+            Toasts.show({
+                id: Toasts.genId(),
+                message: `Badge Spoofer restoring saved run (${job.nextIndex}/${job.games.length} games)...`,
+                type: Toasts.Type.MESSAGE
+            });
+            badgeSpooferEngine.scheduleResume();
+        }
     },
 
     stop() {
@@ -70,6 +80,13 @@ export default definePlugin({
                 if (badgeSpooferEngine.getIsRunning()) {
                     sendBotMessage(channel.id, {
                         content: "Badge Spoofer is already running. Use `/badgespoof-stop` to cancel."
+                    });
+                    return;
+                }
+
+                if (badgeSpooferEngine.hasPendingJob()) {
+                    sendBotMessage(channel.id, {
+                        content: "A saved Badge Spoofer run is pending and will resume automatically. Use `/badgespoof-stop` to discard it before starting a new run."
                     });
                     return;
                 }
@@ -150,11 +167,13 @@ export default definePlugin({
                 const stats = await badgeSpooferEngine.loadStats();
                 const games = await badgeSpooferEngine.loadGames();
                 const running = badgeSpooferEngine.getIsRunning();
+                const pending = badgeSpooferEngine.getPendingJob();
 
                 sendBotMessage(channel.id, {
                     content: [
                         "**Discord Badge Spoofer Status**",
-                        `• Running: ${running ? "Yes (Active)" : "Idle"}`,
+                        `• Running: ${running ? "Yes (Active)" : pending ? "Paused (resumes automatically)" : "Idle"}`,
+                        `• Saved Run: ${pending ? `${pending.nextIndex}/${pending.games.length} games (${pending.options.hours}h play, ${pending.options.streamHours}h stream each)` : "None"}`,
                         `• Games: \`${stats.totalGamesClaimed.toLocaleString()}\``,
                         `• Playtime: \`${Math.round(stats.totalHoursClaimed).toLocaleString()} hours\``,
                         `• Streamed: \`${Math.round(stats.totalStreamHoursClaimed || 0).toLocaleString()} hours\``,
@@ -170,14 +189,19 @@ export default definePlugin({
             name: "badgespoof-stop",
             description: "Stop the currently running Badge Spoofer task",
             inputType: ApplicationCommandInputType.BUILT_IN,
-            execute: (_, { channel }) => {
-                if (!badgeSpooferEngine.getIsRunning()) {
+            execute: async (_, { channel }) => {
+                const running = badgeSpooferEngine.getIsRunning();
+                const pending = badgeSpooferEngine.hasPendingJob();
+
+                if (!running && !pending) {
                     sendBotMessage(channel.id, { content: "Badge Spoofer is not currently running." });
                     return;
                 }
 
-                    badgeSpooferEngine.stopSpoofing();
-                sendBotMessage(channel.id, { content: "Badge Spoofer stopped." });
+                await badgeSpooferEngine.cancelSpoofing();
+                sendBotMessage(channel.id, {
+                    content: running ? "Badge Spoofer stopped." : "Saved Badge Spoofer run discarded."
+                });
             }
         }
     ]

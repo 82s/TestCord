@@ -40,6 +40,7 @@ const NativeHelper = VencordNative.pluginHelpers.TestcordHelper as PluginNative<
 import plugins, { ExcludedPlugins, PluginMeta } from "~plugins";
 
 import { describeConsoleArg } from "./consoleArgs";
+import { installFixDiscordCssExperimental, uninstallFixDiscordCssExperimental } from "./fixDiscordCssExperimental";
 import { hexToInt, ICON_COLOR_FALLBACK, IconColorSettingKey, IconColorSettings, intToHex, isIconColorInputValid } from "./iconColors";
 import { cleanupTcpAutocomplete, initTcpAutocomplete } from "./tcpAutocomplete";
 
@@ -727,6 +728,15 @@ export const settings = definePluginSettings({
         type: OptionType.BOOLEAN,
         description: "Show optional performance features. Nothing here is enabled unless its own toggle is on.",
         default: false,
+    },
+    fixDiscordCssExperimental: {
+        type: OptionType.BOOLEAN,
+        description: "Remove Discord's experimental debug CSS rules that paint box-shadows on over a thousand elements. Experimental.",
+        default: false,
+        onChange(value) {
+            if (value) installFixDiscordCssExperimental();
+            else uninstallFixDiscordCssExperimental();
+        }
     },
     performanceCarefulNetwork: {
         type: OptionType.BOOLEAN,
@@ -2014,6 +2024,7 @@ export default definePlugin({
 
     start() {
         liveFixDesired = settings.store.liveFix;
+        if (settings.store.fixDiscordCssExperimental) installFixDiscordCssExperimental();
         if (settings.store.preventCrashes) installCrashGuards();
         if (settings.store.liveFix) {
             installConsoleCapture();
@@ -2087,6 +2098,7 @@ export default definePlugin({
 
     stop() {
         liveFixDesired = false;
+        uninstallFixDiscordCssExperimental();
         uninstallCrashGuards();
         uninstallDebugInstrumentation();
         uninstallConsoleCapture();

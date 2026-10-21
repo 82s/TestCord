@@ -320,14 +320,18 @@ function stateKey(content: unknown, embeds: unknown): string {
 function dedupeEmbeds<T>(embeds: T[] | undefined): T[] | undefined {
     if (!Array.isArray(embeds)) return embeds;
     const seen = new Set<string>();
+    let changed = false;
     const out: T[] = [];
     for (const embed of embeds) {
         const key = embedFingerprint(embed);
-        if (seen.has(key)) continue;
+        if (seen.has(key)) {
+            changed = true;
+            continue;
+        }
         seen.add(key);
         out.push(embed);
     }
-    return out;
+    return changed ? out : embeds;
 }
 
 export async function getLogById(messageId: string) {

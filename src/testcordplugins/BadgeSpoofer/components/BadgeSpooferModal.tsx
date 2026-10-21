@@ -10,7 +10,7 @@ import { Button, Forms, Modal, React, Text, TextInput, Toasts, useEffect, useRef
 
 import { badgeSpooferEngine } from "../engine";
 import { HypeSquadPicker } from "../hypesquad";
-import type { SpoofLog, SpoofProgress } from "../types";
+import type { SpoofJob, SpoofLog, SpoofProgress } from "../types";
 
 export function BadgeSpooferModal({ modalProps }: { modalProps: RenderModalProps }) {
     const [hours, setHours] = useState("1");
@@ -20,6 +20,7 @@ export function BadgeSpooferModal({ modalProps }: { modalProps: RenderModalProps
     const [stats, setStats] = useState(() => badgeSpooferEngine.getStats());
     const [totalAvailableGames, setTotalAvailableGames] = useState(0);
     const [isRunning, setIsRunning] = useState(badgeSpooferEngine.getIsRunning());
+    const [pendingJob, setPendingJob] = useState<SpoofJob | null>(null);
     const [progress, setProgress] = useState<SpoofProgress | null>(null);
     const [logs, setLogs] = useState<SpoofLog[]>([
         {
@@ -40,6 +41,25 @@ export function BadgeSpooferModal({ modalProps }: { modalProps: RenderModalProps
 
             const games = await badgeSpooferEngine.loadGames();
             setTotalAvailableGames(games.length);
+
+            const saved = badgeSpooferEngine.getPendingJob();
+            setPendingJob(saved);
+            if (saved) {
+                const running = badgeSpooferEngine.getIsRunning();
+                setIsRunning(running);
+                setProgress({
+                    total: saved.games.length,
+                    sent: saved.nextIndex,
+                    hours: saved.options.hours,
+                    streamHours: saved.options.streamHours,
+                    currentBatch: Math.ceil(saved.nextIndex / saved.options.batchSize),
+                    totalBatches: Math.ceil(saved.games.length / saved.options.batchSize),
+                    isRunning: running,
+                    status: running
+                        ? `Resuming ${saved.nextIndex}/${saved.games.length}...`
+                        : `Paused at ${saved.nextIndex}/${saved.games.length}.`
+                });
+            }
         })();
     }, []);
 
@@ -48,6 +68,16 @@ export function BadgeSpooferModal({ modalProps }: { modalProps: RenderModalProps
     }, [logs]);
 
     const handleStart = async () => {
+        if (badgeSpooferEngine.hasPendingJob()) {
+            setPendingJob(badgeSpooferEngine.getPendingJob());
+            Toasts.show({
+                id: Toasts.genId(),
+                message: "A saved run is pending. Resume or discard it first.",
+                type: Toasts.Type.MESSAGE
+            });
+            return;
+        }
+
         const parsedCount = !gameCount.trim() || gameCount.toLowerCase() === "all"
             ? totalAvailableGames
             : Math.min(Number(gameCount) || totalAvailableGames, totalAvailableGames);
@@ -55,6 +85,7 @@ export function BadgeSpooferModal({ modalProps }: { modalProps: RenderModalProps
         const parsedStreamHours = Math.max(0, Number(streamHours) || 0);
 
         setIsRunning(true);
+        setPendingJob(null);
         badgeSpooferEngine.setFingerprint(fingerprint);
 
         await badgeSpooferEngine.startSpoofing({
@@ -73,15 +104,54 @@ export function BadgeSpooferModal({ modalProps }: { modalProps: RenderModalProps
         });
 
         setIsRunning(false);
+        setPendingJob(badgeSpooferEngine.getPendingJob());
         setStats(badgeSpooferEngine.getStats());
     };
 
-    const handleStop = () => {
-        badgeSpooferEngine.stopSpoofing();
+    const handleStop = async () => {
+        await badgeSpooferEngine.cancelSpoofing();
         setIsRunning(false);
+        setPendingJob(null);
+        setProgress(null);
         Toasts.show({
             id: Toasts.genId(),
             message: "Spoofing stopped.",
+            type: Toasts.Type.MESSAGE
+        });
+    };
+
+    const handleResume = async () => {
+        setIsRunning(true);
+        const resumed = await badgeSpooferEngine.resumePendingJob(
+            log => setLogs(prev => [...prev.slice(-150), log]),
+            p => {
+                setProgress(p);
+                setIsRunning(p.isRunning);
+                setStats(badgeSpooferEngine.getStats());
+            }
+        );
+
+        setIsRunning(false);
+        setPendingJob(badgeSpooferEngine.getPendingJob());
+        setStats(badgeSpooferEngine.getStats());
+
+        if (!resumed) {
+            Toasts.show({
+                id: Toasts.genId(),
+                message: "No saved run to resume.",
+                type: Toasts.Type.MESSAGE
+            });
+        }
+    };
+
+    const handleDiscard = async () => {
+        await badgeSpooferEngine.cancelSpoofing();
+        setIsRunning(false);
+        setPendingJob(null);
+        setProgress(null);
+        Toasts.show({
+            id: Toasts.genId(),
+            message: "Saved run discarded.",
             type: Toasts.Type.MESSAGE
         });
     };
@@ -144,6 +214,34 @@ export function BadgeSpooferModal({ modalProps }: { modalProps: RenderModalProps
                         <Text variant="heading-md/bold" color="header-primary">{totalAvailableGames.toLocaleString()}</Text>
                     </div>
                 </div>
+
+                {pendingJob && !isRunning && (
+                    <div style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: "12px",
+                        background: "var(--background-secondary)",
+                        padding: "12px 14px",
+                        borderRadius: "8px",
+                        border: "1px solid var(--background-modifier-accent)"
+                    }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                            <Text variant="text-sm/semibold" color="header-primary">Saved run paused</Text>
+                            <Text variant="text-xs/normal" color="text-muted">
+                                {pendingJob.nextIndex}/{pendingJob.games.length} games already sent. It resumes automatically after a restart.
+                            </Text>
+                        </div>
+                        <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
+                            <Button size={Button.Sizes.SMALL} color={Button.Colors.BRAND} onClick={handleResume}>
+                                Resume
+                            </Button>
+                            <Button size={Button.Sizes.SMALL} color={Button.Colors.RED} onClick={handleDiscard}>
+                                Discard
+                            </Button>
+                        </div>
+                    </div>
+                )}
 
                 <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px" }}>
@@ -274,7 +372,7 @@ export function BadgeSpooferModal({ modalProps }: { modalProps: RenderModalProps
                         Note
                     </Text>
                     <Text variant="text-xs/normal" color="text-muted" style={{ lineHeight: 1.4 }}>
-                        Discord accepts these events with status <code style={{ background: "rgba(0,0,0,0.3)", padding: "1px 4px", borderRadius: "3px", color: "var(--text-positive)" }}>204 OK</code>. When stream hours are enabled, the spoofer briefly joins an empty voice channel so the stream is attributed, then leaves. Badge tiers refresh on their backend within 24-48 hours.
+                        Discord accepts these events with status <code style={{ background: "rgba(0,0,0,0.3)", padding: "1px 4px", borderRadius: "3px", color: "var(--text-positive)" }}>204 OK</code>. When stream hours are enabled, the spoofer briefly joins an empty voice channel so the stream is attributed, then leaves. Progress is saved after every batch, so a crash or Discord restart resumes the run automatically. Badge tiers refresh on their backend within 24-48 hours.
                     </Text>
                 </div>
             </ModalContent>
@@ -313,6 +411,7 @@ export function BadgeSpooferModal({ modalProps }: { modalProps: RenderModalProps
                         ) : (
                             <Button
                                 color={Button.Colors.BRAND}
+                                disabled={!!pendingJob}
                                 onClick={handleStart}
                             >
                                 Start Spoofing

@@ -15,13 +15,14 @@ import {
     UserStore, VoiceStateStore
 } from "@webpack/common";
 
-import type { Game, SessionInfo, SpooferStats, SpoofOptions, VoiceContext } from "./types";
+import type { Game, SessionInfo, SpooferStats, SpoofJob, SpoofOptions, VoiceContext } from "./types";
 
 const logger = new Logger("BadgeSpooferEngine", "#ff73fa");
 
 const GAMES_CDN_URL = "https://cdn.discordapp.com/detectables/games.json";
 const SCIENCE_URL = "/science?source=badge_spoofer";
 const ME_URL = "/users/@me?with_analytics_token=true";
+const JOB_KEY = "badge_spoofer_job";
 
 const CLIENT_VERSION = "1.0.9253";
 const CLIENT_BUILD_NUMBER = 594031;
@@ -38,6 +39,10 @@ export class BadgeSpooferEngine {
     private abortController: AbortController | null = null;
     private isRunning = false;
     private autoJoinedChannelId: string | null = null;
+    private activeJob: SpoofJob | null = null;
+    private cancelRequested = false;
+    private resumeTimeout: ReturnType<typeof setTimeout> | null = null;
+    private runPromise: Promise<void> | null = null;
 
     private stats: SpooferStats = {
         totalGamesClaimed: 0,
@@ -56,6 +61,7 @@ export class BadgeSpooferEngine {
 
     public async init() {
         await this.loadStats();
+        await this.loadJob();
     }
 
     public async loadStats(): Promise<SpooferStats> {
@@ -86,6 +92,65 @@ export class BadgeSpooferEngine {
 
     public getStats(): SpooferStats {
         return { ...this.stats };
+    }
+
+    private async loadJob() {
+        try {
+            const saved = await DataStore.get(JOB_KEY);
+            if (!saved || typeof saved !== "object") {
+                this.activeJob = null;
+                return;
+            }
+
+            const job = saved as SpoofJob;
+            if (
+                !Array.isArray(job.games) ||
+                job.games.length === 0 ||
+                typeof job.nextIndex !== "number" ||
+                job.nextIndex < 0 ||
+                job.nextIndex >= job.games.length ||
+                !job.options
+            ) {
+                await DataStore.del(JOB_KEY);
+                this.activeJob = null;
+                return;
+            }
+
+            this.activeJob = job;
+        } catch (e) {
+            logger.error("Failed to load saved spoofer job:", e);
+            this.activeJob = null;
+        }
+    }
+
+    private async saveJob(job: SpoofJob) {
+        try {
+            await DataStore.set(JOB_KEY, job);
+        } catch (e) {
+            logger.error("Failed to save spoofer job:", e);
+        }
+    }
+
+    private async clearJob() {
+        this.activeJob = null;
+        try {
+            await DataStore.del(JOB_KEY);
+        } catch (e) {
+            logger.error("Failed to clear spoofer job:", e);
+        }
+    }
+
+    public hasPendingJob(): boolean {
+        return this.activeJob !== null;
+    }
+
+    public getPendingJob(): SpoofJob | null {
+        if (!this.activeJob) return null;
+        return {
+            ...this.activeJob,
+            games: [...this.activeJob.games],
+            options: { ...this.activeJob.options }
+        };
     }
 
     public setFingerprint(fp: string) {
@@ -690,8 +755,10 @@ export class BadgeSpooferEngine {
             return;
         }
 
-        this.isRunning = true;
-        this.abortController = new AbortController();
+        if (this.resumeTimeout) {
+            clearTimeout(this.resumeTimeout);
+            this.resumeTimeout = null;
+        }
 
         const log = (type: "info" | "success" | "warn" | "error", message: string) => {
             options.onLog?.({
@@ -707,137 +774,272 @@ export class BadgeSpooferEngine {
         const allGames = await this.loadGames();
         if (allGames.length === 0) {
             log("error", "Could not load games database from Discord CDN. Check network connection.");
-            this.isRunning = false;
             return;
         }
 
         log("info", `Loaded ${allGames.length} detectable games from Discord database.`);
 
+        const targetCount = Math.min(Math.max(1, options.count || allGames.length), allGames.length);
+        const hours = Math.max(0, options.hours || 0);
+        const streamHours = Math.max(0, options.streamHours || 0);
+        const batchSize = Math.max(1, options.batchSize || 50);
+        const batchDelay = Math.max(100, options.batchDelay || 300);
+        const fingerprint = options.fingerprint || this.stats.fingerprint || undefined;
+        const selectedGames = this.selectGames(allGames, targetCount);
+
+        const job: SpoofJob = {
+            version: 1,
+            id: crypto.randomUUID(),
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            games: selectedGames,
+            nextIndex: 0,
+            options: { hours, streamHours, batchSize, batchDelay, fingerprint }
+        };
+
+        this.activeJob = job;
+        await this.saveJob(job);
+        this.runPromise = this.runJob(job, options.onLog, options.onProgress);
+        try {
+            await this.runPromise;
+        } finally {
+            this.runPromise = null;
+        }
+    }
+
+    public scheduleResume(delayMs = 5000) {
+        if (!this.activeJob || this.isRunning || this.resumeTimeout) return;
+
+        this.resumeTimeout = setTimeout(() => {
+            this.resumeTimeout = null;
+            void this.resumePendingJob();
+        }, delayMs);
+    }
+
+    public async resumePendingJob(
+        onLog?: SpoofOptions["onLog"],
+        onProgress?: SpoofOptions["onProgress"]
+    ): Promise<boolean> {
+        if (this.resumeTimeout) {
+            clearTimeout(this.resumeTimeout);
+            this.resumeTimeout = null;
+        }
+        if (this.isRunning || !this.activeJob) return false;
+
+        const job = this.activeJob;
+        if (job.nextIndex >= job.games.length) {
+            await this.clearJob();
+            return false;
+        }
+
+        this.runPromise = this.runJob(job, onLog, onProgress);
+        try {
+            await this.runPromise;
+        } finally {
+            this.runPromise = null;
+        }
+        return true;
+    }
+
+    private async runJob(
+        job: SpoofJob,
+        onLog?: SpoofOptions["onLog"],
+        onProgress?: SpoofOptions["onProgress"]
+    ) {
+        this.isRunning = true;
+        this.cancelRequested = false;
+        this.abortController = new AbortController();
+
+        const log = (type: "info" | "success" | "warn" | "error", message: string) => {
+            onLog?.({
+                id: Math.random().toString(36).substring(2, 9),
+                timestamp: Date.now(),
+                type,
+                message
+            });
+        };
+
+        const { hours, streamHours, batchSize, batchDelay, fingerprint } = job.options;
+        const selectedGames = job.games;
+        const targetCount = selectedGames.length;
+        const playDurationMs = Math.floor(hours * 3600 * 1000);
+        const streamDurationMs = Math.floor(streamHours * 3600 * 1000);
+        const totalBatches = Math.ceil(targetCount / batchSize);
+        const startedAt = job.nextIndex;
+
+        log("info", startedAt > 0
+            ? `Resuming saved run at ${startedAt}/${targetCount} games...`
+            : "Starting spoofing run...");
+
         const analyticsToken = await this.getAnalyticsToken();
         if (!analyticsToken) {
-            log("error", "Could not retrieve Discord analytics_token. Are you logged in?");
+            log("error", "Could not retrieve Discord analytics_token. Are you logged in? The saved run will resume on next start.");
             this.isRunning = false;
             return;
         }
 
         log("success", "Analytics token ready.");
 
-        const targetCount = Math.min(Math.max(1, options.count || allGames.length), allGames.length);
-        const hours = Math.max(0, options.hours || 0);
-        const streamHours = Math.max(0, options.streamHours || 0);
-        const playDurationMs = Math.floor(hours * 3600 * 1000);
-        const streamDurationMs = Math.floor(streamHours * 3600 * 1000);
-        const batchSize = Math.max(1, options.batchSize || 50);
-        const batchDelay = Math.max(100, options.batchDelay || 300);
-        const fingerprint = options.fingerprint || this.stats.fingerprint || undefined;
-        const currentUserId = UserStore?.getCurrentUser?.()?.id;
+        if (this.abortController.signal.aborted || this.cancelRequested) {
+            this.isRunning = false;
+            return;
+        }
 
-        const selectedGames = this.selectGames(allGames, targetCount);
-        const session = this.createSession();
+        const currentUserId = UserStore?.getCurrentUser?.()?.id;
         const voiceContext = streamDurationMs > 0 ? await this.resolveVoiceContext() : null;
         if (streamDurationMs > 0 && !voiceContext) {
             log("warn", "Could not join a voice channel - stream events will be sent WITHOUT channel attribution and Discord may discard them. Join a server voice channel before spoofing stream hours.");
         } else if (voiceContext) {
             log("info", `Stream attribution ready (channel ${voiceContext.channelId}${voiceContext.guildId ? `, guild ${voiceContext.guildId}` : ", DM call"}${this.autoJoinedChannelId ? ", auto-joined" : ""}).`);
         }
+
+        const session = this.createSession();
         let seq = 0;
         const getSeq = () => ++seq;
 
-        const totalBatches = Math.ceil(selectedGames.length / batchSize);
-        let sentGamesCount = 0;
+        log("info", `Targeting ${targetCount} games: ${hours}h play each (${(targetCount * hours).toLocaleString()}h), ${streamHours}h stream each (${(targetCount * streamHours).toLocaleString()}h) in ${totalBatches} batches.`);
 
-        log("info", `Targeting ${selectedGames.length} games: ${hours}h play each (${(selectedGames.length * hours).toLocaleString()}h), ${streamHours}h stream each (${(selectedGames.length * streamHours).toLocaleString()}h) in ${totalBatches} batches.`);
-
-        options.onProgress?.({
-            total: selectedGames.length,
-            sent: 0,
+        onProgress?.({
+            total: targetCount,
+            sent: startedAt,
             hours,
             streamHours,
-            currentBatch: 0,
+            currentBatch: Math.floor(startedAt / batchSize),
             totalBatches,
             isRunning: true,
-            status: `Starting 0/${selectedGames.length}...`
+            status: startedAt > 0 ? `Resuming ${startedAt}/${targetCount}...` : `Starting 0/${targetCount}...`
         });
 
-        for (let i = 0; i < selectedGames.length; i += batchSize) {
-            if (this.abortController.signal.aborted) {
-                log("warn", "Spoofing cancelled by user.");
-                break;
+        let index = startedAt;
+        let rateLimitRetries = 0;
+
+        try {
+            while (index < targetCount) {
+                if (this.abortController.signal.aborted || this.cancelRequested) {
+                    log("warn", "Spoofing cancelled by user.");
+                    break;
+                }
+
+                const batchIndex = Math.floor(index / batchSize) + 1;
+                const chunk = selectedGames.slice(index, index + batchSize);
+                const events: any[] = [];
+
+                for (const game of chunk) {
+                    events.push(...this.buildGameAndStreamSessionEvents(
+                        game,
+                        playDurationMs,
+                        streamDurationMs,
+                        session,
+                        getSeq,
+                        fingerprint,
+                        currentUserId,
+                        voiceContext
+                    ));
+                }
+
+                const status = await this.postEvents(events, analyticsToken, session);
+
+                if (this.cancelRequested || this.abortController.signal.aborted) break;
+
+                if (status >= 200 && status < 300) {
+                    index += chunk.length;
+                    job.nextIndex = index;
+                    job.updatedAt = Date.now();
+                    this.stats.totalGamesClaimed += chunk.length;
+                    this.stats.totalHoursClaimed += chunk.length * hours;
+                    this.stats.totalStreamHoursClaimed += chunk.length * streamHours;
+                    await Promise.all([this.saveStats(), this.saveJob(job)]);
+                    rateLimitRetries = 0;
+
+                    log("success", `Batch ${batchIndex}/${totalBatches} accepted [${status}] (${index}/${targetCount} games, ${hours}h play, ${streamHours}h stream)`);
+                } else if (status === 401 || status === 403) {
+                    log("error", `Batch ${batchIndex} auth rejected [${status}]. Refreshing analytics token and pausing.`);
+                    await this.getAnalyticsToken(true);
+                    break;
+                } else if (status === 429) {
+                    rateLimitRetries++;
+                    if (rateLimitRetries > 5) {
+                        log("warn", "Rate limited too many times. Pausing the saved run.");
+                        break;
+                    }
+                    log("warn", `Rate limited [429] on batch ${batchIndex}. Backing off ${rateLimitRetries * 2.5}s...`);
+                    await sleep(2500 * rateLimitRetries);
+                    continue;
+                } else {
+                    log("warn", `Batch ${batchIndex} returned status [${status}]. Pausing the saved run.`);
+                    break;
+                }
+
+                onProgress?.({
+                    total: targetCount,
+                    sent: index,
+                    hours,
+                    streamHours,
+                    currentBatch: batchIndex,
+                    totalBatches,
+                    isRunning: true,
+                    status: `Sent ${index}/${targetCount} games`
+                });
+
+                await sleep(batchDelay);
             }
+        } catch (e) {
+            logger.error("Badge spoofer run failed:", e);
+            log("error", `Run paused: ${e instanceof Error ? e.message : String(e)}. It will resume on next start.`);
+        } finally {
+            this.leaveJoinedVoiceChannel();
+            this.isRunning = false;
 
-            const batchIndex = Math.floor(i / batchSize) + 1;
-            const chunk = selectedGames.slice(i, i + batchSize);
-            const events: any[] = [];
-
-            for (const game of chunk) {
-                events.push(...this.buildGameAndStreamSessionEvents(
-                    game,
-                    playDurationMs,
-                    streamDurationMs,
-                    session,
-                    getSeq,
-                    fingerprint,
-                    currentUserId,
-                    voiceContext
-                ));
-            }
-
-            const status = await this.postEvents(events, analyticsToken, session);
-
-            if (status === 204 || (status >= 200 && status < 300)) {
-                sentGamesCount += chunk.length;
-                this.stats.totalGamesClaimed += chunk.length;
-                this.stats.totalHoursClaimed += chunk.length * hours;
-                this.stats.totalStreamHoursClaimed += chunk.length * streamHours;
-                await this.saveStats();
-
-                log("success", `Batch ${batchIndex}/${totalBatches} accepted [204 OK] (${sentGamesCount}/${selectedGames.length} games, ${hours}h play, ${streamHours}h stream)`);
-            } else if (status === 401 || status === 403) {
-                log("error", `Batch ${batchIndex} auth rejected [${status}]. Refreshing analytics token...`);
-                await this.getAnalyticsToken(true);
-                break;
-            } else if (status === 429) {
-                log("warn", `Rate limited [429] on batch ${batchIndex}. Backing off 2.5s...`);
-                await sleep(2500);
+            const completed = job.nextIndex >= targetCount;
+            if (completed || this.cancelRequested) {
+                await this.clearJob();
             } else {
-                log("warn", `Batch ${batchIndex} returned status [${status}].`);
+                job.updatedAt = Date.now();
+                await this.saveJob(job);
             }
 
-            options.onProgress?.({
-                total: selectedGames.length,
-                sent: sentGamesCount,
+            onProgress?.({
+                total: targetCount,
+                sent: job.nextIndex,
                 hours,
                 streamHours,
-                currentBatch: batchIndex,
+                currentBatch: Math.ceil(job.nextIndex / batchSize),
                 totalBatches,
-                isRunning: true,
-                status: `Sent ${sentGamesCount}/${selectedGames.length} games`
+                isRunning: false,
+                status: completed
+                    ? `Completed: ${job.nextIndex} games claimed.`
+                    : this.cancelRequested
+                        ? `Cancelled at ${job.nextIndex}/${targetCount}.`
+                        : `Paused at ${job.nextIndex}/${targetCount}. Resumes on next start.`
             });
 
-            await sleep(batchDelay);
+            if (completed) {
+                log("success", `Finished: ${job.nextIndex} games claimed (${(job.nextIndex * hours).toLocaleString()}h play, ${(job.nextIndex * streamHours).toLocaleString()}h stream). Badges update in 1-2 days.`);
+            } else if (!this.cancelRequested) {
+                log("warn", `Paused at ${job.nextIndex}/${targetCount} games. It will resume automatically on the next Discord start.`);
+            }
         }
+    }
 
-        this.leaveJoinedVoiceChannel();
+    public async cancelSpoofing() {
+        this.cancelRequested = true;
+        if (this.resumeTimeout) {
+            clearTimeout(this.resumeTimeout);
+            this.resumeTimeout = null;
+        }
+        this.abortController?.abort();
+        if (this.runPromise) await this.runPromise;
         this.isRunning = false;
-        options.onProgress?.({
-            total: selectedGames.length,
-            sent: sentGamesCount,
-            hours,
-            streamHours,
-            currentBatch: totalBatches,
-            totalBatches,
-            isRunning: false,
-            status: `Completed: ${sentGamesCount} games claimed.`
-        });
-
-        log("success", `Finished: ${sentGamesCount} games claimed (${(sentGamesCount * hours).toLocaleString()}h play, ${(sentGamesCount * streamHours).toLocaleString()}h stream). Badges update in 1-2 days.`);
+        await this.clearJob();
+        this.leaveJoinedVoiceChannel();
     }
 
     public stopSpoofing() {
-        if (this.abortController) {
-            this.abortController.abort();
+        if (this.resumeTimeout) {
+            clearTimeout(this.resumeTimeout);
+            this.resumeTimeout = null;
         }
-        this.isRunning = false;
+        this.abortController?.abort();
         this.leaveJoinedVoiceChannel();
     }
 }
