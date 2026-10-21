@@ -274,7 +274,7 @@ export function BadgeSpooferModal({ modalProps }: { modalProps: RenderModalProps
                         Note
                     </Text>
                     <Text variant="text-xs/normal" color="text-muted" style={{ lineHeight: 1.4 }}>
-                        Discord accepts these events with status <code style={{ background: "rgba(0,0,0,0.3)", padding: "1px 4px", borderRadius: "3px", color: "var(--text-positive)" }}>204 OK</code>. Badge tiers refresh on their backend within 24-48 hours.
+                        Discord accepts these events with status <code style={{ background: "rgba(0,0,0,0.3)", padding: "1px 4px", borderRadius: "3px", color: "var(--text-positive)" }}>204 OK</code>. When stream hours are enabled, the spoofer briefly joins an empty voice channel so the stream is attributed, then leaves. Badge tiers refresh on their backend within 24-48 hours.
                     </Text>
                 </div>
             </ModalContent>

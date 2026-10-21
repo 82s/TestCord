@@ -6,8 +6,14 @@
 
 import * as DataStore from "@api/DataStore";
 import { Logger } from "@utils/Logger";
+import { sleep } from "@utils/misc";
+import { ChannelType } from "@vencord/discord-types/enums";
 import { findStoreLazy } from "@webpack";
-import { AuthenticationStore, ChannelStore, RestAPI, SelectedChannelStore, UserStore } from "@webpack/common";
+import {
+    AuthenticationStore, ChannelActions, ChannelStore, GuildChannelStore, GuildStore,
+    PermissionsBits, PermissionStore, RestAPI, RTCConnectionStore, SelectedChannelStore,
+    UserStore, VoiceStateStore
+} from "@webpack/common";
 
 import type { Game, SessionInfo, SpooferStats, SpoofOptions, VoiceContext } from "./types";
 
@@ -31,6 +37,7 @@ export class BadgeSpooferEngine {
     private analyticsTokenFetchedAt = 0;
     private abortController: AbortController | null = null;
     private isRunning = false;
+    private autoJoinedChannelId: string | null = null;
 
     private stats: SpooferStats = {
         totalGamesClaimed: 0,
@@ -142,13 +149,23 @@ export class BadgeSpooferEngine {
     }
 
     public async getAnalyticsToken(force = false): Promise<string> {
+        const storeToken = (AuthenticationStore as { getAnalyticsToken?: () => string | null; }).getAnalyticsToken?.();
+        if (storeToken) {
+            this.analyticsToken = storeToken;
+            this.analyticsTokenFetchedAt = Date.now();
+            return storeToken;
+        }
+
         const MAX_AGE = 12 * 3600 * 1000;
         if (!force && this.analyticsToken && (Date.now() - this.analyticsTokenFetchedAt < MAX_AGE)) {
             return this.analyticsToken;
         }
 
         try {
-            const res = await RestAPI.get({ url: ME_URL });
+            const res = await Promise.race([
+                RestAPI.get({ url: ME_URL }),
+                sleep(5000).then(() => null)
+            ]);
             const token = res?.body?.analytics_token;
             if (token && typeof token === "string") {
                 this.analyticsToken = token;
@@ -162,12 +179,16 @@ export class BadgeSpooferEngine {
         try {
             const token = (AuthenticationStore as any)?.getToken?.() || (findStoreLazy("AuthenticationStore") as any)?.getToken?.();
             if (token) {
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), 5000);
                 const res = await fetch("https://discord.com/api/v9/users/@me?with_analytics_token=true", {
                     headers: {
                         authorization: token,
                         "user-agent": USER_AGENT
-                    }
+                    },
+                    signal: controller.signal
                 });
+                clearTimeout(timer);
                 if (res.ok) {
                     const data = await res.json();
                     if (data.analytics_token) {
@@ -223,21 +244,71 @@ export class BadgeSpooferEngine {
         return { heartbeatSession, launchSignature, superProps };
     }
 
-    private resolveVoiceContext(): VoiceContext | null {
+    private async joinEmptyVoiceChannel(): Promise<string | null> {
+        const userId = UserStore.getCurrentUser()?.id;
+        if (!userId) return null;
+
+        const guilds = Object.values(GuildStore.getGuilds()).sort(
+            (a, b) => Number(b.ownerId === userId) - Number(a.ownerId === userId)
+        );
+
+        for (const guild of guilds) {
+            for (const channelId of GuildChannelStore.getVocalChannelIds(guild.id) ?? []) {
+                const channel = ChannelStore.getChannel(channelId);
+                if (!channel || channel.type === ChannelType.GUILD_STAGE_VOICE) continue;
+                if (guild.afkChannelId === channelId) continue;
+                if (!PermissionStore.can(PermissionsBits.CONNECT, channel)) continue;
+                if (!PermissionStore.can(PermissionsBits.STREAM, channel)) continue;
+                if (Object.keys(VoiceStateStore.getVoiceStatesForChannel(channelId) ?? {}).length > 0) continue;
+
+                ChannelActions.selectVoiceChannel(channelId);
+                for (let i = 0; i < 40; i++) {
+                    if (SelectedChannelStore.getVoiceChannelId() === channelId && RTCConnectionStore.getMediaSessionId()) {
+                        this.autoJoinedChannelId = channelId;
+                        return channelId;
+                    }
+                    await sleep(250);
+                }
+
+                ChannelActions.selectVoiceChannel(null);
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    private leaveJoinedVoiceChannel() {
+        if (!this.autoJoinedChannelId) return;
+
+        if (SelectedChannelStore.getVoiceChannelId() === this.autoJoinedChannelId) {
+            ChannelActions.selectVoiceChannel(null);
+        }
+        this.autoJoinedChannelId = null;
+    }
+
+    private async resolveVoiceContext(): Promise<VoiceContext | null> {
         try {
-            const channelId = (SelectedChannelStore as any)?.getVoiceChannelId?.() || null;
-            if (!channelId) return null;
+            let channelId = SelectedChannelStore.getVoiceChannelId() ?? null;
+            if (!channelId) {
+                channelId = await this.joinEmptyVoiceChannel();
+                if (!channelId) return null;
+            }
 
-            const channel = (ChannelStore as any)?.getChannel?.(channelId);
-            const guildId = channel?.guild_id ?? channel?.getGuildId?.() ?? null;
-            const userId = UserStore?.getCurrentUser?.()?.id;
-            if (!userId) return null;
+            for (let i = 0; i < 40 && !RTCConnectionStore.getMediaSessionId(); i++) {
+                await sleep(250);
+            }
 
-            const streamKey = guildId
-                ? `${guildId}:${channelId}:${userId}`
-                : `call:${channelId}:${userId}`;
+            const channel = ChannelStore.getChannel(channelId);
+            if (!channel) return null;
 
-            return { channelId, guildId: guildId ?? null, streamKey };
+            return {
+                channelId,
+                guildId: channel.guild_id ?? null,
+                channelType: channel.type,
+                mediaSessionId: RTCConnectionStore.getMediaSessionId() ?? null,
+                rtcConnectionId: RTCConnectionStore.getRTCConnectionId() ?? null
+            };
         } catch (e) {
             logger.warn("Failed to resolve voice context:", e);
             return null;
@@ -316,15 +387,168 @@ export class BadgeSpooferEngine {
                 game_metadata: null,
                 game_executable: game.exe,
                 game_detection_enabled: true,
+                game_distributor: null,
+                game_distributor_game_id: null,
                 initial_heartbeat: initial,
                 final_heartbeat: final,
                 game_session_id: gameSessionId,
                 duration_tracked_ms: durationMs,
                 rtc_connection_id: rtcId,
                 media_session_id: mediaId,
-                launch_signature: session.launchSignature,
                 client_app_state: "focused",
                 client_send_timestamp: timestamp,
+            }
+        };
+    }
+
+    private getRegion(): string | null {
+        const match = /^([a-z]+-[a-z]+)/.exec(RTCConnectionStore.getHostname());
+        return match ? match[1] : null;
+    }
+
+    private buildStreamProperties(
+        game: Game,
+        voiceContext: VoiceContext | null,
+        mediaSessionId: string,
+        rtcConnectionId: string,
+        userId: string | null
+    ) {
+        const region = this.getRegion();
+        return {
+            channel_id: voiceContext?.channelId ?? null,
+            guild_id: voiceContext?.guildId ?? null,
+            channel_type: voiceContext?.channelType ?? null,
+            rtc_connection_id: rtcConnectionId,
+            media_session_id: mediaSessionId,
+            parent_media_session_id: voiceContext?.mediaSessionId ?? null,
+            sender_user_id: userId,
+            context: "stream",
+            stream_region: region,
+            stream_source_type: "screen",
+            guild_region: region,
+            participant_type: "streamer",
+            share_application_name: game.name,
+            share_application_id: game.id,
+            share_application_executable: game.exe,
+            share_application_distributor: null,
+            share_application_distributor_game_id: null,
+            share_application_game_metadata: null,
+            video_layout: "full-screen",
+            client_event_source: null,
+            voice_backend_version: null,
+            rtc_worker_backend_version: null
+        };
+    }
+
+    private buildMediaSessionJoinedEvent(
+        streamStart: number,
+        session: SessionInfo,
+        seq: number,
+        mediaSessionId: string,
+        rtcConnectionId: string,
+        voiceContext: VoiceContext | null
+    ) {
+        return {
+            type: "media_session_joined",
+            properties: {
+                client_track_timestamp: streamStart,
+                client_heartbeat_session_id: session.heartbeatSession,
+                event_sequence_number: seq,
+                guild_id: voiceContext?.guildId ?? null,
+                channel_id: voiceContext?.channelId ?? null,
+                channel_type: voiceContext?.channelType ?? null,
+                rtc_connection_id: rtcConnectionId,
+                context: "stream",
+                voice_backend_version: null,
+                rtc_worker_backend_version: null,
+                media_session_id: mediaSessionId,
+                parent_media_session_id: voiceContext?.mediaSessionId ?? null,
+                raw_thermal_state: null
+            }
+        };
+    }
+
+    private buildVideoStreamStartedEvent(
+        game: Game,
+        streamStart: number,
+        session: SessionInfo,
+        seq: number,
+        mediaSessionId: string,
+        rtcConnectionId: string,
+        userId: string | null,
+        voiceContext: VoiceContext | null
+    ) {
+        return {
+            type: "video_stream_started",
+            properties: {
+                client_track_timestamp: streamStart,
+                client_heartbeat_session_id: session.heartbeatSession,
+                event_sequence_number: seq,
+                ...this.buildStreamProperties(game, voiceContext, mediaSessionId, rtcConnectionId, userId),
+                video_input_resolution: 1080,
+                video_input_frame_rate: 60,
+                soundshare_session: crypto.randomUUID(),
+                share_game_name: game.name,
+                share_game_id: game.id,
+                quality_preset: "balanced",
+                connection_type: null,
+                effective_connection_speed: null,
+                service_provider: null,
+                duration_go_live_modal: 3000,
+                source_location_stack: []
+            }
+        };
+    }
+
+    private buildVideoStreamEndedEvent(
+        game: Game,
+        streamEnd: number,
+        streamDurationMs: number,
+        session: SessionInfo,
+        seq: number,
+        mediaSessionId: string,
+        rtcConnectionId: string,
+        userId: string | null,
+        voiceContext: VoiceContext | null
+    ) {
+        const duration = Math.floor(streamDurationMs / 1000);
+        return {
+            type: "video_stream_ended",
+            properties: {
+                client_track_timestamp: streamEnd,
+                client_heartbeat_session_id: session.heartbeatSession,
+                event_sequence_number: seq,
+                ...this.buildStreamProperties(game, voiceContext, mediaSessionId, rtcConnectionId, userId),
+                duration,
+                duration_aggregation: duration,
+                avg_resolution: 1080,
+                avg_fps: 60,
+                num_frames: Math.max(1, duration * 60),
+                num_bytes: duration * 562500,
+                num_packets: Math.max(1, duration * 350),
+                num_packets_lost: 0,
+                avg_bitrate: 4500000,
+                num_keyframes: Math.max(1, Math.floor(duration / 5)),
+                time_to_first_frame_ms: 250,
+                num_layout_changes: 0,
+                duration_layout_fullscreen: duration,
+                duration_layout_theatre: 0,
+                duration_layout_pip: 0,
+                duration_layout_popout: 0,
+                duration_layout_portrait: 0,
+                duration_layout_landscape: 0,
+                duration_layout_minimized: 0,
+                reason: "stream-end",
+                max_viewers: 1,
+                hostname: RTCConnectionStore.getHostname() || null,
+                hardware_enabled: true,
+                device_performance_class: null,
+                soundshare_experimental: false,
+                quality_preset: "balanced",
+                discord_is_elevated: false,
+                clips_enabled: false,
+                clips_buffer_length: 0,
+                app_hardware_acceleration_enabled: true
             }
         };
     }
@@ -343,99 +567,43 @@ export class BadgeSpooferEngine {
         const mediaSessionId = streamDurationMs > 0 ? crypto.randomUUID() : null;
         const rtcConnectionId = streamDurationMs > 0 ? crypto.randomUUID() : null;
         const now = Date.now();
-        const maxDuration = Math.max(playDurationMs, streamDurationMs);
-        const startTime = Math.max(0, now - maxDuration);
-        const numFrames = streamDurationMs > 0 ? Math.max(100, Math.floor((streamDurationMs / 1000) * 60)) : 0;
+        const gameStart = Math.max(0, now - playDurationMs);
+        const streamStart = Math.max(0, now - streamDurationMs);
 
         const events: any[] = [];
 
         events.push(
-            this.buildLaunchEvent(game, session, getSeq(), fingerprint, startTime, voiceContext)
+            this.buildLaunchEvent(game, session, getSeq(), fingerprint, gameStart, voiceContext)
         );
 
         events.push(
-            this.buildHeartbeatEvent(game, 0, gameSessionId, true, false, session, getSeq(), startTime, rtcConnectionId, mediaSessionId)
+            this.buildHeartbeatEvent(game, 0, gameSessionId, true, false, session, getSeq(), gameStart,
+                voiceContext?.rtcConnectionId ?? null, voiceContext?.mediaSessionId ?? null)
         );
 
         if (streamDurationMs > 0 && mediaSessionId && rtcConnectionId) {
-            events.push({
-                type: "video_stream_started",
-                properties: {
-                    client_track_timestamp: startTime + 1000,
-                    client_heartbeat_session_id: session.heartbeatSession,
-                    event_sequence_number: getSeq(),
-                    media_session_id: mediaSessionId,
-                    rtc_connection_id: rtcConnectionId,
-                    stream_key: voiceContext?.streamKey ?? null,
-                    channel_id: voiceContext?.channelId ?? null,
-                    guild_id: voiceContext?.guildId ?? null,
-                    channel_type: voiceContext?.guildId ? 2 : 1,
-                    context: "stream",
-                    activity: game.name,
-                    application_id: game.id,
-                    is_owner: true,
-                    max_viewers: 3,
-                    num_viewers: 2,
-                    desktop_capturer_type: "screen",
-                    app_hardware_acceleration_enabled: true,
-                    hardware_enabled: true,
-                    soundshare_session: crypto.randomUUID(),
-                    sender_user_id: userId ?? null,
-                    client_send_timestamp: startTime + 1000
-                }
-            });
+            events.push(
+                this.buildMediaSessionJoinedEvent(streamStart, session, getSeq(), mediaSessionId, rtcConnectionId, voiceContext ?? null)
+            );
+            events.push(
+                this.buildVideoStreamStartedEvent(game, streamStart, session, getSeq(), mediaSessionId, rtcConnectionId, userId ?? null, voiceContext ?? null)
+            );
         }
 
         events.push(
-            this.buildHeartbeatEvent(game, playDurationMs, gameSessionId, false, true, session, getSeq(), now, rtcConnectionId, mediaSessionId)
+            this.buildHeartbeatEvent(game, playDurationMs, gameSessionId, false, true, session, getSeq(), now,
+                voiceContext?.rtcConnectionId ?? null, voiceContext?.mediaSessionId ?? null)
         );
 
         if (streamDurationMs > 0 && mediaSessionId && rtcConnectionId) {
-            const bytesSent = Math.floor(streamDurationMs * 562.5);
-            const packetsSent = Math.floor((streamDurationMs / 1000) * 350);
+            events.push(
+                this.buildVideoStreamEndedEvent(game, now, streamDurationMs, session, getSeq(), mediaSessionId, rtcConnectionId, userId ?? null, voiceContext ?? null)
+            );
+        }
 
-            events.push({
-                type: "video_stream_ended",
-                properties: {
-                    client_track_timestamp: now,
-                    client_heartbeat_session_id: session.heartbeatSession,
-                    event_sequence_number: getSeq(),
-                    media_session_id: mediaSessionId,
-                    rtc_connection_id: rtcConnectionId,
-                    duration: streamDurationMs,
-                    duration_streamed_ms: streamDurationMs,
-                    num_frames: numFrames,
-                    resolution_width: 1920,
-                    resolution_height: 1080,
-                    fps: 60,
-                    target_fps: 60,
-                    min_fps: 58,
-                    max_fps: 60,
-                    codec: "H264",
-                    audio_codec: "opus",
-                    audio_bitrate: 128000,
-                    video_bitrate: 4500000,
-                    bytes_sent: bytesSent,
-                    packets_sent: packetsSent,
-                    packets_lost: 0,
-                    stream_key: voiceContext?.streamKey ?? null,
-                    channel_id: voiceContext?.channelId ?? null,
-                    guild_id: voiceContext?.guildId ?? null,
-                    channel_type: voiceContext?.guildId ? 2 : 1,
-                    context: "stream",
-                    max_viewers: 3,
-                    num_viewers: 2,
-                    average_viewers: 2.2,
-                    reason: "user_ended",
-                    activity: game.name,
-                    application_id: game.id,
-                    desktop_capturer_type: "screen",
-                    app_hardware_acceleration_enabled: true,
-                    hardware_enabled: true,
-                    sender_user_id: userId ?? null,
-                    client_send_timestamp: now
-                }
-            });
+        const flushTime = Date.now();
+        for (const event of events) {
+            event.properties.client_send_timestamp = flushTime;
         }
 
         return events;
@@ -566,11 +734,11 @@ export class BadgeSpooferEngine {
 
         const selectedGames = this.selectGames(allGames, targetCount);
         const session = this.createSession();
-        const voiceContext = streamDurationMs > 0 ? this.resolveVoiceContext() : null;
+        const voiceContext = streamDurationMs > 0 ? await this.resolveVoiceContext() : null;
         if (streamDurationMs > 0 && !voiceContext) {
-            log("warn", "No voice channel joined - stream events will be sent WITHOUT channel attribution and Discord may discard them. Join a server voice channel before spoofing stream hours.");
+            log("warn", "Could not join a voice channel - stream events will be sent WITHOUT channel attribution and Discord may discard them. Join a server voice channel before spoofing stream hours.");
         } else if (voiceContext) {
-            log("info", `Stream attribution ready (channel ${voiceContext.channelId}${voiceContext.guildId ? `, guild ${voiceContext.guildId}` : ", DM call"}).`);
+            log("info", `Stream attribution ready (channel ${voiceContext.channelId}${voiceContext.guildId ? `, guild ${voiceContext.guildId}` : ", DM call"}${this.autoJoinedChannelId ? ", auto-joined" : ""}).`);
         }
         let seq = 0;
         const getSeq = () => ++seq;
@@ -630,7 +798,7 @@ export class BadgeSpooferEngine {
                 break;
             } else if (status === 429) {
                 log("warn", `Rate limited [429] on batch ${batchIndex}. Backing off 2.5s...`);
-                await new Promise(r => setTimeout(r, 2500));
+                await sleep(2500);
             } else {
                 log("warn", `Batch ${batchIndex} returned status [${status}].`);
             }
@@ -646,9 +814,10 @@ export class BadgeSpooferEngine {
                 status: `Sent ${sentGamesCount}/${selectedGames.length} games`
             });
 
-            await new Promise(r => setTimeout(r, batchDelay));
+            await sleep(batchDelay);
         }
 
+        this.leaveJoinedVoiceChannel();
         this.isRunning = false;
         options.onProgress?.({
             total: selectedGames.length,
@@ -669,6 +838,7 @@ export class BadgeSpooferEngine {
             this.abortController.abort();
         }
         this.isRunning = false;
+        this.leaveJoinedVoiceChannel();
     }
 }
 

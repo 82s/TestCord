@@ -19,7 +19,9 @@ export interface SessionInfo {
 export interface VoiceContext {
     channelId: string;
     guildId: string | null;
-    streamKey: string;
+    channelType: number;
+    mediaSessionId: string | null;
+    rtcConnectionId: string | null;
 }
 
 export interface SpoofLog {
