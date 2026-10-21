@@ -329,9 +329,12 @@ function getCrashStatistics(): CrashStatistics {
     const raw = settings.store.crashStats || "{}";
     if (raw === _crashStatsRaw && _crashStatsCache) return _crashStatsCache;
     try {
-        _crashStatsCache = JSON.parse(raw);
+        const stats = JSON.parse(raw) as CrashStatistics;
+        stats.crashesByType ??= {};
+        stats.crashFrequency ??= [];
+        _crashStatsCache = stats;
         _crashStatsRaw = raw;
-        return _crashStatsCache!;
+        return stats;
     } catch {
         _crashStatsCache = {
             totalCrashes: 0,
