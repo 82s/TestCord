@@ -1166,8 +1166,8 @@ export default definePlugin({
         {
             find: "disableUserProfileLink:",
             replacement: {
-                match: /user:(\i),currentUser:(\i)/,
-                replace: "user:$self.fakeCurrentUser($1),currentUser:$2"
+                match: /function (\i)\((\i)\)\{let\{(?=.*?disableUserProfileLink:)/,
+                replace: "function $1($2){$2={...$2,user:$self.fakeCurrentUser($2?.user)};let{"
             }
         },
         {
