@@ -63,7 +63,7 @@ export default definePlugin({
         },
 
         {
-            find: "#{intl::ADD_ROLE_A11Y_LABEL}",
+            find: "MemberRolesList: currentUser cannot be undefined",
             all: true,
             predicate: () => settings.store.copyRoleColorInProfilePopout && !settings.store.bothStyles,
             replacement: {
@@ -72,7 +72,7 @@ export default definePlugin({
             }
         },
         {
-            find: ".roleVerifiedIcon",
+            find: "overflowOnly:!0,ariaHidden:!0",
             all: true,
             predicate: () => settings.store.copyRoleColorInProfilePopout && !settings.store.bothStyles,
             replacement: {
