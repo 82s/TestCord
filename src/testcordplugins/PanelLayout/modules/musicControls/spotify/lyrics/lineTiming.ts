@@ -11,6 +11,10 @@ export interface LineTimes {
     end: number;
 }
 
+export function isInterludeLine(line: SyncedLyric): boolean {
+    return line.text === null && !line.untimed && !line.words?.length && !line.background?.length;
+}
+
 const NO_END_FALLBACK_SEC = 5;
 const PIN_LOOKAHEAD = 2;
 

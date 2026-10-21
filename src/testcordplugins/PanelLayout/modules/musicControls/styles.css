@@ -430,6 +430,10 @@
     );
 }
 
+.vc-spotify-lyrics-line.vc-spotify-lyrics-line-plain.vc-spotify-lyrics-line-active:not(.vc-spotify-lyrics-line-sweep) {
+    --gradient-position: 100%;
+}
+
 .vc-spotify-lyrics-line:hover {
     opacity: 1;
 }
@@ -443,6 +447,51 @@
     .vc-spotify-lyrics-line {
         transition: none;
     }
+}
+
+.vc-spotify-lyrics.vc-spotify-lyrics-spicy:not(.vc-spotify-lyrics-dynbg) {
+    background: #151515;
+}
+
+.vc-spotify-lyrics-interlude {
+    display: flex;
+    align-items: center;
+    height: calc(var(--vc-dots-open, 1) * 1.9em);
+    overflow: visible;
+    margin-top: calc(var(--vc-dots-open, 1) * 1%);
+    pointer-events: none;
+}
+
+.vc-spotify-lyrics-interlude.vc-spotify-lyrics-align-left {
+    justify-content: flex-start;
+}
+
+.vc-spotify-lyrics-interlude.vc-spotify-lyrics-align-center {
+    justify-content: center;
+}
+
+.vc-spotify-lyrics-interlude.vc-spotify-lyrics-align-right {
+    justify-content: flex-end;
+}
+
+.vc-spotify-lyrics-dots {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3em;
+    opacity: var(--vc-dots-opacity, 1);
+    transform: scale(var(--vc-dots-scale, 1));
+    transform-origin: center center;
+    will-change: transform, opacity;
+}
+
+.vc-spotify-lyrics-dot {
+    display: block;
+    width: 0.55em;
+    height: 0.55em;
+    border-radius: 50%;
+    background: #fff;
+    transform-origin: center center;
+    will-change: transform, opacity, box-shadow;
 }
 
 .vc-spotify-lyrics.vc-spotify-lyrics-dynbg::after {

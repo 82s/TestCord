@@ -247,6 +247,8 @@ export function MusicControlsSettingsModal({ modalProps, onClose }: { modalProps
         "fallbackProvider",
         "showFailedToasts",
         "smoothScroll",
+        "dynamicBackground",
+        "lyricsAnimation",
         "fiveMinuteHide",
     ]);
 
@@ -330,12 +332,14 @@ export function MusicControlsSettingsModal({ modalProps, onClose }: { modalProps
                                 value={s.previousButtonRestartsTrack}
                                 onChange={v => { settings.store.previousButtonRestartsTrack = v; forceUpdate(); }}
                             />
-                            <FormSwitch
-                                title="Seek Fade-in Compensation"
-                                description="Clicking a lyric line starts 300 ms before it, so Spotify's fade-in doesn't clip the first word. Best for rap and fast songs."
-                                value={s.seekFadeCompensation}
-                                onChange={v => { settings.store.seekFadeCompensation = v; forceUpdate(); }}
-                            />
+                            {s.lyricsProvider === Provider.SpicyLyrics && (
+                                <FormSwitch
+                                    title="Seek Fade-in Compensation"
+                                    description="Clicking a lyric line starts 300 ms before it, so Spotify's fade-in doesn't clip the first word. Best for rap and fast songs."
+                                    value={s.seekFadeCompensation}
+                                    onChange={v => { settings.store.seekFadeCompensation = v; forceUpdate(); }}
+                                />
+                            )}
                             <FormSwitch
                                 title="Five Minute Hide"
                                 description="Hide the Spotify Controls after five minutes"
@@ -478,6 +482,22 @@ export function MusicControlsSettingsModal({ modalProps, onClose }: { modalProps
                                 value={s.smoothScroll}
                                 onChange={v => { settings.store.smoothScroll = v; forceUpdate(); }}
                             />
+                            {s.lyricsProvider === Provider.SpicyLyrics && (
+                                <FormSwitch
+                                    title="Dynamic Background"
+                                    description="Animated album-art background behind Spicy Lyrics. Turn off to save GPU/CPU."
+                                    value={s.dynamicBackground}
+                                    onChange={v => { settings.store.dynamicBackground = v; forceUpdate(); }}
+                                />
+                            )}
+                            {s.lyricsProvider === Provider.SpicyLyrics && (
+                                <FormSwitch
+                                    title="Lyrics Animation"
+                                    description="Word scale, lift and glow, held-word letters and the bouncing interlude dots. When off, words only get the colour sweep."
+                                    value={s.lyricsAnimation}
+                                    onChange={v => { settings.store.lyricsAnimation = v; forceUpdate(); }}
+                                />
+                            )}
                             <div style={{ padding: "10px 0" }}>
                                 <Paragraph style={{ fontSize: "12px", color: "var(--text-muted)", marginBottom: "4px" }}>
                                     Lyrics Position Relative to Player:

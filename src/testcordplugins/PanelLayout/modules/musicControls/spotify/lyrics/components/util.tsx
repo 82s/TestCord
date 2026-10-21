@@ -6,7 +6,7 @@
 
 import * as DataStore from "@api/DataStore";
 import { settings } from "@testcordplugins/PanelLayout/modules/musicControls/settings";
-import { computeLineStates, computeLineTimes, LineTimes, pickScrollIndex } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/lineTiming";
+import { computeLineStates, computeLineTimes, isInterludeLine, LineTimes, pickScrollIndex } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/lineTiming";
 import { SpotifyLrcStore } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/providers/store";
 import {
     LyricsAttribution,
@@ -17,6 +17,7 @@ import {
     SyncedLyric,
 } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/providers/types";
 import { SmoothScroller } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/smoothScroll";
+import { isLetterCapable, segmentGraphemes } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/spicyAnimator/WordAnimator";
 import { SpotifyStore } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/SpotifyStore";
 import { classNameFactory } from "@utils/css";
 import { findCssClassesLazy } from "@webpack";
@@ -43,25 +44,64 @@ export function SpicyWordSpans({ words, refsArray, variant = "lead" }: {
     refsArray: React.MutableRefObject<(HTMLSpanElement | null)[]>;
     variant?: "lead" | "bg";
 }) {
-    return (
-        <>
-            {words.map((word, w) => (
-                <React.Fragment key={w}>
-                    <span
-                        ref={(el: HTMLSpanElement | null) => { refsArray.current[w] = el; }}
-                        className={[
-                            "vc-spicy-word",
-                            word.IsPartOfWord && "vc-spicy-part-of-word",
-                            variant === "bg" && "vc-spicy-bg-word"
-                        ].filter(Boolean).join(" ")}
-                    >
-                        {word.text}
-                    </span>
-                    {word.IsPartOfWord ? "" : " "}
+    const { lyricsAnimation } = settings.use(["lyricsAnimation"]);
+
+    const renderSpan = (word: LyricWord, w: number) => {
+        const letters = lyricsAnimation && isLetterCapable(word.text, word.startTime, word.endTime)
+            ? segmentGraphemes(word.text.trimEnd())
+            : null;
+
+        return (
+            <span
+                ref={(el: HTMLSpanElement | null) => { refsArray.current[w] = el; }}
+                data-vc-letters={letters ? "1" : undefined}
+                className={[
+                    "vc-spicy-word",
+                    letters && "vc-spicy-letter-group",
+                    word.IsPartOfWord && "vc-spicy-part-of-word",
+                    variant === "bg" && "vc-spicy-bg-word"
+                ].filter(Boolean).join(" ")}
+            >
+                {letters
+                    ? letters.map((letter, i) => <span key={i} className="vc-spicy-letter">{letter}</span>)
+                    : word.text}
+            </span>
+        );
+    };
+
+    const nodes: React.ReactNode[] = [];
+    let w = 0;
+    while (w < words.length) {
+        const first = w;
+        while (w < words.length - 1 && words[w].IsPartOfWord) w++;
+        const last = w;
+        w++;
+
+        const trailingSpace = words[last].IsPartOfWord ? "" : " ";
+
+        if (first === last) {
+            nodes.push(
+                <React.Fragment key={first}>
+                    {renderSpan(words[first], first)}
+                    {trailingSpace}
                 </React.Fragment>
-            ))}
-        </>
-    );
+            );
+            continue;
+        }
+
+        const syllables: React.ReactNode[] = [];
+        for (let k = first; k <= last; k++) {
+            syllables.push(<React.Fragment key={k}>{renderSpan(words[k], k)}</React.Fragment>);
+        }
+        nodes.push(
+            <React.Fragment key={first}>
+                <span className="vc-spicy-word-group">{syllables}</span>
+                {trailingSpace}
+            </React.Fragment>
+        );
+    }
+
+    return <>{nodes}</>;
 }
 
 export function leadAlignCl(
@@ -71,6 +111,20 @@ export function leadAlignCl(
 ): string {
     if (!isSpicyProvider) return fallback === "center" ? cl("align-center") : cl("align-left");
     return line.oppositeAligned ? cl("align-right") : cl("align-left");
+}
+
+export function InterludeDots() {
+    return (
+        <span className={cl("dots")}>
+            {[0, 1, 2].map(i => <span key={i} data-vc-dot className={cl("dot")} />)}
+        </span>
+    );
+}
+
+export function interludeAlignCl(lines: SyncedLyric[], index: number, isSpicyProvider: boolean): string {
+    if (!isSpicyProvider) return cl("align-center");
+    const next = lines.slice(index + 1).find(l => !isInterludeLine(l) && l.text !== null);
+    return next?.oppositeAligned ? cl("align-right") : cl("align-left");
 }
 
 export function NoteSvg() {

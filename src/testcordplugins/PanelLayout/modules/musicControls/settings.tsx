@@ -6,6 +6,7 @@
 
 import { disableStyle, enableStyle } from "@api/Styles";
 import { ButtonCompat } from "@components/Button";
+import { FormSwitch } from "@components/FormSwitch";
 import { HeadingSecondary } from "@components/Heading";
 import { Paragraph } from "@components/Paragraph";
 import { SettingsSection } from "@components/settings/tabs/plugins/components/Common";
@@ -48,7 +49,38 @@ function InstallInstructions() {
     );
 }
 
+/** Settings that only affect Spicy Lyrics, shown only while it is the selected provider. */
+function SpicyLyricsSettings() {
+    const s = settings.use(["dynamicBackground", "lyricsAnimation", "seekFadeCompensation"]);
+
+    return (
+        <SettingsSection id="spicy-lyrics-options" name="Spicy Lyrics" description="Options for Spicy Lyrics only.">
+            <FormSwitch
+                title="Dynamic Background"
+                description="Animated album-art background behind the lyrics. Turn off to save GPU/CPU."
+                value={s.dynamicBackground}
+                onChange={v => { settings.store.dynamicBackground = v; }}
+            />
+            <FormSwitch
+                title="Lyrics Animation"
+                description="Word scale, lift and glow, held-word letters and the bouncing interlude dots. When off, words only get the colour sweep."
+                value={s.lyricsAnimation}
+                onChange={v => { settings.store.lyricsAnimation = v; }}
+            />
+            <FormSwitch
+                title="Seek Fade-in Compensation"
+                description="Clicking a lyric line starts 300 ms before it, so Spotify's fade-in doesn't clip the first word. Best for rap and fast songs."
+                value={s.seekFadeCompensation}
+                onChange={v => { settings.store.seekFadeCompensation = v; }}
+                hideBorder
+            />
+        </SettingsSection>
+    );
+}
+
 function LyricsProviderSettings() {
+    const { lyricsProvider } = settings.use(["lyricsProvider"]);
+
     return (
         <>
             <SettingsSection id="lyrics-provider" name="Lyrics Provider" description="Where lyrics are fetched from.">
@@ -64,6 +96,8 @@ function LyricsProviderSettings() {
                     placeholder="Select a lyrics provider"
                 />
             </SettingsSection>
+
+            {lyricsProvider === Provider.SpicyLyrics && <SpicyLyricsSettings />}
 
             {settings.store.lyricsProvider === Provider.Spotify && (
                 <SettingsSection
@@ -99,6 +133,18 @@ export const settings = defineModuleSettings("MusicControls", {
         description: "Show a music note icon when no lyrics are found",
         type: OptionType.BOOLEAN,
         default: true,
+    },
+    dynamicBackground: {
+        description: "Animated album-art background behind Spicy Lyrics (turn off to save GPU/CPU)",
+        type: OptionType.BOOLEAN,
+        default: true,
+        hidden: true,
+    },
+    lyricsAnimation: {
+        description: "Animate lyrics: word scale, lift and glow, held-word letters and the interlude dots' bounce. When off, words only get the colour sweep",
+        type: OptionType.BOOLEAN,
+        default: true,
+        hidden: true,
     },
     lyricsPosition: {
         description: "Position of the lyrics",
@@ -238,7 +284,8 @@ export const settings = defineModuleSettings("MusicControls", {
     seekFadeCompensation: {
         type: OptionType.BOOLEAN,
         description: "Seek Fade-in Compensation: clicking a lyric line starts 300 ms before it, so Spotify's fade-in doesn't clip the first word. Best for rap and fast songs",
-        default: true
+        default: true,
+        hidden: true,
     },
     tdalSectionTitle: {
         type: OptionType.COMPONENT,

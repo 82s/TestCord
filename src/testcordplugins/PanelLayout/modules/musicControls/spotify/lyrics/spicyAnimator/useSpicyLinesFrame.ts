@@ -4,13 +4,15 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { LineTimes } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/lineTiming";
+import { settings } from "@testcordplugins/PanelLayout/modules/musicControls/settings";
+import { isInterludeLine, LineTimes } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/lineTiming";
 import { LyricWord, SyncedLyric } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/providers/types";
 import { React } from "@webpack/common";
 
+import { resetInterlude, stepInterlude } from "./InterludeAnimator";
 import { Spline } from "./Splines";
 import { Spring } from "./Spring";
-import { getWordProgress, getWordState, resetWord, stepWord } from "./WordAnimator";
+import { resetWordFull, stepWordFull } from "./WordAnimator";
 
 type WordRefs = { current: (HTMLSpanElement | null)[]; };
 
@@ -83,6 +85,12 @@ function stepLine(el: HTMLElement, state: string, progress: number, dt: number, 
     setVar(el, "--text-shadow-opacity", `${Math.round(glow * 50)}%`);
 }
 
+function clearLineSweep(el: HTMLElement) {
+    el.style.removeProperty("--gradient-position");
+    el.style.removeProperty("--text-shadow-blur-radius");
+    el.style.removeProperty("--text-shadow-opacity");
+}
+
 function isPlainLine(line: SyncedLyric) {
     return line.text !== null && !line.words?.length;
 }
@@ -119,13 +127,19 @@ function forEachWord(line: SyncedLyric, refs: LineWordRefs, fn: (el: HTMLSpanEle
     });
 }
 
-function resetAll(lines: SyncedLyric[], registry: LineRegistry, posSec: number, lineTimes: LineTimes[]) {
+function resetAll(lines: SyncedLyric[], registry: LineRegistry, posSec: number, lineTimes: LineTimes[], animated: boolean, isSpicy: boolean) {
     for (let i = 0; i < lines.length; i++) {
         const refs = registry.get(i);
         if (!refs) continue;
+        if (isInterludeLine(lines[i])) {
+            if (refs.row) resetInterlude(refs.row, lineTimes[i].start, lineTimes[i].end, posSec, !animated);
+            continue;
+        }
         if (isPlainLine(lines[i])) {
             const el = lineElOf(refs);
-            if (el) {
+            if (el && !isSpicy) {
+                clearLineSweep(el);
+            } else if (el) {
                 const { start, end } = lineTimes[i];
                 const state = posSec < start ? "n" : posSec >= end ? "s" : "a";
                 const progress = end > start ? Math.min(Math.max((posSec - start) / (end - start), 0), 1) : 0;
@@ -133,13 +147,11 @@ function resetAll(lines: SyncedLyric[], registry: LineRegistry, posSec: number, 
             }
             continue;
         }
-        forEachWord(lines[i], refs, (el, w) =>
-            resetWord(el, getWordState(posSec, w.startTime, w.endTime), getWordProgress(posSec, w.startTime, w.endTime))
-        );
+        forEachWord(lines[i], refs, (el, w) => resetWordFull(el, w, posSec, animated));
     }
 }
 
-export function useSpicyLinesFrame({ lines, lineTimes, registry, statesRef, positionRef, isPlaying, pausedPosition }: {
+export function useSpicyLinesFrame({ lines, lineTimes, registry, statesRef, positionRef, isPlaying, pausedPosition, isSpicy = true }: {
     lines: SyncedLyric[] | null | undefined;
     lineTimes: LineTimes[] | null;
     registry: LineRegistry;
@@ -147,14 +159,17 @@ export function useSpicyLinesFrame({ lines, lineTimes, registry, statesRef, posi
     positionRef: { current: number; };
     isPlaying: boolean;
     pausedPosition: number;
+    isSpicy?: boolean;
 }) {
+    const { lyricsAnimation } = settings.use(["lyricsAnimation"]);
+
     React.useLayoutEffect(() => {
         if (!lines || !lineTimes) return;
-        resetAll(lines, registry, positionRef.current / 1000, lineTimes);
+        resetAll(lines, registry, positionRef.current / 1000, lineTimes, lyricsAnimation, isSpicy);
         const states = statesRef.current;
         const activeIndex = states.indexOf("a");
         if (activeIndex !== -1) applyBlur(lines, registry, states, activeIndex);
-    }, [lines, lineTimes, registry]);
+    }, [lines, lineTimes, registry, lyricsAnimation, isSpicy]);
 
     React.useEffect(() => {
         if (!lines || !lineTimes) return;
@@ -177,7 +192,7 @@ export function useSpicyLinesFrame({ lines, lineTimes, registry, statesRef, posi
             if (needsReset || Math.abs(posSec - prevPos) > JUMP_SEC) {
                 needsReset = false;
                 settleUntil.clear();
-                resetAll(lines, registry, posSec, lineTimes);
+                resetAll(lines, registry, posSec, lineTimes, lyricsAnimation, isSpicy);
             } else {
                 for (let i = 0; i < lines.length; i++) {
                     const state = states[i];
@@ -191,18 +206,20 @@ export function useSpicyLinesFrame({ lines, lineTimes, registry, statesRef, posi
 
                     const refs = registry.get(i);
                     if (!refs) continue;
+                    if (isInterludeLine(lines[i])) {
+                        if (refs.row) stepInterlude(refs.row, lineTimes[i].start, lineTimes[i].end, posSec, dt, now, !lyricsAnimation);
+                        continue;
+                    }
                     if (isPlainLine(lines[i])) {
                         const el = lineElOf(refs);
-                        if (el) {
+                        if (el && isSpicy) {
                             const { start, end } = lineTimes[i];
                             const progress = end > start ? Math.min(Math.max((posSec - start) / (end - start), 0), 1) : 0;
                             stepLine(el, state, progress, dt, false);
                         }
                         continue;
                     }
-                    forEachWord(lines[i], refs, (el, w) =>
-                        stepWord(el, getWordState(posSec, w.startTime, w.endTime), getWordProgress(posSec, w.startTime, w.endTime), dt)
-                    );
+                    forEachWord(lines[i], refs, (el, w) => stepWordFull(el, w, posSec, dt, lyricsAnimation));
                 }
             }
 
@@ -223,5 +240,5 @@ export function useSpicyLinesFrame({ lines, lineTimes, registry, statesRef, posi
         return () => {
             if (rafId !== undefined) cancelAnimationFrame(rafId);
         };
-    }, [lines, lineTimes, registry, isPlaying, isPlaying ? 0 : pausedPosition]);
+    }, [lines, lineTimes, registry, isPlaying, lyricsAnimation, isSpicy, isPlaying ? 0 : pausedPosition]);
 }

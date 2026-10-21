@@ -5,6 +5,8 @@
  */
 
 import { BaseText } from "@components/BaseText";
+import { settings } from "@testcordplugins/PanelLayout/modules/musicControls/settings";
+import { isInterludeLine } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/lineTiming";
 import { Provider } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/providers/types";
 import { getBgRefs, getLineWordRefs, LineRegistry, rowRef, useSpicyLinesFrame } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/spicyAnimator/useSpicyLinesFrame";
 import { SpotifyStore, Track } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/SpotifyStore";
@@ -13,7 +15,7 @@ import { RenderModalProps } from "@vencord/discord-types";
 import { Modal, React } from "@webpack/common";
 
 import { DynamicBackground } from "./DynamicBackground";
-import { cl, leadAlignCl, lineStateClass, LyricsAttributionFooter, NoteSvg, scrollClasses, SpicyWordSpans, useLyrics } from "./util";
+import { cl, interludeAlignCl, InterludeDots, leadAlignCl, lineStateClass, LyricsAttributionFooter, NoteSvg, scrollClasses, SpicyWordSpans, useLyrics } from "./util";
 
 const formatTime = (time: number) => {
     const minutes = Math.floor(time / 60);
@@ -51,6 +53,7 @@ function getTitleNode(track: Track | null) {
 const modalLine = cl("modal-line");
 
 export function LyricsModal({ props }: { props: RenderModalProps; }) {
+    const { dynamicBackground } = settings.use(["dynamicBackground"]);
     const containerRef = React.useRef<HTMLDivElement>(null);
     const {
         track, lyricsInfo, lyricRefs, statesKey, statesRef, lineTimes,
@@ -58,6 +61,7 @@ export function LyricsModal({ props }: { props: RenderModalProps; }) {
     } = useLyrics({ scroll: true, containerRef });
     const currentLyrics = lyricsInfo?.lyricsVersions[lyricsInfo.useLyric];
     const registry = React.useMemo<LineRegistry>(() => new Map(), [currentLyrics]);
+    const isSpicyProvider = lyricsInfo?.useLyric === Provider.SpicyLyrics || lyricsInfo?.useLyric === Provider.SpicyRomanized;
 
     useSpicyLinesFrame({
         lines: currentLyrics,
@@ -66,10 +70,9 @@ export function LyricsModal({ props }: { props: RenderModalProps; }) {
         statesRef,
         positionRef,
         isPlaying,
-        pausedPosition: storePosition
+        pausedPosition: storePosition,
+        isSpicy: isSpicyProvider
     });
-
-    const isSpicyProvider = lyricsInfo?.useLyric === Provider.SpicyLyrics || lyricsInfo?.useLyric === Provider.SpicyRomanized;
 
     const seekTo = (seconds: number) => () => {
         if (isSpicyProvider && !isUntimed) SpotifyStore.seekToLine(seconds * 1000);
@@ -78,7 +81,7 @@ export function LyricsModal({ props }: { props: RenderModalProps; }) {
     return (
         <Modal {...props} size="md" title={getTitleNode(track)}>
             <div className={isSpicyProvider ? cl("modal-spicy") : undefined}>
-                {isSpicyProvider && (
+                {isSpicyProvider && dynamicBackground && (
                     <DynamicBackground imageUrl={track?.album?.image?.url} isPlaying={isPlaying} lite />
                 )}
             <div ref={containerRef} className={`${cl("lyrics-modal-container")} ${scrollClasses.auto}`}>
@@ -90,12 +93,22 @@ export function LyricsModal({ props }: { props: RenderModalProps; }) {
                             const refs = getLineWordRefs(registry, i);
                             const hasWordTiming = !isUntimed && !!line.words?.length;
 
+                            if (isInterludeLine(line)) {
+                                return (
+                                    <div ref={rowRef(lyricRefs[i], refs)} key={i} className={[cl("line-row"), cl("line-row-interlude")].join(" ")}>
+                                        <BaseText size="md" className={[cl("interlude"), interludeAlignCl(currentLyrics, i, isSpicyProvider)].join(" ")}>
+                                            <InterludeDots />
+                                        </BaseText>
+                                    </div>
+                                );
+                            }
+
                             return (
                                 <div ref={rowRef(lyricRefs[i], refs)} key={i} className={cl("line-row")}>
                                     <BaseText
                                         size="md"
                                         weight="semibold"
-                                        className={[modalLine, cl("line"), !hasWordTiming && cl("line-plain"), stateCl, alignCl, isSpicyProvider && !isUntimed && cl("line-seekable")].filter(Boolean).join(" ")}
+                                        className={[modalLine, cl("line"), !hasWordTiming && cl("line-plain"), !hasWordTiming && isSpicyProvider && cl("line-sweep"), stateCl, alignCl, isSpicyProvider && !isUntimed && cl("line-seekable")].filter(Boolean).join(" ")}
                                         onClick={seekTo(line.time)}
                                     >
                                         {!isUntimed && (

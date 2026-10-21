@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { settings } from "@testcordplugins/PanelLayout/modules/musicControls/settings";
 import { LyricWord } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/providers/types";
 import { React } from "@webpack/common";
 
-import { getWordProgress, getWordState, resetWord, stepWord } from "./WordAnimator";
+import { resetWordFull, stepWordFull } from "./WordAnimator";
 
 export function useSpicyWordFrame(
     words: LyricWord[] | undefined | null,
@@ -15,6 +16,7 @@ export function useSpicyWordFrame(
     getPositionMs: () => number,
     isPlaying: boolean
 ): void {
+    const { lyricsAnimation } = settings.use(["lyricsAnimation"]);
     const mountedForRef = React.useRef<LyricWord[] | undefined | null>(null);
 
     React.useEffect(() => {
@@ -40,11 +42,7 @@ export function useSpicyWordFrame(
                 for (let j = 0; j < words.length; j++) {
                     const jEl = wordRefs.current?.[j];
                     if (!jEl) continue;
-                    resetWord(
-                        jEl,
-                        getWordState(posSec, words[j].startTime, words[j].endTime),
-                        getWordProgress(posSec, words[j].startTime, words[j].endTime)
-                    );
+                    resetWordFull(jEl, words[j], posSec, lyricsAnimation);
                 }
             }
 
@@ -52,9 +50,7 @@ export function useSpicyWordFrame(
                 const el = wordRefs.current?.[i];
                 if (!el) continue;
 
-                const state = getWordState(posSec, words[i].startTime, words[i].endTime);
-                const progress = getWordProgress(posSec, words[i].startTime, words[i].endTime);
-                stepWord(el, state, progress, deltaTimeSec);
+                stepWordFull(el, words[i], posSec, deltaTimeSec, lyricsAnimation);
             }
 
             if (isPlaying) rafId = requestAnimationFrame(frame);
@@ -65,5 +61,5 @@ export function useSpicyWordFrame(
         return () => {
             if (rafId !== undefined) cancelAnimationFrame(rafId);
         };
-    }, [words, isPlaying]);
+    }, [words, isPlaying, lyricsAnimation]);
 }

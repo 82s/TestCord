@@ -7,6 +7,7 @@
 import { BaseText } from "@components/BaseText";
 import { TooltipContainer } from "@components/TooltipContainer";
 import { settings } from "@testcordplugins/PanelLayout/modules/musicControls/settings";
+import { isInterludeLine } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/lineTiming";
 import { SpotifyLrcStore } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/providers/store";
 import { Provider } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/providers/types";
 import { getBgRefs, getLineWordRefs, LineRegistry, rowRef, useSpicyLinesFrame } from "@testcordplugins/PanelLayout/modules/musicControls/spotify/lyrics/spicyAnimator/useSpicyLinesFrame";
@@ -16,10 +17,10 @@ import { ContextMenuApi, openModalLazy, React, useEffect, useState, useStateFrom
 import { LyricsContextMenu } from "./ctxMenu";
 import { DynamicBackground } from "./DynamicBackground";
 import { LyricsModal } from "./modal";
-import { cl, leadAlignCl, lineStateClass, LyricsAttributionFooter, NoteSvg, SpicyWordSpans, useLyrics } from "./util";
+import { cl, interludeAlignCl, InterludeDots, leadAlignCl, lineStateClass, LyricsAttributionFooter, NoteSvg, SpicyWordSpans, useLyrics } from "./util";
 
 function LyricsDisplay({ scroll = true, style }: { scroll?: boolean; style?: React.CSSProperties; }) {
-    const { showMusicNoteOnNoLyrics } = settings.use(["showMusicNoteOnNoLyrics"]);
+    const { showMusicNoteOnNoLyrics, dynamicBackground } = settings.use(["showMusicNoteOnNoLyrics", "dynamicBackground"]);
     const containerRef = React.useRef<HTMLDivElement>(null);
 
     const {
@@ -29,6 +30,7 @@ function LyricsDisplay({ scroll = true, style }: { scroll?: boolean; style?: Rea
 
     const currentLyrics = lyricsInfo?.lyricsVersions[lyricsInfo.useLyric] || null;
     const registry = React.useMemo<LineRegistry>(() => new Map(), [currentLyrics]);
+    const isSpicyProvider = lyricsInfo?.useLyric === Provider.SpicyLyrics || lyricsInfo?.useLyric === Provider.SpicyRomanized;
 
     useSpicyLinesFrame({
         lines: currentLyrics,
@@ -37,10 +39,11 @@ function LyricsDisplay({ scroll = true, style }: { scroll?: boolean; style?: Rea
         statesRef,
         positionRef,
         isPlaying,
-        pausedPosition: storePosition
+        pausedPosition: storePosition,
+        isSpicy: isSpicyProvider
     });
 
-    const isSpicyProvider = lyricsInfo?.useLyric === Provider.SpicyLyrics || lyricsInfo?.useLyric === Provider.SpicyRomanized;
+    const showDynamicBackground = isSpicyProvider && dynamicBackground;
 
     // Spicy Lyrics only: clicking a line jumps to it, clicking empty space opens the modal
     const seekTo = (seconds: number) => (e: React.MouseEvent) => {
@@ -53,14 +56,14 @@ function LyricsDisplay({ scroll = true, style }: { scroll?: boolean; style?: Rea
         <div
             className={[
                 "vc-spotify-lyrics",
-                isSpicyProvider && "vc-spotify-lyrics-dynbg",
+                showDynamicBackground && "vc-spotify-lyrics-dynbg",
                 isSpicyProvider && "vc-spotify-lyrics-spicy"
             ].filter(Boolean).join(" ")}
             style={style}
             onClick={() => openModalLazy(async () => props => <LyricsModal props={props} />)}
             onContextMenu={e => ContextMenuApi.openContextMenu(e, () => <LyricsContextMenu />)}
         >
-            {isSpicyProvider && <DynamicBackground imageUrl={track?.album?.image?.url} isPlaying={isPlaying} />}
+            {showDynamicBackground && <DynamicBackground imageUrl={track?.album?.image?.url} isPlaying={isPlaying} />}
             <div
                 ref={containerRef}
                 className={isSpicyProvider ? "vc-spotify-lyrics-inner vc-spotify-lyrics-spicy" : "vc-spotify-lyrics-inner"}
@@ -73,11 +76,21 @@ function LyricsDisplay({ scroll = true, style }: { scroll?: boolean; style?: Rea
                             const refs = getLineWordRefs(registry, i);
                             const hasWordTiming = !isUntimed && !!line.words?.length;
 
+                            if (isInterludeLine(line)) {
+                                return (
+                                    <div ref={rowRef(lyricRefs[i], refs)} key={i} className={[cl("line-row"), cl("line-row-interlude")].join(" ")}>
+                                        <BaseText size="sm" className={[cl("interlude"), interludeAlignCl(currentLyrics, i, isSpicyProvider)].join(" ")}>
+                                            <InterludeDots />
+                                        </BaseText>
+                                    </div>
+                                );
+                            }
+
                             return (
                                 <div ref={rowRef(lyricRefs[i], refs)} key={i} className={cl("line-row")}>
                                     <BaseText
                                         size="sm"
-                                        className={[cl("line"), !hasWordTiming && cl("line-plain"), stateCl, alignCl, isSpicyProvider && !isUntimed && cl("line-seekable")].filter(Boolean).join(" ")}
+                                        className={[cl("line"), !hasWordTiming && cl("line-plain"), !hasWordTiming && isSpicyProvider && cl("line-sweep"), stateCl, alignCl, isSpicyProvider && !isUntimed && cl("line-seekable")].filter(Boolean).join(" ")}
                                         onClick={seekTo(line.time)}
                                     >
                                         {hasWordTiming

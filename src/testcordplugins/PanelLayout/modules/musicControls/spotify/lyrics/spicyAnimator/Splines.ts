@@ -14,63 +14,80 @@ export class Spline {
     private ys: number[];
     private ks: number[];
 
-    constructor(range: AnimationPoint[]) {
-        this.xs = range.map(p => p.Time);
-        this.ys = range.map(p => p.Value);
-        this.ks = this.solveKs();
+    constructor(points: AnimationPoint[]) {
+        if (points.length < 2) throw new Error("Need at least 2 points for interpolation");
+        const sorted = [...points].sort((a, b) => a.Time - b.Time);
+        this.xs = sorted.map(p => p.Time);
+        this.ys = sorted.map(p => p.Value);
+        this.ks = Spline.naturalCoefficients(this.xs, this.ys);
     }
 
-    private solveKs(): number[] {
-        const { xs, ys } = this;
-        const n = xs.length - 1;
-        const A = Array.from({ length: n + 1 }, () => new Array<number>(n + 2).fill(0));
+    private static naturalCoefficients(xs: number[], ys: number[]): number[] {
+        const n = xs.length;
+        const ks = new Array<number>(n).fill(0);
+
+        if (n === 2) {
+            const slope = (ys[1] - ys[0]) / (xs[1] - xs[0]);
+            ks[0] = slope;
+            ks[1] = slope;
+            return ks;
+        }
+
+        const a = new Array<number>(n).fill(0);
+        const b = new Array<number>(n).fill(0);
+        const c = new Array<number>(n).fill(0);
+        const d = new Array<number>(n).fill(0);
+
+        b[0] = 2 / (xs[1] - xs[0]);
+        c[0] = 1 / (xs[1] - xs[0]);
+        d[0] = 3 * (ys[1] - ys[0]) / ((xs[1] - xs[0]) * (xs[1] - xs[0]));
+
+        for (let i = 1; i < n - 1; i++) {
+            const dx0 = xs[i] - xs[i - 1];
+            const dx1 = xs[i + 1] - xs[i];
+            a[i] = 1 / dx0;
+            b[i] = 2 * (1 / dx0 + 1 / dx1);
+            c[i] = 1 / dx1;
+            d[i] = 3 * ((ys[i] - ys[i - 1]) / (dx0 * dx0) + (ys[i + 1] - ys[i]) / (dx1 * dx1));
+        }
+
+        const last = n - 1;
+        const dxLast = xs[last] - xs[last - 1];
+        a[last] = 1 / dxLast;
+        b[last] = 2 / dxLast;
+        c[last] = 0;
+        d[last] = 3 * (ys[last] - ys[last - 1]) / (dxLast * dxLast);
 
         for (let i = 1; i < n; i++) {
-            const h0 = xs[i] - xs[i - 1];
-            const h1 = xs[i + 1] - xs[i];
-            A[i][i - 1] = 1 / h0;
-            A[i][i] = 2 * (1 / h0 + 1 / h1);
-            A[i][i + 1] = 1 / h1;
-            A[i][n + 1] = 3 * ((ys[i] - ys[i - 1]) / (h0 * h0) + (ys[i + 1] - ys[i]) / (h1 * h1));
+            const m = a[i] / b[i - 1];
+            b[i] -= m * c[i - 1];
+            d[i] -= m * d[i - 1];
         }
 
-        const h0 = xs[1] - xs[0];
-        A[0][0] = 2 / h0;
-        A[0][1] = 1 / h0;
-        A[0][n + 1] = (3 * (ys[1] - ys[0])) / (h0 * h0);
-
-        const hn = xs[n] - xs[n - 1];
-        A[n][n - 1] = 1 / hn;
-        A[n][n] = 2 / hn;
-        A[n][n + 1] = (3 * (ys[n] - ys[n - 1])) / (hn * hn);
-
-        const m = n + 1;
-        for (let col = 0; col < m; col++) {
-            let pivot = col;
-            for (let r = col + 1; r < m; r++) if (Math.abs(A[r][col]) > Math.abs(A[pivot][col])) pivot = r;
-            [A[col], A[pivot]] = [A[pivot], A[col]];
-            for (let r = col + 1; r < m; r++) {
-                const f = A[r][col] / A[col][col];
-                for (let c = col; c <= m; c++) A[r][c] -= f * A[col][c];
-            }
+        ks[last] = d[last] / b[last];
+        for (let i = n - 2; i >= 0; i--) {
+            ks[i] = (d[i] - c[i] * ks[i + 1]) / b[i];
         }
-        const ks = new Array<number>(m).fill(0);
-        for (let r = m - 1; r >= 0; r--) {
-            let sum = A[r][m];
-            for (let c = r + 1; c < m; c++) sum -= A[r][c] * ks[c];
-            ks[r] = sum / A[r][r];
-        }
+
         return ks;
     }
 
     at(x: number): number {
         const { xs, ys, ks } = this;
+        const t = Math.min(Math.max(x, xs[0]), xs[xs.length - 1]);
+
         let i = 1;
-        while (i < xs.length - 1 && xs[i] < x) i++;
-        const h = xs[i] - xs[i - 1];
-        const t = (x - xs[i - 1]) / h;
-        const a = ks[i - 1] * h - (ys[i] - ys[i - 1]);
-        const b = -ks[i] * h + (ys[i] - ys[i - 1]);
-        return (1 - t) * ys[i - 1] + t * ys[i] + t * (1 - t) * ((1 - t) * a + t * b);
+        while (i < xs.length - 1 && xs[i] < t) i++;
+        const seg = i - 1;
+
+        const dx = xs[seg + 1] - xs[seg];
+        if (dx === 0) return ys[seg];
+
+        const localT = (t - xs[seg]) / dx;
+        const a = ks[seg] * dx - (ys[seg + 1] - ys[seg]);
+        const b = -ks[seg + 1] * dx + (ys[seg + 1] - ys[seg]);
+
+        return (1 - localT) * ys[seg] + localT * ys[seg + 1]
+            + localT * (1 - localT) * (a * (1 - localT) + b * localT);
     }
 }
