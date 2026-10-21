@@ -116,7 +116,7 @@ function StandingButton() {
 }
 
 const addAutoCorrectMenuItem: NavContextMenuPatchCallback = children => {
-    const { enableAutoCorrect, autoCorrect } = settings.use(["enableAutoCorrect", "autoCorrect"]);
+    const { enableAutoCorrect, autoCorrect } = settings.store;
     if (!enableAutoCorrect) return;
 
     const group = findGroupChildrenByChildId("spellcheck-enabled", children, true);
@@ -498,8 +498,9 @@ export default definePlugin({
         );
     },
     useAutoCorrect() {
-        const { autoCorrect } = settings.use(["autoCorrect"]);
-        return autoCorrect ? "on" : "off";
+        // Called from the patched getSlateEditor() factory, not from a React render.
+        // settings.use() is a hook and would corrupt React's hook order here.
+        return settings.store.autoCorrect ? "on" : "off";
     },
     getPlatformUrl(platform, args) {
         switch (platform) {
