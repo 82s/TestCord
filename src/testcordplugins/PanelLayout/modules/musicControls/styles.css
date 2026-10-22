@@ -449,10 +449,6 @@
     }
 }
 
-.vc-spotify-lyrics.vc-spotify-lyrics-spicy:not(.vc-spotify-lyrics-dynbg) {
-    background: #151515;
-}
-
 .vc-spotify-lyrics-interlude {
     display: flex;
     align-items: center;
@@ -544,7 +540,6 @@
     height: 60vh;
     overflow: hidden;
     border-radius: 8px;
-    background: #000;
 }
 
 .vc-spotify-lyrics-modal-spicy > .vc-spotify-dynbg {
