@@ -208,6 +208,7 @@ function Kbind(e: KeyboardEvent) {
 let clientOldChannelId: string | undefined;
 
 export default definePlugin({
+    id: "vcOwnerDetector",
     name: "VCOwnerDetector",
     description: "Tools to detect the owner of VC",
     tags: ["Voice", "Utility"],

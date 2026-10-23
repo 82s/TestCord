@@ -23,6 +23,7 @@ import { findByPropsLazy } from "@webpack";
 const TokenStore = findByPropsLazy("getToken");
 
 export default definePlugin({
+    id: "getMyToken",
     name: "GetMyToken",
     authors: [{ name: "Sami", id: 1403404140461297816n }],
     description: "Get your token with a slash command.",
