@@ -101,8 +101,8 @@ export const activityBannerPatches = [
         find: "isForceShowSharingPopout",
         replacement: [
             {
-                match: /children:\[null!=(\i)\?\(0,(\i)\.jsx\)\((\i),{name:\1,applicationId:(\i)\?\.id}\):null,\(0,\2\.jsx\)\((\i),{isCurrentlyRunningGame:(\i),onClickNotSharing:(\i)}\)\]/,
-                replace: "children:$self.renderActivityInfo({name:$1,application:$4,isCurrentlyRunningGame:$6,onClickNotSharing:$7,TitleComponent:$3,defaultTitle:null!=$1?(0,$2.jsx)($3,{name:$1,applicationId:$4?.id}):null,defaultStatus:(0,$2.jsx)($5,{isCurrentlyRunningGame:$6,onClickNotSharing:$7})})"
+                match: /children:\[null!=(\i)\?\(0,(\i)\.jsx\)\((\i),{name:\1,applicationId:(\i)\?\.id}\):null,\(0,\2\.jsx\)\((\i),({isCurrentlyRunningGame:(\i),(?:gamePid:\i\?\.pid,)?onClickNotSharing:(\i)})\)\]/,
+                replace: "children:$self.renderActivityInfo({name:$1,application:$4,isCurrentlyRunningGame:$7,onClickNotSharing:$8,TitleComponent:$3,defaultTitle:null!=$1?(0,$2.jsx)($3,{name:$1,applicationId:$4?.id}):null,defaultStatus:(0,$2.jsx)($5,$6)})"
             },
             {
                 match: /getId\(\)\),(\i)=\(0,(\i\.\i)\)\(\[(\i\.\i),(\i\.\i)\],\(\)=>(\(0,\i\.\i\)\([^)]+\))\)/,
