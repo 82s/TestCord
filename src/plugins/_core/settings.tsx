@@ -653,6 +653,7 @@ function TestCordDiscordIcon({ original }: { original: any; }) {
 }
 
 export default definePlugin({
+    id: "Settings",
     name: "Settings",
     description: "Adds Settings UI and debug info",
     authors: [Devs.Ven, Devs.Megu],

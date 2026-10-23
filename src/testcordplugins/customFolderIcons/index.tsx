@@ -13,6 +13,7 @@ import { folderProp, int2rgba } from "./util";
 
 export default definePlugin({
     settings,
+    id: "CustomFolderIcons",
     name: "CustomFolderIcons",
     description: "Customize folder icons with any png",
     tags: ["Customisation", "Appearance"],

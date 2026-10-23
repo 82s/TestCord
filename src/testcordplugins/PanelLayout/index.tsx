@@ -3579,6 +3579,7 @@ function CollapseToggleButton({ iconForeground, hideTooltips, nameplate }: UserA
 // ─── Plugin ───────────────────────────────────────────────────────────────────
 
 export default definePlugin({
+    id: "PanelLayout",
     name: "PanelLayout",
     description: "Customize the layout, style, and visibility of panel and call buttons, and manage user area modules.",
     authors: [TestcordDevs.deracul, TestcordDevs.Aviv, TestcordDevs.x2b, TestcordDevs.sirphantom89],

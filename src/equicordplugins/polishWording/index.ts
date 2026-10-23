@@ -61,6 +61,7 @@ const settings = definePluginSettings({
 });
 
 export default definePlugin({
+    id: "PolishWording",
     name: "PolishWording",
     description: "Tweaks your messages to make them look nicer and have better grammar. See settings",
     dependencies: ["MessageEventsAPI"],

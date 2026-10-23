@@ -191,6 +191,7 @@ function cleanup() {
 }
 
 export default definePlugin({
+    id: "Backpack",
     name: "Backpack",
     description: "Collapse your other chat-bar plugin buttons behind a single button to declutter the message bar. Click to expand a menu with packed buttons. Right-click for options.",
     authors: [TestcordDevs.sirphantom89],

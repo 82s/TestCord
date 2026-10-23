@@ -224,6 +224,7 @@ const BETTER_FOLDERS_EXPANDED_IDS_VAR = "typeof betterFoldersExpandedIds!=='unde
 const GRID_STYLE_NAME = "vc-betterFolders-sidebar-grid";
 
 export default definePlugin({
+    id: "BetterFolders",
     name: "BetterFolders",
     description: "Shows server folders on dedicated sidebar and adds folder related improvements",
     authors: [Devs.juby, Devs.AutumnVN, Devs.Nuckyz],
