@@ -110,7 +110,7 @@ function TimeAlogButton() {
 }
 
 export default definePlugin({
-    name: "timeAlog",
+    name: "TimeAlog",
     description: "Automatically antilog deletes your sent messages after a configurable delay.",
     tags: ["Utility", "Chat", "Privacy"],
     authors: [TestcordDevs.x2b],
