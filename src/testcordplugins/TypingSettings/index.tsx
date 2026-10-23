@@ -47,7 +47,7 @@ const settings = definePluginSettings({
     motionBlur: {
         type: OptionType.BOOLEAN,
         description: "Smooth typing: blur the caret while it moves.",
-        default: true,
+        default: false,
         onChange() { applySmoothCSS(); }
     },
     motionBlurAmount: {

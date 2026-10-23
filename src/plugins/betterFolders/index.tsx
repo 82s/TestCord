@@ -341,14 +341,14 @@ export default definePlugin({
             group: true,
             replacement: [
                 {
-                    // Render the Better Folders sidebar
-                    // Discord has two different places where they render the sidebar.
-                    // One is for visual refresh, one is not,
-                    // and each has a bunch of conditions &&ed in front of it.
-                    // Add the betterFolders sidebar to both, keeping the conditions Discord uses.
-                    match: /(?<=[[,])((?:!?\i&&)+)\(.{0,50}({className:\i\.\i,themeOverride:\i})\)/g,
-                    replace: (m, conditions, props) => `${m},${conditions}$self.FolderSideBar(${props})`
-                },
+                                    // Render the Better Folders sidebar
+                                    // Discord has two different places where they render the sidebar.
+                                    // One is for visual refresh, one is not,
+                                    // and each has a bunch of conditions &&ed in front of it.
+                                    // Add the betterFolders sidebar to both, keeping the conditions Discord uses.
+                                    match: /(?<=[[,])((?:!?\\i&&)+)\\(.{0,200}({className:\\i\\.\\i,themeOverride:\\i}[^)]*)\\)/g,
+                                    replace: (m, conditions, props) => `${m},${conditions}$self.FolderSideBar(${props})`
+                                },
                 {
                     // Add grid styles to fix alignment with other visual refresh elements
                     match: /(?<=className:)\i\.\i(?=,"data-fullscreen")/,

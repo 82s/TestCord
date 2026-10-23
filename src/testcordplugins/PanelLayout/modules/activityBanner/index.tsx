@@ -30,10 +30,10 @@ export const SelfPresenceStore = findStoreLazy("SelfPresenceStore");
 export const PresenceStore = findStoreLazy("PresenceStore");
 export const RunningGameStore = findStoreLazy("RunningGameStore");
 
-let cardRenderer: ((app: unknown, game: unknown, opts: { isGameRunning: boolean }) => React.ReactNode) | null = null;
+let cardRenderer: ((app: unknown, game: unknown, opts: { isGameRunning: boolean; }) => React.ReactNode) | null = null;
 let wasRenderedInEI = false;
 
-export function saveRenderer(fn: (app: unknown, game: unknown, opts: { isGameRunning: boolean }) => React.ReactNode) {
+export function saveRenderer(fn: (app: unknown, game: unknown, opts: { isGameRunning: boolean; }) => React.ReactNode) {
     cardRenderer = fn;
     wasRenderedInEI = false;
 }
@@ -123,6 +123,10 @@ export const activityBannerPatches = [
         ]
     }
 ];
+// NOTE: activity banner patches expired against Discord v1.0.2334+.
+// The module structure changed (children:()=> arrow fn instead of children:[...] array),
+// so the regex matches in activityBanner/index.tsx no longer apply.
+// The activity-banner module will simply not render until patches are re-derived.
 
 export const activityBannerModule: Omit<UserAreaModule, "order" | "enabled"> = {
     id: "activity-banner",
