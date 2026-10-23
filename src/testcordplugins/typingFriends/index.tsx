@@ -298,7 +298,7 @@ export default definePlugin({
             find: "openPrivateChannel=()=>{let{user:e}=this.props",
             predicate: () => settings.store.showFriendsSection,
             replacement: {
-                match: /subText:(\(0,(\i)\.jsxs?\)\(.*?\buser:(\i)\b.*?\]\}\))(?=,hovered:\i,showAccountIdentifier)/,
+                match: /subText:(\(0,(\i)\.jsxs?\)\(.*?\buser:(\i)\b.*?\))(?=,hovered:\i,showAccountIdentifier)/,
                 replace: 'subText:(window.__typingUsers?.has($3.id)?(0,$2.jsx)("div",{children:"Typing in "+window.__typingUsers.get($3.id)}):$1)'
             }
         },
