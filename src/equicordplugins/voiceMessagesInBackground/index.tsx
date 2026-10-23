@@ -23,6 +23,7 @@ const WrappedVoiceMessagesInBackgroundPlayer = ErrorBoundary.wrap(VoiceMessagesI
 
 migratePluginSettings("VoiceMessagesInBackground", "Voice Messages In-Background");
 export default definePlugin({
+    id: "VoiceMessagesInBackground",
     name: "VoiceMessagesInBackground",
     description: "Keeps voice messages playing across chats with a synchronized mini player.",
     authors: [EquicordDevs.ELJoOker],
@@ -35,7 +36,7 @@ export default definePlugin({
         // that merely share the intl string).
         find: "playbackCacheKey:",
         replacement: {
-            match: /(playbackCacheKey:\i}[\s\S]{0,400}?)(\[(\i),(\i)\]=(\i)\.useState\(([\s\S]{0,40}>0)\))([\s\S]{0,200}?)(\[(\i),(\i)\]=(\i)\.useState\((\i)\))/,
+            match: /(playbackCacheKey:\i}[\s\S]{0,400}?)(\[(\i),(\i)\]=(\i)\.useState\(([\s\S]{0,40}?>0)\))([\s\S]{0,200}?)(\[(\i),(\i)\]=(\i)\.useState\((\i)\))/,
             replace: "$1$2;$self.useBackgroundPlayback([$3,$4],$9,arguments[0]?.src,arguments[0]?.playbackCacheKey,$10)$7$8"
         }
     }],
