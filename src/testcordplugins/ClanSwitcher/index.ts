@@ -41,8 +41,8 @@ const settings = definePluginSettings({
 let loop: ReturnType<typeof setInterval> | null = null;
 
 export default definePlugin({
-    id: "Clan Switcher",
-    name: "Clan Switcher",
+    id: "ClanSwitcher",
+    name: "ClanSwitcher",
     description: "Automatically switches discord clantags",
     tags: ["Servers", "Utility"],
     authors: [],
