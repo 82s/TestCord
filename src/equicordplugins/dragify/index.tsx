@@ -164,22 +164,7 @@ export default definePlugin({
             }
         },
         {
-            find: "tutorialId:\"voice-conversations\"",
-            replacement: [
-                // Voice channel rows (guild sidebar)
-                {
-                    match: /(?<=this.getTooltipText\(\),.{0,100})iconClassName:/,
-                    replace: "draggable:!0,onDragStart:e=>$self.onChannelDragStart(e,{id:this?.props?.channel?.id,guild_id:this?.props?.channel?.guild_id}),$&"
-                },
-                // Voice channel rows (guild sidebar fallback - li wrapper)
-                {
-                    match: /(?<=this\.getModeClass\(\),.{0,50})"data-dnd-name":.{0,40},children:\[/g,
-                    replace: "draggable:!0,onDragStart:e=>$self.onChannelDragStart(e,{id:this?.props?.channel?.id,guild_id:this?.props?.channel?.guild_id}),$&"
-                }
-            ]
-        },
-        // Thread rows in channel list (sidebar thread items)
-        {
+            // Thread rows in channel list (sidebar thread items)
             find: "__invalid_threadMainContent",
             replacement: {
                 match: /className:\i\.\i,onClick:\i,(?:onAuxClick:\i,)?"aria-label":(?=.{0,100}__invalid_threadMainContent)/,
