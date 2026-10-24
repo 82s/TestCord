@@ -4,6 +4,7 @@ body.tc-backpack-collapsed .vc-chatbar-button:not(:has(.tc-backpack-marker)) {
 }
 
 .tc-backpack-marker {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 4px;

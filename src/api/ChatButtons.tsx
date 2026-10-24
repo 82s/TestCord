@@ -119,7 +119,7 @@ SettingsStore.addGlobalChangeListener((_, path) => {
     if (path === "" || path.startsWith("uiElements.chatBarButtons")) refreshContextMenus();
 });
 
-const chatBarButtonListeners = new Set<() => void>();
+export const chatBarButtonListeners = new Set<() => void>();
 function notifyChatBarButtonChange() { chatBarButtonListeners.forEach(l => l()); }
 
 /**
@@ -146,7 +146,11 @@ function VencordChatBarButtons(props: ChatBarProps) {
     useEffect(() => {
         const listener = () => { cachedChatBarButtons = null; forceUpdate(n => n + 1); };
         chatBarButtonListeners.add(listener);
-        return () => { chatBarButtonListeners.delete(listener); };
+        backpackListeners.add(listener);
+        return () => {
+            chatBarButtonListeners.delete(listener);
+            backpackListeners.delete(listener);
+        };
     }, []);
 
     // Factories often read settings.store directly without subscribing, so
@@ -163,7 +167,7 @@ function VencordChatBarButtons(props: ChatBarProps) {
     const isMainChat = analyticsName === "normal";
     const isAnyChat = isMainChat || analyticsName === "sidebar";
     const enabledKey = getSortedChatBarButtons()
-        .filter(({ key }) => isChatBarButtonEnabled(key))
+        .filter(({ key }) => isChatBarButtonEnabled(key) && !BackpackedButtons.has(key))
         .map(({ key }) => key)
         .join(",");
 
@@ -175,7 +179,7 @@ function VencordChatBarButtons(props: ChatBarProps) {
     // attachments and isEmpty from props; everything live (draft, settings,
     // local state) flows through their own hooks, which still fire.
     const buttons = useMemo(() => getSortedChatBarButtons()
-        .filter(({ key }) => isChatBarButtonEnabled(key))
+        .filter(({ key }) => isChatBarButtonEnabled(key) && !BackpackedButtons.has(key))
         .map(({ key, render: Button }) => (
             <ErrorBoundary noop key={key} onError={e => logger.error(`Failed to render ${key}`, e.error)}>
                 <Button {...props} isMainChat={isMainChat} isAnyChat={isAnyChat} />
