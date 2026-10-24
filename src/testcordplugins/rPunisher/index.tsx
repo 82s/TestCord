@@ -174,6 +174,11 @@ function handleUserVoiceActivity(userId: string, oldChannelId: string): void {
 }
 
 export default definePlugin({
+<<<<<<< HEAD
+=======
+    id: "retardExterminator",
+    aliases: ["rPunisher"],
+>>>>>>> 210048d4ebf3a9e6374e3d6f80a5b3d716ac024f
     name: "RetardExterminator",
     description: "Automatically bans users who spam rejoin voice channels",
     tags: ["Servers", "Utility"],

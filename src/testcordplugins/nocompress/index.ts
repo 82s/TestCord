@@ -7,7 +7,8 @@
 import definePlugin from "@utils/types";
 
 export default definePlugin({
-    name: "Disable Compression",
+    id: "DisableCompression",
+    name: "DisableCompression",
     description: "Disables the compression of attachments.",
     tags: ["Media", "Utility"],
     authors: [{ id: 566409342161780747n, name: "zv_yz" }],

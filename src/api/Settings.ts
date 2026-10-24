@@ -428,7 +428,25 @@ export function definePluginSettings<
         get plain() {
             if (!definedSettings.pluginName) throw new Error("Cannot access settings before plugin is initialized");
             const name = definedSettings.pluginName;
-            return (PlainSettings.plugins[name] ?? (Settings.plugins[name], PlainSettings.plugins[name])) as any;
+            const target = PlainSettings.plugins[name] ?? (Settings.plugins[name], PlainSettings.plugins[name]);
+            if (target && def) {
+                for (const key in def) {
+                    if (!(key in target)) {
+                        const setting = def[key];
+                        if ("default" in setting) {
+                            target[key] = Array.isArray(setting.default)
+                                ? [...setting.default]
+                                : typeof setting.default === "object" && setting.default !== null
+                                ? { ...setting.default }
+                                : setting.default;
+                        } else if (setting.type === OptionType.SELECT) {
+                            const optDef = setting.options?.find(o => o.default);
+                            if (optDef) target[key] = optDef.value;
+                        }
+                    }
+                }
+            }
+            return target as any;
         },
         use: settings => useSettings((
             settings

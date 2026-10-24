@@ -2,3 +2,173 @@
 body.tc-backpack-collapsed .vc-chatbar-button:not(:has(.tc-backpack-marker)) {
     display: none !important;
 }
+
+.tc-backpack-marker {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.tc-backpack-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: var(--brand-500);
+    color: var(--white-500);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 16px;
+    text-align: center;
+}
+
+.tc-backpack-popout {
+    background: var(--background-floating);
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+    border-radius: 8px;
+    box-shadow: var(--elevation-high, 0 8px 16px rgba(0, 0, 0, 0.24));
+    padding: 10px;
+    min-width: 220px;
+    max-width: 380px;
+}
+
+.tc-backpack-popout-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+.tc-backpack-popout-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--header-primary);
+}
+
+.tc-backpack-badge-inline {
+    background: var(--brand-500);
+    color: var(--white-500);
+    border-radius: 8px;
+    padding: 0 6px;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 16px;
+}
+
+.tc-backpack-popout-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.tc-backpack-header-btn {
+    color: var(--interactive-normal);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    border-radius: 4px;
+    transition: color 0.15s, background-color 0.15s;
+}
+
+.tc-backpack-header-btn:hover {
+    color: var(--interactive-hover);
+    background: var(--background-modifier-hover);
+}
+
+.tc-backpack-buttons-grid {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+}
+
+.tc-backpack-button-item {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.tc-backpack-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 14px 8px;
+    text-align: center;
+    gap: 6px;
+}
+
+.tc-backpack-empty-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--header-primary);
+    margin: 0;
+}
+
+.tc-backpack-empty-sub {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin: 0 0 6px 0;
+}
+
+.tc-backpack-reorder-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 380px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.tc-backpack-reorder-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 10px;
+    background: var(--background-secondary-alt);
+    border-radius: 6px;
+}
+
+.tc-backpack-reorder-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.tc-backpack-reorder-index {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-muted);
+    width: 18px;
+}
+
+.tc-backpack-reorder-label {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--header-primary);
+}
+
+.tc-backpack-reorder-packed-tag {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: var(--brand-500);
+    color: var(--white-500);
+}
+
+.tc-backpack-reorder-controls {
+    display: flex;
+    gap: 4px;
+}

@@ -857,7 +857,8 @@ const IGNORED_GLOBAL_ERROR_PATTERNS = [
     /NetworkError/i,
     /Load failed/i,
     /url parse[\s\S]*libdiscore/i,
-    /Sentry successfully disabled/i
+    /Sentry successfully disabled/i,
+    /__DEV__ is not defined/i
 ];
 
 /**

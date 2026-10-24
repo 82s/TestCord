@@ -193,6 +193,10 @@ const good = async e => {
     }
 };
 export default definePlugin({
+<<<<<<< HEAD
+=======
+    id: "recentBan",
+>>>>>>> 210048d4ebf3a9e6374e3d6f80a5b3d716ac024f
     name: "RecentBan",
     description: "Tools to ban recently joined VC users (only if owner)",
     tags: ["Servers", "Utility"],

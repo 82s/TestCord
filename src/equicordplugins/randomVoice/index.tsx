@@ -847,6 +847,7 @@ function renderOperationGroup({
 }
 
 export default definePlugin({
+    id: "RandomVoice",
     name: "RandomVoice",
     description: "Adds a button near mute to join a random voice channel.",
     dependencies: ["UserAreaAPI"],

@@ -18,7 +18,7 @@ import { Margins } from "@utils/margins";
 import { classes } from "@utils/misc";
 import { getPluginWarning, PluginWarningInfo } from "@utils/pluginWarnings";
 import { getTestcordModifiedDetails, isTestcordModified, TestcordPluginIconUrl } from "@utils/testcordIcons";
-import { Plugin } from "@utils/types";
+import { Plugin, PluginTag } from "@utils/types";
 import { ConfirmModal, openModal, React, showToast, Toasts, Tooltip } from "@webpack/common";
 
 import { PluginMeta } from "~plugins";
@@ -89,9 +89,20 @@ interface PluginCardProps extends React.HTMLProps<HTMLDivElement> {
     isNew?: boolean;
     onMouseEnter?: React.MouseEventHandler<HTMLDivElement>;
     onMouseLeave?: React.MouseEventHandler<HTMLDivElement>;
+    onTagClick?: (tag: PluginTag) => void;
+    selectedTags?: readonly PluginTag[] | PluginTag[];
 }
 
-export function PluginCard({ plugin, disabled, onRestartNeeded, onMouseEnter, onMouseLeave, isNew }: PluginCardProps) {
+export function PluginCard({
+    plugin,
+    disabled,
+    onRestartNeeded,
+    onMouseEnter,
+    onMouseLeave,
+    isNew,
+    onTagClick,
+    selectedTags
+}: PluginCardProps) {
     const canonicalId = (plugin as any).id ?? plugin.name;
     const settingsKey = `plugins.${canonicalId}.enabled` as const;
     const legacyKey = canonicalId !== plugin.name ? `plugins.${plugin.name}.enabled` as const : null;
@@ -327,9 +338,35 @@ showToast(msg, Toasts.Type.FAILURE, {
                 )}
                 {!!tags?.length && (
                     <div className={cl("card-tags")}>
-                        {tags.slice(0, maxVisibleTags).map(tag => (
-                            <span key={tag} className={cl("card-tag")}>{tag}</span>
-                        ))}
+                        {tags.slice(0, maxVisibleTags).map(tag => {
+                            const isSelected = selectedTags?.includes(tag as PluginTag);
+                            return (
+                                <span
+                                    key={tag}
+                                    className={classes(
+                                        cl("card-tag"),
+                                        isSelected && cl("card-tag-selected"),
+                                        onTagClick && cl("card-tag-clickable")
+                                    )}
+                                    onClick={onTagClick ? e => {
+                                        e.stopPropagation();
+                                        onTagClick(tag as PluginTag);
+                                    } : undefined}
+                                    title={onTagClick ? `Filter by ${tag}` : undefined}
+                                    role={onTagClick ? "button" : undefined}
+                                    tabIndex={onTagClick ? 0 : undefined}
+                                    onKeyDown={onTagClick ? e => {
+                                        if (e.key === "Enter" || e.key === " ") {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            onTagClick(tag as PluginTag);
+                                        }
+                                    } : undefined}
+                                >
+                                    {tag}
+                                </span>
+                            );
+                        })}
                         {tags.length > maxVisibleTags && (
                             <Tooltip text={tags.slice(maxVisibleTags).join(", ")}>
                                 {({ onMouseEnter: onTagEnter, onMouseLeave: onTagLeave }) => (

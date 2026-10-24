@@ -27,6 +27,7 @@ const settings = definePluginSettings({
 });
 
 export default definePlugin({
+    id: "ReactionLogger",
     name: "ReactionLogger",
     description: "Get notified when a user reacts to your messages",
     tags: ["Reactions", "Utility"],

@@ -9,7 +9,11 @@ import { definePluginSettings } from "@api/Settings";
 import { TestcordDevs } from "@utils/constants";
 import definePlugin, { OptionType } from "@utils/types";
 import { Message } from "@vencord/discord-types";
+<<<<<<< HEAD
 import { RestAPI, React, useState } from "@webpack/common";
+=======
+import { React, RestAPI, useState } from "@webpack/common";
+>>>>>>> 210048d4ebf3a9e6374e3d6f80a5b3d716ac024f
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -178,6 +182,10 @@ const BalldexButton: ChatBarButtonFactory = ({ isMainChat }) => {
 // ─── Plugin ────────────────────────────────────────────────────────────────────
 
 export default definePlugin({
+<<<<<<< HEAD
+=======
+    id: "Balldex",
+>>>>>>> 210048d4ebf3a9e6374e3d6f80a5b3d716ac024f
     name: "Balldex",
     description: "Balldex integration: auto-catch Pokémon, spawn notifications, and quick commands.",
     authors: [TestcordDevs.sirphantom89],

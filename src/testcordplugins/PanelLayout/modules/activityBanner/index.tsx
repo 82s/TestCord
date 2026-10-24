@@ -30,10 +30,10 @@ export const SelfPresenceStore = findStoreLazy("SelfPresenceStore");
 export const PresenceStore = findStoreLazy("PresenceStore");
 export const RunningGameStore = findStoreLazy("RunningGameStore");
 
-let cardRenderer: ((app: unknown, game: unknown, opts: { isGameRunning: boolean }) => React.ReactNode) | null = null;
+let cardRenderer: ((app: unknown, game: unknown, opts: { isGameRunning: boolean; }) => React.ReactNode) | null = null;
 let wasRenderedInEI = false;
 
-export function saveRenderer(fn: (app: unknown, game: unknown, opts: { isGameRunning: boolean }) => React.ReactNode) {
+export function saveRenderer(fn: (app: unknown, game: unknown, opts: { isGameRunning: boolean; }) => React.ReactNode) {
     cardRenderer = fn;
     wasRenderedInEI = false;
 }
@@ -101,7 +101,11 @@ export const activityBannerPatches = [
         find: "isForceShowSharingPopout",
         replacement: [
             {
+<<<<<<< HEAD
                 match: /children:\[null!=(\i)?\(0,(\i)\.jsx\)\((\i),{name:\1,applicationId:(\i)\?\.id}\):null,\(0,\2\.jsx\)\((\i),({isCurrentlyRunningGame:(\i),(?:gamePid:\i\?\.pid,)?onClickNotSharing:(\i)})\]/,
+=======
+                match: /children:\[null!=(\i)\?\(0,(\i)\.jsx\)\((\i),{name:\1,applicationId:(\i)\?\.id}\):null,\(0,\2\.jsx\)\((\i),({isCurrentlyRunningGame:(\i),(?:gamePid:\i\?\.pid,)?onClickNotSharing:(\i)})\)\]/,
+>>>>>>> 210048d4ebf3a9e6374e3d6f80a5b3d716ac024f
                 replace: "children:$self.renderActivityInfo({name:$1,application:$4,isCurrentlyRunningGame:$7,onClickNotSharing:$8,TitleComponent:$3,defaultTitle:null!=$1?(0,$2.jsx)($3,{name:$1,applicationId:$4?.id}):null,defaultStatus:(0,$2.jsx)($5,$6)})"
             },
             {
@@ -123,6 +127,10 @@ export const activityBannerPatches = [
         ]
     }
 ];
+// NOTE: activity banner patches expired against Discord v1.0.2334+.
+// The module structure changed (children:()=> arrow fn instead of children:[...] array),
+// so the regex matches in activityBanner/index.tsx no longer apply.
+// The activity-banner module will simply not render until patches are re-derived.
 
 export const activityBannerModule: Omit<UserAreaModule, "order" | "enabled"> = {
     id: "activity-banner",

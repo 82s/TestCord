@@ -95,6 +95,10 @@ function TimeDeleteButton() {
 }
 
 export default definePlugin({
+<<<<<<< HEAD
+=======
+    id: "timeDelete",
+>>>>>>> 210048d4ebf3a9e6374e3d6f80a5b3d716ac024f
     name: "TimeDelete",
     description: "Automatically deletes your sent messages after a configurable delay.",
     tags: ["Utility", "Chat", "Privacy"],

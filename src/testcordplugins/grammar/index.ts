@@ -23,6 +23,7 @@ const settings = definePluginSettings(
     });
 
 export default definePlugin({
+    id: "Grammar",
     name: "Grammar",
     description: "Tweaks your messages to make them look nicer and have better grammar",
     tags: ["Chat", "Utility"],

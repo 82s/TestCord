@@ -112,6 +112,13 @@
         color-mix(in srgb, var(--status-danger) 100%, transparent) !important;
 }
 
+.vc-plugins-enable-all-btn {
+    background-color:
+        color-mix(in srgb, var(--status-positive, #23a55a) 10%, transparent) !important;
+    color:
+        color-mix(in srgb, var(--status-positive, #23a55a) 100%, transparent) !important;
+}
+
 .vc-plugins-restart-button {
     background-color:
         color-mix(in srgb, var(--text-status-idle) 10%, transparent) !important;

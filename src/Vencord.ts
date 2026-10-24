@@ -50,6 +50,19 @@ import { changes, checkForUpdates, isOutdated as getIsOutdated, update, UpdateLo
 import { onceReady } from "./webpack";
 import { patches } from "./webpack/patchWebpack";
 
+if (typeof __DEV__ === "undefined") {
+    try {
+        Object.defineProperty(globalThis, "__DEV__", {
+            value: false,
+            writable: true,
+            configurable: true,
+            enumerable: false
+        });
+    } catch {
+        globalThis.__DEV__ = false;
+    }
+}
+
 if (IS_REPORTER) {
     require("./debug/runReporter");
 }
@@ -263,7 +276,7 @@ initPluginManager();
 if (!IS_DEV) {
     window.onerror = (message, source, lineno, colno, error) => {
         const msg = String(message);
-        if (msg.includes("startsWith") || msg.includes("Cannot read properties")) return true;
+        if (msg.includes("startsWith") || msg.includes("Cannot read properties") || msg.includes("__DEV__")) return true;
     };
     window.addEventListener("unhandledrejection", e => {
         const { reason } = e;

@@ -34,6 +34,8 @@ import * as $Notices from "./Notices";
 import * as $Notifications from "./Notifications";
 import * as $PluginWorker from "./PluginWorker";
 import * as $UserArea from "./UserArea";
+export * as PatchVersioning from "./PatchVersioning";
+export * as PluginHealth from "./PluginHealth";
 export * as PluginManager from "./PluginManager";
 export * as PatchVersioning from "./PatchVersioning";
 export * as PluginHealth from "./PluginHealth";

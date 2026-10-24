@@ -119,7 +119,7 @@ SettingsStore.addGlobalChangeListener((_, path) => {
     if (path === "" || path.startsWith("uiElements.chatBarButtons")) refreshContextMenus();
 });
 
-const chatBarButtonListeners = new Set<() => void>();
+export const chatBarButtonListeners = new Set<() => void>();
 function notifyChatBarButtonChange() { chatBarButtonListeners.forEach(l => l()); }
 
 /**
@@ -130,12 +130,25 @@ export const BackpackedButtons = new Set<string>();
 export const backpackListeners = new Set<() => void>();
 export function notifyBackpackChange() { backpackListeners.forEach(l => l()); }
 
+export type ChatBarButtonOrderResolver = (buttons: { key: string; render: ChatBarButtonFactory; }[]) => { key: string; render: ChatBarButtonFactory; }[];
+let chatBarButtonOrderResolver: ChatBarButtonOrderResolver | null = null;
+
+export function setChatBarButtonOrderResolver(resolver: ChatBarButtonOrderResolver | null) {
+    chatBarButtonOrderResolver = resolver;
+    cachedChatBarButtons = null;
+    notifyChatBarButtonChange();
+}
+
 let cachedChatBarButtons: { key: string; render: ChatBarButtonFactory; }[] | null = null;
 
 function getSortedChatBarButtons() {
     if (cachedChatBarButtons && cachedChatBarButtons.length === ChatBarButtonMap.size) return cachedChatBarButtons;
-    cachedChatBarButtons = Array.from(ChatBarButtonMap)
+    let buttons = Array.from(ChatBarButtonMap)
         .map(([key, { render }]) => ({ key, render }));
+    if (chatBarButtonOrderResolver) {
+        buttons = chatBarButtonOrderResolver(buttons);
+    }
+    cachedChatBarButtons = buttons;
     return cachedChatBarButtons;
 }
 
@@ -146,7 +159,11 @@ function VencordChatBarButtons(props: ChatBarProps) {
     useEffect(() => {
         const listener = () => { cachedChatBarButtons = null; forceUpdate(n => n + 1); };
         chatBarButtonListeners.add(listener);
-        return () => { chatBarButtonListeners.delete(listener); };
+        backpackListeners.add(listener);
+        return () => {
+            chatBarButtonListeners.delete(listener);
+            backpackListeners.delete(listener);
+        };
     }, []);
 
     // Factories often read settings.store directly without subscribing, so
@@ -163,7 +180,7 @@ function VencordChatBarButtons(props: ChatBarProps) {
     const isMainChat = analyticsName === "normal";
     const isAnyChat = isMainChat || analyticsName === "sidebar";
     const enabledKey = getSortedChatBarButtons()
-        .filter(({ key }) => isChatBarButtonEnabled(key))
+        .filter(({ key }) => isChatBarButtonEnabled(key) && !BackpackedButtons.has(key))
         .map(({ key }) => key)
         .join(",");
 
@@ -175,7 +192,7 @@ function VencordChatBarButtons(props: ChatBarProps) {
     // attachments and isEmpty from props; everything live (draft, settings,
     // local state) flows through their own hooks, which still fire.
     const buttons = useMemo(() => getSortedChatBarButtons()
-        .filter(({ key }) => isChatBarButtonEnabled(key))
+        .filter(({ key }) => isChatBarButtonEnabled(key) && !BackpackedButtons.has(key))
         .map(({ key, render: Button }) => (
             <ErrorBoundary noop key={key} onError={e => logger.error(`Failed to render ${key}`, e.error)}>
                 <Button {...props} isMainChat={isMainChat} isAnyChat={isAnyChat} />
@@ -259,7 +276,7 @@ addContextMenuPatch("textarea-context", children => {
     if (idx === -1) return;
 
     group.splice(idx, 0,
-        <Menu.MenuItem id="vc-chat-buttons" key="vencord-chat-buttons" label="Vencord Buttons">
+        <Menu.MenuItem id="vc-chat-buttons" key="vencord-chat-buttons" label="Testcord Buttons">
             {buttons.map(id => (
                 <Menu.MenuCheckboxItem
                     label={id}
