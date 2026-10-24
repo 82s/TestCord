@@ -130,12 +130,25 @@ export const BackpackedButtons = new Set<string>();
 export const backpackListeners = new Set<() => void>();
 export function notifyBackpackChange() { backpackListeners.forEach(l => l()); }
 
+export type ChatBarButtonOrderResolver = (buttons: { key: string; render: ChatBarButtonFactory; }[]) => { key: string; render: ChatBarButtonFactory; }[];
+let chatBarButtonOrderResolver: ChatBarButtonOrderResolver | null = null;
+
+export function setChatBarButtonOrderResolver(resolver: ChatBarButtonOrderResolver | null) {
+    chatBarButtonOrderResolver = resolver;
+    cachedChatBarButtons = null;
+    notifyChatBarButtonChange();
+}
+
 let cachedChatBarButtons: { key: string; render: ChatBarButtonFactory; }[] | null = null;
 
 function getSortedChatBarButtons() {
     if (cachedChatBarButtons && cachedChatBarButtons.length === ChatBarButtonMap.size) return cachedChatBarButtons;
-    cachedChatBarButtons = Array.from(ChatBarButtonMap)
+    let buttons = Array.from(ChatBarButtonMap)
         .map(([key, { render }]) => ({ key, render }));
+    if (chatBarButtonOrderResolver) {
+        buttons = chatBarButtonOrderResolver(buttons);
+    }
+    cachedChatBarButtons = buttons;
     return cachedChatBarButtons;
 }
 
