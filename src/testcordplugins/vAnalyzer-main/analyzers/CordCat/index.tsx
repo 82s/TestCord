@@ -12,7 +12,7 @@ import { settings } from "../../settings";
 import { safeToast } from "../../utils";
 import { CordCatModal } from "./CordCatModal";
 
-const Native = VencordNative.pluginHelpers.vAnalyzer as PluginNative<typeof import("./native")>;
+const Native = VencordNative.pluginHelpers.VAnalyzer as PluginNative<typeof import("./native")>;
 
 export async function analyzeUserWithCordCat(userId: string, username: string): Promise<void> {
     safeToast(`Querying CordCat for ${username}...`);

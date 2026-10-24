@@ -10,7 +10,7 @@ import { Toasts } from "@webpack/common";
 import { ModularScanModule } from "../../modularScanStore";
 import { AnalysisValue, safeToast } from "../../utils";
 
-const Native = VencordNative.pluginHelpers.vAnalyzer as PluginNative<typeof import("./native")>;
+const Native = VencordNative.pluginHelpers.VAnalyzer as PluginNative<typeof import("./native")>;
 
 export async function runModularScan(
     module: ModularScanModule,

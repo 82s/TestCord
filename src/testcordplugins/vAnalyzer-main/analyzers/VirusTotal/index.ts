@@ -11,7 +11,7 @@ import { Toasts } from "@webpack/common";
 import { settings } from "../../settings";
 import { AnalysisValue, safeToast } from "../../utils";
 
-const Native = VencordNative.pluginHelpers.vAnalyzer as PluginNative<typeof import("./native")>;
+const Native = VencordNative.pluginHelpers.VAnalyzer as PluginNative<typeof import("./native")>;
 
 function buildDetails(stats: any): AnalysisValue["details"] {
     const details: AnalysisValue["details"] = [];

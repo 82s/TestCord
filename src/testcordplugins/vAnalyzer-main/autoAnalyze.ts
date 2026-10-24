@@ -231,7 +231,7 @@ function analyzeUrlsAndInvites(
         const skipInvites = options.respectDirectMessageOnly && s.autoScanInvitesDirectMessageOnly && !isDM(message.channel_id);
         if (!skipInvites) {
             for (const url of inviteUrls) {
-                analyzeDiscordInvite(url, true).then(r => r && handleAnalysis(message.id, r));
+                runScan(message.id, url, () => analyzeDiscordInvite(url, true), "Invite scan error");
             }
         }
     }

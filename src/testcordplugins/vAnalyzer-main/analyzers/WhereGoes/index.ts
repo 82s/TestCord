@@ -9,7 +9,7 @@ import { Toasts } from "@webpack/common";
 
 import { AnalysisValue, safeToast } from "../../utils";
 
-const Native = VencordNative.pluginHelpers.vAnalyzer as PluginNative<typeof import("./native")>;
+const Native = VencordNative.pluginHelpers.VAnalyzer as PluginNative<typeof import("./native")>;
 
 interface TraceHop {
     step: number;

@@ -9,7 +9,7 @@ import { Toasts } from "@webpack/common";
 
 import { AnalysisValue, extractDomain, safeToast } from "../../utils";
 
-const Native = VencordNative.pluginHelpers.vAnalyzer as PluginNative<typeof import("./native")>;
+const Native = VencordNative.pluginHelpers.VAnalyzer as PluginNative<typeof import("./native")>;
 
 export async function analyzeWithFishFish(url: string, silent = false): Promise<AnalysisValue | null> {
     const domain = extractDomain(url);
