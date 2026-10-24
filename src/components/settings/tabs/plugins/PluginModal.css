@@ -80,14 +80,25 @@
 }
 
 .vc-plugin-modal-tag {
-    padding: 3px 8px;
-    border: 1px solid var(--border-subtle);
+    display: inline-flex;
+    align-items: center;
+    height: 22px;
+    box-sizing: border-box;
+    padding: 0 8px;
     border-radius: 6px;
-    background-color: var(--background-base-low);
-    color: var(--text-muted);
-    font-size: 12px;
+    background-color: var(--background-surface-highest, var(--background-modifier-accent));
+    border: 1px solid var(--border-subtle);
+    color: var(--text-normal);
+    font-size: 11px;
     font-weight: 600;
-    line-height: 16px;
+    line-height: 1;
+    transition: 0.1s ease;
+    user-select: none;
+}
+
+.vc-plugin-modal-tag:hover {
+    background-color: var(--background-modifier-hover);
+    color: var(--text-normal);
 }
 
 .vc-plugin-modal-section {

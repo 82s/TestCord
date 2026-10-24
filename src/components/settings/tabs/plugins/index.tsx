@@ -445,6 +445,13 @@ function PluginSettings() {
 
     const handleRestartNeeded = useCallback((name: string, key: string) => changes.handleChange(`${name}:${key}`), [changes]);
 
+    const handleTagClick = useCallback((tag: PluginTag) => {
+        setSearchValue(prev => ({
+            ...prev,
+            tags: prev.tags.includes(tag) ? prev.tags.filter(t => t !== tag) : [...prev.tags, tag]
+        }));
+    }, []);
+
     // Filtering is cheap; building JSX is not. This used to allocate a <PluginCard>
     // element for every matching plugin (~700) on each keystroke, of which the
     // visiblePlugins slice below then discarded all but `visibleCount`. Split the two:
@@ -489,11 +496,13 @@ function PluginSettings() {
                         onRestartNeeded={handleRestartNeeded}
                         disabled={true}
                         plugin={p}
+                        onTagClick={handleTagClick}
+                        selectedTags={searchValue.tags}
                     />
                 )}
             </Tooltip>
         );
-    }), [requiredPluginDefs, depMap, settings.plugins, handleRestartNeeded]);
+    }), [requiredPluginDefs, depMap, settings.plugins, handleRestartNeeded, handleTagClick, searchValue.tags]);
 
     function resetCheckAndDo() {
         let restartNeeded = false;
@@ -582,9 +591,11 @@ function PluginSettings() {
             disabled={false}
             plugin={p}
             isNew={newPluginsSet?.has(p.name)}
+            onTagClick={handleTagClick}
+            selectedTags={searchValue.tags}
             key={p.name}
         />
-    )), [filteredPlugins, visibleCount, newPluginsSet, handleRestartNeeded]);
+    )), [filteredPlugins, visibleCount, newPluginsSet, handleRestartNeeded, handleTagClick, searchValue.tags]);
     const rawAuthorGithub = searchValue.author ? (authorOptions.find(a => a.value === searchValue.author)?.github || searchValue.author) : "";
     const authorGithub = rawAuthorGithub ? (rawAuthorGithub.startsWith("http") ? rawAuthorGithub : "https://github.com/" + rawAuthorGithub) : "";
 
@@ -675,12 +686,31 @@ function PluginSettings() {
                     />
                     <button
                         type="button"
-                        className={classes(cl("tag-filter-toggle"), searchValue.tags.length > 0 && cl("tag-filter-toggle-active"))}
+                        className={classes(
+                            cl("tag-filter-toggle"),
+                            tagsOpen && cl("tag-filter-toggle-open"),
+                            searchValue.tags.length > 0 && cl("tag-filter-toggle-active")
+                        )}
                         onClick={() => setTagsOpen(open => !open)}
                         aria-expanded={tagsOpen}
                     >
-                        <span className={cl("tag-filter-caret")}>{tagsOpen ? "▾" : "▸"}</span>
-                        Tags{searchValue.tags.length > 0 ? ` (${searchValue.tags.length})` : ""}
+                        <span>
+                            Tags{searchValue.tags.length > 0 ? ` (${searchValue.tags.length})` : ""}
+                        </span>
+                        <svg
+                            className={classes(cl("tag-filter-caret-icon"), tagsOpen && cl("tag-filter-caret-open"))}
+                            width="16"
+                            height="16"
+                            viewBox="0 0 16 16"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden="true"
+                        >
+                            <path d="M1.5 5.5L8 12L14.5 5.5" />
+                        </svg>
                     </button>
                     <SearchableSelect
                         options={[{ label: "All Authors", value: "" }, ...authorOptions]}
@@ -705,31 +735,47 @@ function PluginSettings() {
 
             {tagsOpen && (
                 <div className={cl("tag-filter-panel")}>
-                    {PluginTags.map(tag => {
-                        const checked = searchValue.tags.includes(tag);
-                        return (
-                            <label key={tag} className={classes(cl("tag-filter-item"), checked && cl("tag-filter-item-checked"))}>
-                                <input
-                                    type="checkbox"
-                                    checked={checked}
-                                    onChange={() => setSearchValue(prev => ({
+                    <div className={cl("tag-filter-grid")}>
+                        {PluginTags.map(tag => {
+                            const checked = searchValue.tags.includes(tag);
+                            return (
+                                <button
+                                    key={tag}
+                                    type="button"
+                                    role="checkbox"
+                                    aria-checked={checked}
+                                    className={classes(
+                                        cl("tag-filter-item"),
+                                        checked && cl("tag-filter-item-checked")
+                                    )}
+                                    onClick={() => setSearchValue(prev => ({
                                         ...prev,
                                         tags: checked ? prev.tags.filter(t => t !== tag) : [...prev.tags, tag]
                                     }))}
-                                />
-                                <span>{tag}</span>
-                            </label>
-                        );
-                    })}
+                                >
+                                    <span className={classes(cl("tag-checkbox"), checked && cl("tag-checkbox-checked"))}>
+                                        {checked && (
+                                            <svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                <polyline points="3 8.5 6.5 12 13 4" />
+                                            </svg>
+                                        )}
+                                    </span>
+                                    <span className={cl("tag-filter-name")}>{tag}</span>
+                                </button>
+                            );
+                        })}
+                    </div>
                     {searchValue.tags.length > 0 && (
-                        <Button
-                            variant="secondary"
-                            size="small"
-                            className={cl("tag-filter-clear")}
-                            onClick={() => setSearchValue(prev => ({ ...prev, tags: [] }))}
-                        >
-                            Clear tags
-                        </Button>
+                        <div className={cl("tag-filter-footer")}>
+                            <Button
+                                variant="secondary"
+                                size="small"
+                                className={cl("tag-filter-clear")}
+                                onClick={() => setSearchValue(prev => ({ ...prev, tags: [] }))}
+                            >
+                                Clear tags
+                            </Button>
+                        </div>
                     )}
                 </div>
             )}
