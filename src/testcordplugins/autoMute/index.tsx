@@ -111,32 +111,34 @@ const AudioDeviceContextMenuPatch: NavContextMenuPatchCallback = (children, prop
                         updateAutoMute();
                     }}
                 />
-                <Menu.MenuControlItem
-                    id="vc-auto-mute-timeout"
-                    label="Inactivity Timeout"
-                    control={(props, ref) => (
-                        <Menu.MenuSliderControl
-                            {...props}
-                            ref={ref}
-                            minValue={15}
-                            maxValue={900}
-                            value={timeout}
-                            onChange={debounce((rawValue: number) => {
-                                const value = Math.round(rawValue);
-                                settings.store.timeout = value;
-                                updateTimeout(value);
-                            }, 10)}
-                            renderValue={(value: number) => {
-                                const minutes = Math.floor(value / 60);
-                                const seconds = Math.round(value % 60);
-                                return [
-                                    minutes,
-                                    `${seconds < 10 ? "0" + seconds : seconds}${minutes ? "" : "s"}`
-                                ].filter(Boolean).join(":");
-                            }}
-                        />
-                    )}
-                />
+                {Menu.MenuSliderControl && (
+                    <Menu.MenuControlItem
+                        id="vc-auto-mute-timeout"
+                        label="Inactivity Timeout"
+                        control={(props, ref) => (
+                            <Menu.MenuSliderControl
+                                {...props}
+                                ref={ref}
+                                minValue={15}
+                                maxValue={900}
+                                value={timeout}
+                                onChange={debounce((rawValue: number) => {
+                                    const value = Math.round(rawValue);
+                                    settings.store.timeout = value;
+                                    updateTimeout(value);
+                                }, 10)}
+                                renderValue={(value: number) => {
+                                    const minutes = Math.floor(value / 60);
+                                    const seconds = Math.round(value % 60);
+                                    return [
+                                        minutes,
+                                        `${seconds < 10 ? "0" + seconds : seconds}${minutes ? "" : "s"}`
+                                    ].filter(Boolean).join(":");
+                                }}
+                            />
+                        )}
+                    />
+                )}
                 <Menu.MenuCheckboxItem
                     checked={nonFriendJoinsChannel}
                     id="vc-auto-mute-non-friends"

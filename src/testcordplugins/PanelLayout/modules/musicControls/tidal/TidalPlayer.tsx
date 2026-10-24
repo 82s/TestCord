@@ -226,21 +226,23 @@ function AlbumContextMenu({ track }: { track: PlayerState["track"]; }) {
                 icon={ImageIcon}
                 leadingAccessory={{ type: "icon", icon: ImageIcon }}
             />
-            <Menu.MenuControlItem
-                id="tdl-volume"
-                key="tdl-volume"
-                label="Volume"
-                control={(props, ref) => (
-                    <Menu.MenuSliderControl
-                        {...props}
-                        ref={ref}
-                        value={TidalStore.volume}
-                        minValue={0}
-                        maxValue={100}
-                        onChange={debounce((v: number) => TidalStore.setVolume(v))}
-                    />
-                )}
-            />
+            {Menu.MenuSliderControl && (
+                <Menu.MenuControlItem
+                    id="tdl-volume"
+                    key="tdl-volume"
+                    label="Volume"
+                    control={(props, ref) => (
+                        <Menu.MenuSliderControl
+                            {...props}
+                            ref={ref}
+                            value={TidalStore.volume}
+                            minValue={0}
+                            maxValue={100}
+                            onChange={debounce((v: number) => TidalStore.setVolume(v))}
+                        />
+                    )}
+                />
+            )}
         </Menu.Menu>
     );
 }

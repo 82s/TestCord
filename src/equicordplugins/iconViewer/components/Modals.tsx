@@ -88,19 +88,21 @@ function ColorContextMenu({ colorKeys }: { colorKeys: string[]; }) {
             onClose={() => FluxDispatcher.dispatch({ type: "CONTEXT_MENU_CLOSE" })}
             aria-label="Icon Viewer Colors"
         >
-            <Menu.MenuControlItem
-                id="vc-ic-colors-search"
-                control={(props, ref) => (
-                    <Menu.MenuSearchControl
-                        {...props}
-                        query={query}
-                        onChange={setQuery}
-                        ref={ref}
-                        placeholder={getIntlMessage("SEARCH")}
-                        autoFocus
-                    />
-                )}
-            />
+            {Menu.MenuSearchControl && (
+                <Menu.MenuControlItem
+                    id="vc-ic-colors-search"
+                    control={(props, ref) => (
+                        <Menu.MenuSearchControl
+                            {...props}
+                            query={query}
+                            onChange={setQuery}
+                            ref={ref}
+                            placeholder={getIntlMessage("SEARCH")}
+                            autoFocus
+                        />
+                    )}
+                />
+            )}
             <Menu.MenuSeparator />
             {filtered.map(colorKey => (
                 <Menu.MenuItem

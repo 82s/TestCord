@@ -259,21 +259,23 @@ function AlbumContextMenu({ track }: { track: Track; }) {
                 action={() => openImageModal(track.album.image)}
                 icon={ImageIcon}
             />
-            <Menu.MenuControlItem
-                id="spotify-volume"
-                key="spotify-volume"
-                label="Volume"
-                control={(props, ref) => (
-                    <Menu.MenuSliderControl
-                        {...props}
-                        ref={ref}
-                        value={volume}
-                        minValue={0}
-                        maxValue={100}
-                        onChange={debounce((v: number) => SpotifyStore.setVolume(v))}
-                    />
-                )}
-            />
+            {Menu.MenuSliderControl && (
+                <Menu.MenuControlItem
+                    id="spotify-volume"
+                    key="spotify-volume"
+                    label="Volume"
+                    control={(props, ref) => (
+                        <Menu.MenuSliderControl
+                            {...props}
+                            ref={ref}
+                            value={volume}
+                            minValue={0}
+                            maxValue={100}
+                            onChange={debounce((v: number) => SpotifyStore.setVolume(v))}
+                        />
+                    )}
+                />
+            )}
         </Menu.Menu>
     );
 }

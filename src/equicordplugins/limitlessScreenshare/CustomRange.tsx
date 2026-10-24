@@ -33,7 +33,7 @@ export const CustomRange = ({ onChange, initialValue, minMax, group, id, suffix 
         setValue(roundedValue);
         changeStreamSettings(roundedValue);
     };
-    return (
+    return Menu.MenuSliderControl ? (
         <Menu.MenuControlItem group={`${group}`} id={`${id}-custom`} label={value + suffix} control={(props, ref) => <Menu.MenuSliderControl
             {...props}
             ref={ref}
@@ -43,5 +43,5 @@ export const CustomRange = ({ onChange, initialValue, minMax, group, id, suffix 
             minValue={0}
             maxValue={100}>
         </Menu.MenuSliderControl>} />
-    );
+    ) : null;
 };

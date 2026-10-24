@@ -811,21 +811,23 @@ function renderOperationGroup({
 }) {
     return (
         <Menu.MenuGroup label={label.toUpperCase()}>
-            <Menu.MenuControlItem
-                id={`random-voice-slider-${sliderKey}`}
-                label={label}
-                control={(props, ref) => (
-                    <Menu.MenuSliderControl
-                        ref={ref}
-                        {...props}
-                        minValue={1}
-                        maxValue={15}
-                        value={sliderValue}
-                        onChange={onSliderChange}
-                        renderValue={value => `${Math.round(value)} user${Math.round(value) === 1 ? "" : "s"}`}
-                    />
-                )}
-            />
+            {Menu.MenuSliderControl && (
+                <Menu.MenuControlItem
+                    id={`random-voice-slider-${sliderKey}`}
+                    label={label}
+                    control={(props, ref) => (
+                        <Menu.MenuSliderControl
+                            ref={ref}
+                            {...props}
+                            minValue={1}
+                            maxValue={15}
+                            value={sliderValue}
+                            onChange={onSliderChange}
+                            renderValue={value => `${Math.round(value)} user${Math.round(value) === 1 ? "" : "s"}`}
+                        />
+                    )}
+                />
+            )}
             <Menu.MenuItem id={`random-voice-operation-${operationKey}`} label="Parameters">
                 <>
                     {operationOptions.map(option => (

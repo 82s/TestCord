@@ -129,21 +129,24 @@ export function buildPluginMenuEntries(includeEmpty = false) {
                                 break;
                             case OptionType.SLIDER:
                                 // The menu slider doesn't support these options. Skip to avoid confusion
-                                if (option.stickToMarkers || option.componentProps) continue;
+                                if (option.stickToMarkers || option.componentProps || !Menu.MenuSliderControl || !Menu.MenuControlItem) continue;
 
                                 options.push(
                                     <Menu.MenuControlItem
                                         {...baseProps}
-                                        control={(props, ref) => (
-                                            <Menu.MenuSliderControl
-                                                ref={ref}
-                                                {...props}
-                                                minValue={option.markers[0]}
-                                                maxValue={option.markers.at(-1)!}
-                                                value={s[key]}
-                                                onChange={v => s[key] = v}
-                                            />
-                                        )}
+                                        control={(props, ref) => {
+                                            if (!Menu.MenuSliderControl) return null;
+                                            return (
+                                                <Menu.MenuSliderControl
+                                                    ref={ref}
+                                                    {...props}
+                                                    minValue={option.markers?.[0] ?? 0}
+                                                    maxValue={option.markers?.at(-1) ?? 100}
+                                                    value={s[key]}
+                                                    onChange={v => s[key] = v}
+                                                />
+                                            );
+                                        }}
                                     />
                                 );
                                 break;

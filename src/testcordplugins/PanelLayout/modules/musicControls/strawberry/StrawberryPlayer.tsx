@@ -254,21 +254,23 @@ function AlbumContextMenu({ track }: { track: StrawberryTrack | null; }) {
                     icon={ImageIcon}
                 />
             )}
-            <Menu.MenuControlItem
-                id="strawberry-volume"
-                key="strawberry-volume"
-                label="Volume"
-                control={(props, ref) => (
-                    <Menu.MenuSliderControl
-                        {...props}
-                        ref={ref}
-                        value={StrawberryStore.volume}
-                        minValue={0}
-                        maxValue={100}
-                        onChange={debounce((v: number) => StrawberryStore.setVolume(v))}
-                    />
-                )}
-            />
+            {Menu.MenuSliderControl && (
+                <Menu.MenuControlItem
+                    id="strawberry-volume"
+                    key="strawberry-volume"
+                    label="Volume"
+                    control={(props, ref) => (
+                        <Menu.MenuSliderControl
+                            {...props}
+                            ref={ref}
+                            value={StrawberryStore.volume}
+                            minValue={0}
+                            maxValue={100}
+                            onChange={debounce((v: number) => StrawberryStore.setVolume(v))}
+                        />
+                    )}
+                />
+            )}
         </Menu.Menu>
     );
 }

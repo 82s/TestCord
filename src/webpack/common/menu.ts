@@ -17,13 +17,33 @@
 */
 
 import type * as t from "@vencord/discord-types";
-import { filters, mapMangledModuleLazy, waitFor } from "@webpack";
+import { filters, mapMangledModuleLazy } from "@webpack";
+
+import { waitForComponent } from "./internal";
 
 export const Menu = {} as t.Menu;
 
-waitFor(filters.componentByCode('path:["empty"]'), m => Menu.Menu = m);
-waitFor(filters.componentByCode("SLIDER)", "handleSize:16"), m => Menu.MenuSliderControl = m);
-waitFor(filters.componentByCode(".SEARCH)", ".focus()", "query:"), m => Menu.MenuSearchControl = m);
+// Placeholders for menu items so they are never undefined before Discord's item module loads
+const createPlaceholder = (name: string) => {
+    const fn = (props: any) => null;
+    Object.defineProperty(fn, "name", { value: name });
+    return fn;
+};
+
+for (const name of [
+    "MenuItem",
+    "MenuCheckboxItem",
+    "MenuRadioItem",
+    "MenuSeparator",
+    "MenuGroup",
+    "MenuControlItem"
+] as const) {
+    (Menu as any)[name] ??= createPlaceholder(name);
+}
+
+Menu.Menu = waitForComponent<t.Menu["Menu"]>("Menu", filters.componentByCode('path:["empty"]'));
+Menu.MenuSliderControl = waitForComponent<t.Menu["MenuSliderControl"]>("MenuSliderControl", filters.componentByCode("SLIDER)", "handleSize:16"));
+Menu.MenuSearchControl = waitForComponent<t.Menu["MenuSearchControl"]>("MenuSearchControl", filters.componentByCode(".SEARCH)", ".focus()", "query:"));
 
 export const ContextMenuApi: t.ContextMenuApi = mapMangledModuleLazy('type:"CONTEXT_MENU_OPEN', {
     closeContextMenu: filters.byCode("CONTEXT_MENU_CLOSE"),
