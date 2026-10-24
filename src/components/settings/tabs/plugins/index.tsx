@@ -22,7 +22,6 @@ import * as DataStore from "@api/DataStore";
 import { PluginHealth } from "@api/PluginHealth";
 import { isPluginEnabled, stopPlugin } from "@api/PluginManager";
 import { Settings, useSettings } from "@api/Settings";
-import { BaseText } from "@components/BaseText";
 import { Button } from "@components/Button";
 import { Card } from "@components/Card";
 import { Divider } from "@components/Divider";
@@ -117,7 +116,7 @@ function applyPluginBulk(plugins: Plugin[], enabled: boolean, markRestartNeeded:
     return changed;
 }
 
-function ReloadRequiredCard({ required, enabledPlugins, openWarningModal, resetCheckAndDo }) {
+function ReloadRequiredCard({ required }: { required: boolean; }) {
     return (
         <Card className={classes(cl("info-card"), required && "vc-warning-card")}>
             <div className={cl("info-card-content")}>
@@ -136,22 +135,13 @@ function ReloadRequiredCard({ required, enabledPlugins, openWarningModal, resetC
                     </>
                 )}
             </div>
-            <div className={cl("info-card-actions")}>
-                {required ? (
+            {required && (
+                <div className={cl("info-card-actions")}>
                     <Button variant="primary" className={cl("restart-button")} onClick={() => location.reload()}>
                         Restart
                     </Button>
-) : enabledPlugins.length > 0 && (
-                    <Button
-                        variant="secondary"
-                        size="small"
-                        className={"vc-plugins-disable-warning vc-modal-align-reset"}
-                        onClick={() => openWarningModal(null, undefined, false, enabledPlugins.length, resetCheckAndDo)}
-                    >
-                        Disable All Plugins
-                    </Button>
-                )}
-            </div>
+                </div>
+            )}
         </Card>
     );
 }
@@ -530,6 +520,8 @@ function PluginSettings() {
             void PluginHealth.recordPluginChange(plugin, false);
         }
 
+        forceBulkUpdate();
+
         if (restartNeeded) {
             Alerts.show({
                 title: "Restart Required",
@@ -599,34 +591,54 @@ function PluginSettings() {
     const rawAuthorGithub = searchValue.author ? (authorOptions.find(a => a.value === searchValue.author)?.github || searchValue.author) : "";
     const authorGithub = rawAuthorGithub ? (rawAuthorGithub.startsWith("http") ? rawAuthorGithub : "https://github.com/" + rawAuthorGithub) : "";
 
-    const bulkSetEnabled = (enabled: boolean) => {
-        const targets = filteredPlugins.filter(p => isPluginEnabled(p.name) !== enabled);
-        if (!targets.length) {
-            showErrorToast(`Every plugin matching the current filters is already ${enabled ? "enabled" : "disabled"}.`);
+    const allEnableablePlugins = useMemo(() => {
+        return sortedPlugins.filter(p =>
+            !p.hidden &&
+            !p.required &&
+            (!p.name.endsWith("API") || Boolean(p.settings?.def)) &&
+            !isPluginEnabled(p.name)
+        );
+    }, [sortedPlugins, settings.plugins]);
+
+    const enableAllPlugins = () => {
+        if (!allEnableablePlugins.length) {
+            showErrorToast("All plugins are already enabled.");
             return;
         }
 
         Alerts.show({
-            title: enabled ? "Enable matching plugins?" : "Disable matching plugins?",
+            title: "Enable All Plugins?",
             body: (
                 <Paragraph>
-                    This {enabled ? "enables" : "disables"} <b>{targets.length}</b> plugin{targets.length === 1 ? "" : "s"} matching the
-                    current search, status and tag filters. Changes only take effect after a restart.
+                    This enables <b>{allEnableablePlugins.length}</b> plugin{allEnableablePlugins.length === 1 ? "" : "s"}.
+                    Changes will take effect after a restart.
                 </Paragraph>
             ),
-            confirmText: enabled ? "Enable All" : "Disable All",
+            confirmText: "Enable All",
             cancelText: "Cancel",
             onConfirm: () => {
-                const changed = applyPluginBulk(targets, enabled, handleRestartNeeded);
+                const changed = applyPluginBulk(allEnableablePlugins, true, handleRestartNeeded);
                 forceBulkUpdate();
-                showToast(`${changed.length} plugin${changed.length === 1 ? "" : "s"} ${enabled ? "enabled" : "disabled"}, restart to apply`, Toasts.Type.SUCCESS);
+                showToast(`${changed.length} plugin${changed.length === 1 ? "" : "s"} enabled, restart to apply`, Toasts.Type.SUCCESS);
+                Alerts.show({
+                    title: "Restart Required",
+                    body: (
+                        <>
+                            <p style={{ textAlign: "center" }}>Some plugins require a restart to fully enable.</p>
+                            <p style={{ textAlign: "center" }}>Would you like to restart now?</p>
+                        </>
+                    ),
+                    confirmText: "Restart Now",
+                    cancelText: "Later",
+                    onConfirm: () => location.reload()
+                });
             }
         });
     };
 
     return (
         <SettingsTab>
-            <ReloadRequiredCard required={changes.hasChanges} enabledPlugins={enabledPlugins} openWarningModal={openWarningModal} resetCheckAndDo={resetCheckAndDo} />
+            <ReloadRequiredCard required={changes.hasChanges} />
 
             <div className={cl("stats-container")}>
                 <StockPluginsCard
@@ -780,26 +792,31 @@ function PluginSettings() {
                 </div>
             )}
 
-            <div className={cl("bulk-actions")}>
-                <div>
-                    <BaseText size="sm" weight="semibold">Bulk actions</BaseText>
-                    <Paragraph size="xs" className={cl("bulk-actions-hint")}>
-                        Applies to the {filteredPlugins.length} plugin{filteredPlugins.length === 1 ? "" : "s"} matching the filters above. Pick tags to narrow it down.
-                    </Paragraph>
-                </div>
-                <div className={cl("bulk-actions-buttons")}>
-                    <Button variant="secondary" size="small" onClick={() => bulkSetEnabled(true)}>
-                        Enable matching
+            <div className={cl("section-header")}>
+                <HeadingTertiary className={classes(cl("section-heading"))}>
+                    Plugins <span className={cl("match-count")}>({filteredPlugins.length})</span>
+                </HeadingTertiary>
+                <div className={cl("header-actions")}>
+                    <Button
+                        variant="secondary"
+                        size="small"
+                        className={cl("enable-all-btn")}
+                        disabled={allEnableablePlugins.length === 0}
+                        onClick={enableAllPlugins}
+                    >
+                        Enable All Plugins
                     </Button>
-                    <Button variant="dangerSecondary" size="small" onClick={() => bulkSetEnabled(false)}>
-                        Disable matching
+                    <Button
+                        variant="secondary"
+                        size="small"
+                        className={classes("vc-plugins-disable-warning", cl("disable-all-btn"))}
+                        disabled={enabledPlugins.length === 0}
+                        onClick={() => openWarningModal(null, undefined, false, enabledPlugins.length, resetCheckAndDo)}
+                    >
+                        Disable All Plugins
                     </Button>
                 </div>
             </div>
-
-            <HeadingTertiary className={classes(Margins.top20, Margins.bottom8, cl("section-heading"))}>
-                Plugins <span className={cl("match-count")}>({filteredPlugins.length} matching)</span>
-            </HeadingTertiary>
 
             {filteredPlugins.length || requiredPlugins.length
                 ? (

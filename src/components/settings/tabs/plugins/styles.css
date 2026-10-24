@@ -540,27 +540,63 @@
     font-size: 12px;
 }
 
-.vc-plugins-bulk-actions {
-    margin-top: 16px;
-    padding: 12px 14px;
-    border: 1px solid var(--border-subtle);
-    border-radius: 8px;
-    background-color: var(--background-surface-high);
+.vc-plugins-section-header {
     display: flex;
-    flex-direction: column;
-    gap: 10px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 28px !important;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
 }
 
-.vc-plugins-bulk-actions-hint {
-    color: var(--text-muted);
-    font-size: 12px;
-    line-height: 1.4;
-    margin: 0;
+.vc-plugins-section-header .vc-plugins-section-heading {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
 }
 
-.vc-plugins-bulk-actions-buttons {
+.vc-plugins-header-actions {
     display: flex;
+    align-items: center;
     gap: 8px;
+}
+
+button.vc-plugins-enable-all-btn,
+.vc-btn-base.vc-plugins-enable-all-btn,
+.vc-plugins-enable-all-btn {
+    background-color: color-mix(in srgb, var(--status-positive, #23a55a) 10%, transparent) !important;
+    color: color-mix(in srgb, var(--status-positive, #23a55a) 100%, transparent) !important;
+    border: 1px solid color-mix(in srgb, var(--status-positive, #23a55a) 30%, transparent) !important;
+    transition: background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+button.vc-plugins-enable-all-btn:hover:not(:disabled),
+.vc-btn-base.vc-plugins-enable-all-btn:hover:not(:disabled),
+.vc-plugins-enable-all-btn:hover:not(:disabled) {
+    background-color: color-mix(in srgb, var(--status-positive, #23a55a) 20%, transparent) !important;
+    border-color: color-mix(in srgb, var(--status-positive, #23a55a) 50%, transparent) !important;
+}
+
+button.vc-plugins-disable-warning,
+button.vc-plugins-disable-all-btn,
+.vc-btn-base.vc-plugins-disable-warning,
+.vc-btn-base.vc-plugins-disable-all-btn,
+.vc-plugins-disable-warning,
+.vc-plugins-disable-all-btn {
+    background-color: color-mix(in srgb, var(--status-danger) 10%, transparent) !important;
+    color: color-mix(in srgb, var(--status-danger) 100%, transparent) !important;
+    border: 1px solid color-mix(in srgb, var(--status-danger) 30%, transparent) !important;
+    transition: background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+button.vc-plugins-disable-warning:hover:not(:disabled),
+button.vc-plugins-disable-all-btn:hover:not(:disabled),
+.vc-btn-base.vc-plugins-disable-warning:hover:not(:disabled),
+.vc-btn-base.vc-plugins-disable-all-btn:hover:not(:disabled),
+.vc-plugins-disable-warning:hover:not(:disabled),
+.vc-plugins-disable-all-btn:hover:not(:disabled) {
+    background-color: color-mix(in srgb, var(--status-danger) 20%, transparent) !important;
+    border-color: color-mix(in srgb, var(--status-danger) 50%, transparent) !important;
 }
 
 .vc-plugins-match-count {
