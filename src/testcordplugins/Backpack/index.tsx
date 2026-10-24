@@ -42,7 +42,7 @@ function BackpackIcon({ width = 22, height = 22 }: { width?: string | number; he
 }
 
 function packButton(id: string) {
-    const { packedButtons } = settings.plain;
+    const packedButtons = settings.plain.packedButtons ?? [];
     if (!packedButtons.includes(id)) {
         settings.store.packedButtons = [...packedButtons, id];
     }
@@ -51,7 +51,7 @@ function packButton(id: string) {
 }
 
 function unpackButton(id: string) {
-    const { packedButtons } = settings.plain;
+    const packedButtons = settings.plain.packedButtons ?? [];
     if (packedButtons.includes(id)) {
         settings.store.packedButtons = packedButtons.filter(b => b !== id);
     }
@@ -68,7 +68,7 @@ function unpackAll() {
 const MENU_SETTINGS_KEYS = ["packedButtons"] as const;
 
 function BackpackMenu() {
-    const { packedButtons } = settings.use(MENU_SETTINGS_KEYS);
+    const { packedButtons = [] } = settings.use(MENU_SETTINGS_KEYS);
 
     return (
         <Menu.Menu
@@ -110,7 +110,7 @@ function BackpackMenu() {
 const OPTIONS_SETTINGS_KEYS = ["packedButtons", "autoPackNewButtons", "showPackedCount"] as const;
 
 function BackpackOptionsMenu() {
-    const { packedButtons, autoPackNewButtons, showPackedCount } = settings.use(OPTIONS_SETTINGS_KEYS);
+    const { packedButtons = [], autoPackNewButtons, showPackedCount } = settings.use(OPTIONS_SETTINGS_KEYS);
 
     const availableButtons = Array.from(ChatBarButtonMap.keys())
         .filter(id => id !== BACKPACK_ID)
@@ -166,7 +166,7 @@ function BackpackOptionsMenu() {
 const BUTTON_SETTINGS_KEYS = ["packedButtons", "showPackedCount"] as const;
 
 const BackpackButton: ChatBarButtonFactory = ({ isMainChat }) => {
-    const { packedButtons, showPackedCount } = settings.use(BUTTON_SETTINGS_KEYS);
+    const { packedButtons = [], showPackedCount } = settings.use(BUTTON_SETTINGS_KEYS);
 
     if (!isMainChat) return null;
 
@@ -199,9 +199,10 @@ let removeButtonListener: (() => void) | null = null;
 
 function autoPackAvailableButtons() {
     if (!settings.plain.autoPackNewButtons) return;
+    const packedButtons = settings.plain.packedButtons ?? [];
     for (const [id] of ChatBarButtonMap) {
         if (id === BACKPACK_ID) continue;
-        if (!BackpackedButtons.has(id) && !settings.plain.packedButtons.includes(id)) {
+        if (!BackpackedButtons.has(id) && !packedButtons.includes(id)) {
             packButton(id);
         }
     }
@@ -223,7 +224,7 @@ export default definePlugin({
     managedStyle: backpackStyle,
 
     start() {
-        for (const id of settings.plain.packedButtons) {
+        for (const id of settings.plain.packedButtons ?? []) {
             BackpackedButtons.add(id);
         }
         autoPackAvailableButtons();
