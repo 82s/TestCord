@@ -122,11 +122,8 @@ const settings = definePluginSettings(
     });
 
 export default definePlugin({
-<<<<<<< HEAD
-=======
     id: "vcGrape",
     aliases: ["vcR"],
->>>>>>> 210048d4ebf3a9e6374e3d6f80a5b3d716ac024f
     name: "VCGrape",
     description: "R any loser in a vc with this trolling bot, originally created by atticus. Updated and fixed by dot",
     tags: ["Utility"],

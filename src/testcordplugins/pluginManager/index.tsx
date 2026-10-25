@@ -298,10 +298,7 @@ function keybind(e: KeyboardEvent) {
 }
 
 export default definePlugin({
-<<<<<<< HEAD
-=======
     id: "pluginManager",
->>>>>>> 210048d4ebf3a9e6374e3d6f80a5b3d716ac024f
     name: "PluginManager",
     description: "Manage custom plugins",
     tags: ["Utility", "Developers"],

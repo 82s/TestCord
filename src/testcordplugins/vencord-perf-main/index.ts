@@ -7,11 +7,8 @@
 import definePlugin from "@utils/types";
 
 export default definePlugin({
-<<<<<<< HEAD
-=======
     id: "perf",
     aliases: ["vencord-perf-main"],
->>>>>>> 210048d4ebf3a9e6374e3d6f80a5b3d716ac024f
     name: "Perf",
 description: "[RISKY]Collection of small performance improvements[RISKY]",
     tags: ["Developers", "Utility"],

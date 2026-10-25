@@ -37,8 +37,6 @@ import * as $UserArea from "./UserArea";
 export * as PatchVersioning from "./PatchVersioning";
 export * as PluginHealth from "./PluginHealth";
 export * as PluginManager from "./PluginManager";
-export * as PatchVersioning from "./PatchVersioning";
-export * as PluginHealth from "./PluginHealth";
 import * as $ProfileCollections from "./ProfileCollections";
 import * as $ProfileSections from "./ProfileSections";
 import * as $ServerList from "./ServerList";

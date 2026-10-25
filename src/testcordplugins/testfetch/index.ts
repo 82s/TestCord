@@ -215,10 +215,7 @@ async function buildReport(asJson: boolean) {
 }
 
 export default definePlugin({
-<<<<<<< HEAD
-=======
     id: "testfetch",
->>>>>>> 210048d4ebf3a9e6374e3d6f80a5b3d716ac024f
     name: "Testfetch",
     description: "System info card for Testcord, for bug reports",
     tags: ["Utility", "Developers", "Fun"],

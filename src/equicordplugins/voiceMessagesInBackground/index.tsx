@@ -37,11 +37,7 @@ export default definePlugin({
         find: "playbackCacheKey:",
         replacement: {
             match: /(playbackCacheKey:\i}[\s\S]{0,400}?)(\[(\i),(\i)\]=(\i)\.useState\(([\s\S]{0,40}?>0)\))([\s\S]{0,200}?)(\[(\i),(\i)\]=(\i)\.useState\((\i)\))/,
-<<<<<<< HEAD
-            replace: "$1$2$self.useBackgroundPlayback([$3,$4],$9,arguments[0]?.src,arguments[0]?.playbackCacheKey,$10)$7$8"
-=======
             replace: "$1$2;$self.useBackgroundPlayback([$3,$4],$9,arguments[0]?.src,arguments[0]?.playbackCacheKey,$10)$7$8"
->>>>>>> 210048d4ebf3a9e6374e3d6f80a5b3d716ac024f
         }
     }],
 

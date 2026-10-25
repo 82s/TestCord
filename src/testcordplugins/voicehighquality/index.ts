@@ -47,11 +47,8 @@ const settings = definePluginSettings({
 });
 
 export default definePlugin({
-<<<<<<< HEAD
-=======
     id: "rzStudioAudio",
     aliases: ["voicehighquality"],
->>>>>>> 210048d4ebf3a9e6374e3d6f80a5b3d716ac024f
     name: "RZStudioAudio",
     description: "🎙️ Professional studio-grade audio quality for Discord. 510kbps OPUS @ 48kHz with maximum quality settings. Optimized for 192kHz microphones.",
     tags: ["Voice", "Customisation"],

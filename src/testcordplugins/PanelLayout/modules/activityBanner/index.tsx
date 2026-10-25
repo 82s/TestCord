@@ -101,11 +101,7 @@ export const activityBannerPatches = [
         find: "isForceShowSharingPopout",
         replacement: [
             {
-<<<<<<< HEAD
-                match: /children:\[null!=(\i)?\(0,(\i)\.jsx\)\((\i),{name:\1,applicationId:(\i)\?\.id}\):null,\(0,\2\.jsx\)\((\i),({isCurrentlyRunningGame:(\i),(?:gamePid:\i\?\.pid,)?onClickNotSharing:(\i)})\]/,
-=======
                 match: /children:\[null!=(\i)\?\(0,(\i)\.jsx\)\((\i),{name:\1,applicationId:(\i)\?\.id}\):null,\(0,\2\.jsx\)\((\i),({isCurrentlyRunningGame:(\i),(?:gamePid:\i\?\.pid,)?onClickNotSharing:(\i)})\)\]/,
->>>>>>> 210048d4ebf3a9e6374e3d6f80a5b3d716ac024f
                 replace: "children:$self.renderActivityInfo({name:$1,application:$4,isCurrentlyRunningGame:$7,onClickNotSharing:$8,TitleComponent:$3,defaultTitle:null!=$1?(0,$2.jsx)($3,{name:$1,applicationId:$4?.id}):null,defaultStatus:(0,$2.jsx)($5,$6)})"
             },
             {
